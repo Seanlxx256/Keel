@@ -33,6 +33,13 @@ def main(argv=None):
     validation.add_argument("--output", type=Path)
     benchmark = sub.add_parser("benchmark", help="Evaluate local canonical CORE or SWE-Explore exports")
     formats = benchmark.add_subparsers(dest="benchmark_format", required=True)
+    batch = formats.add_parser("core-batch", help="Run a manifest of local CORE exports with repeated timing")
+    batch.add_argument("--manifest", type=Path, required=True)
+    batch.add_argument("--output-dir", type=Path, required=True)
+    batch.add_argument("--repeats", type=int, default=3)
+    batch.add_argument("--seed", type=int, default=0)
+    batch.add_argument("--max-queries", type=int)
+    batch.add_argument("--max-documents", type=int, default=200000)
     core = formats.add_parser("core")
     core.add_argument("--data-dir", type=Path, required=True)
     core.add_argument("--revision", required=True)
@@ -96,6 +103,12 @@ def main(argv=None):
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 1 if any(check["status"] == "failed" for check in result["checks"]) or (args.require_all and not result["all_passed"]) else 0
         elif args.command == "benchmark":
+            if args.benchmark_format == "core-batch":
+                from .experiments import run_core_batch
+                result = run_core_batch(args.manifest, args.output_dir, repeats=args.repeats,
+                                        max_queries=args.max_queries, seed=args.seed, max_documents=args.max_documents)
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+                return 0 if result["all_passed"] else 1
             from .benchmarks import evaluate_core, evaluate_swe, load_core, load_swe_instance
             if args.output and args.output.exists():
                 raise ValueError("Benchmark output already exists; choose a new path")

@@ -337,4 +337,30 @@ The probes exercise real tree-sitter extraction and incremental updates, LanceDB
 
 Each component reports `passed`, `failed`, or `unavailable`, with installed versions and evidence. Missing libraries never count as passes. `--require-all` exits 1 for either unavailable or failed integrations; without it, unavailable components are reported but only failed probes cause exit 1. Output files must be new. Select probes with `--components tree_sitter lancedb mcp_sdk`.
 
-The GitHub Actions workflow in `.github/workflows/compass-integrations.yml` installs the extras, requires all probes, runs regression tests on Windows and Linux, and archives validation evidence. Adding this workflow does not establish that a hosted run has passed. Native integrations and SDK interoperability remain unverified in the current local environment because the optional packages are unavailable.
+The GitHub Actions workflow in `.github/workflows/compass-integrations.yml` installs the extras, requires all probes, runs regression tests on Windows and Linux, and archives validation evidence. Adding this workflow does not establish that a hosted run has passed. Windows validation has passed for tree-sitter 0.26.0, tree-sitter-python 0.25.0, and LanceDB 0.40.0. The operator also confirmed the official MCP SDK 1.30.0 probe passes with protocol 2025-11-25; the restricted agent environment cannot create the SDK's Windows asynchronous subprocess pipes. Hosted CI and a complete operator-side regression run remain separate checks.
+
+
+## Repeated CORE reference batches
+
+Create a manifest outside the dataset checkouts. Paths are relative to the manifest file; names must be unique, and aliases of the same directory are rejected:
+
+```json
+{
+  "version": 1,
+  "benchmark": "core",
+  "datasets": [
+    {"name": "repository-a", "data_dir": "data/LEVEL-2/dataset/repository-a", "revision": "DATA_REVISION", "level": 2},
+    {"name": "repository-b", "data_dir": "data/LEVEL-3/dataset/repository-b", "revision": "DATA_REVISION", "level": 3}
+  ]
+}
+```
+
+```powershell
+python -m compass benchmark core-batch --manifest D:/datasets/core-manifest.json --output-dir .keel/core-batch-001 --repeats 3 --max-queries 20 --seed 42
+```
+
+Omit `--max-queries` to evaluate every judged query. Sampling is stable under JSONL reordering and uses query IDs, dataset names, and the seed, without inspecting relevance labels. The corpus is never sampled. Each repetition rebuilds BM25; elapsed totals include scorer construction and retrieval, while OS caches remain uncontrolled. Quality is counted once per query, rather than treating timing repetitions as independent quality evidence.
+
+Outputs include `batch.json`, `datasets.csv`, and one canonical evaluation JSON per dataset/repetition. Reports retain selected query IDs, declared revisions, input/implementation/manifest hashes, timing mean and standard deviation, query-weighted means, repository means, and separate Level-2/Level-3 aggregates. Combined means describe only the manifest's selected exports. Failed datasets are visible and excluded from means; any failure makes the batch exit 1. Existing output directories are rejected.
+
+For input pinning, add a `sha256` object to each dataset entry containing all consumed input names and their lowercase SHA-256 values (`corpus.jsonl`, `queries.jsonl`, and `qrels.jsonl` or `qrels/test.tsv`). Partial pins and mismatches fail. Files are checked for changes during loading and after every repetition. Hashes establish local integrity, not trusted dataset provenance. This remains a BM25 reference workflow; routing calibration and full-cascade public evaluation are not performed by this command.
