@@ -204,7 +204,10 @@ class SnapshotPreparationTests(unittest.TestCase):
             with patch("compass.preparation.subprocess.run", side_effect=transfer):
                 prepare_snapshot("org/repo", commit, destination, source=str(source))
             self.assertEqual((destination / "api.py").read_bytes(), (source / "api.py").read_bytes())
-            self.assertEqual(prepare_snapshot("org/repo", commit, destination, offline=True), destination)
+            prepared = prepare_snapshot("org/repo", commit, destination, offline=True)
+            # Windows TEMP may use an 8.3 alias (RUNNER~1) that resolve() expands.
+            self.assertEqual(prepared, destination.resolve())
+            self.assertTrue(prepared.samefile(destination))
             (destination / "extra.py").write_text("future code", encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "untracked"):
                 prepare_snapshot("org/repo", commit, destination, offline=True)
