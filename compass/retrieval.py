@@ -13,6 +13,7 @@ from .lexical import BM25, tokens
 
 @dataclass
 class Routing:
+    ranking: str = "rrf"
     min_relevance: float = 0.35
     min_overlap: float = 0.2
     max_entropy: float = 0.98
@@ -24,6 +25,8 @@ class Routing:
     max_output: int = 512
 
     def __post_init__(self):
+        if not isinstance(self.ranking, str) or self.ranking not in {"rrf", "code-aware"}:
+            raise ValueError("ranking must be rrf or code-aware")
         for name in ("min_relevance", "min_overlap", "max_entropy"):
             value = getattr(self, name)
             if type(value) not in {int, float} or not math.isfinite(value) or not 0 <= value <= 1:
@@ -86,6 +89,31 @@ def fuse(lexical, vector, constant=60):
     return sorted(combined.values(), key=lambda row: (-row["score"], row["id"]))
 
 
+def rank_code_evidence(query, rows):
+    """Optional identifier-aware reranking; no labels or model calls."""
+    anchors = set(re.findall(r"`([^`\n]+)`", query))
+    anchors.update(re.findall(r"\b[A-Z][A-Za-z0-9_]{2,}\b", query))
+    def terms(text):
+        words = set(tokens(text))
+        return words | {word[:-1] for word in words if len(word) > 3 and word.endswith("s")}
+    wanted = set().union(*(terms(anchor) for anchor in anchors)) if anchors else set()
+    # Only identifiers actually present in candidate identities become anchors.
+    identities = set().union(*(terms(row["qualname"] + " " + row["path"]) for row in rows)) if rows else set()
+    wanted &= identities
+    ranked = []
+    for row in rows:
+        identity = terms(row["qualname"] + " " + row["path"])
+        body = terms(row["code"])
+        coverage = len(wanted & identity) / max(1, len(wanted))
+        body_coverage = len(wanted & body) / max(1, len(wanted))
+        length = row["end_line"] - row["start_line"] + 1
+        score = row["score"] * (1 + coverage + body_coverage / math.sqrt(max(1, length / 32)))
+        ranked.append({**row, "rrf_score": row["score"], "score": score,
+                       "ranking_evidence": {"anchors": sorted(wanted), "identity_coverage": coverage,
+                                            "body_coverage": body_coverage}})
+    return sorted(ranked, key=lambda row: (-row["score"], row["id"]))
+
+
 class Retriever:
     def __init__(self, index, *, routing=None, model=None, budget=None, record=None):
         self.index = index
@@ -130,6 +158,8 @@ class Retriever:
             vector = self.index.search_vector(query, self.routing.candidates, timeout=self.budget.remaining)["results"]
             self.budget.check()
         rows = fuse(lexical, vector)
+        if self.routing.ranking == "code-aware":
+            rows = rank_code_evidence(query, rows)
         lhs, rhs = {row["id"] for row in lexical[:10]}, {row["id"] for row in vector[:10]}
         overlap = len(lhs & rhs) / max(1, len(lhs | rhs)) if available else None
         scores = [row["score"] for row in rows[:10]]
@@ -143,6 +173,10 @@ class Retriever:
                    "lexical_hits": len(lexical), "vector_hits": len(vector)}
         reasons = upgrade_reasons(signals, self.index.metadata["complete"], self.routing)
         self.record("retrieval_gate", {"query": query, "signals": signals, "reasons": reasons})
+        self.record("retrieval_candidates", {"query": query, "ranked": [
+            {key: row[key] for key in ("id", "path", "qualname", "start_line", "end_line", "score", "channels",
+                                       "rrf_score", "ranking_evidence") if key in row}
+            for row in rows]})
         return rows, signals, reasons
 
     def retrieve(self, query, limit=10, mode="adaptive"):
@@ -182,7 +216,7 @@ class Retriever:
         result = self.index.envelope(rows[:limit], tier=tier, signals=signals,
                                      routing={"mode_status": status, "upgrade_reasons": reasons, "trace": trace},
                                      usage=usage, elapsed_seconds=round(time.perf_counter() - started, 6),
-                                     truncated=len(rows) > limit, reranker="rrf" if tier != "T0" else None,
+                                     truncated=len(rows) > limit, reranker=self.routing.ranking if tier != "T0" else None,
                                      confidence_calibrated=False, token_scope="chat calls only; embedding token usage is not available")
         self.record("retrieval_finished", {"tier": tier, "usage": usage, "status": status, "hits": len(result["results"])})
         return result
@@ -190,7 +224,7 @@ class Retriever:
     @staticmethod
     def _preview(rows):
         return [{key: row[key] for key in ("id", "path", "qualname", "signature")} |
-                {"code": row["code"][:1000]} for row in rows[:5]]
+                {"code": row["code"][:1000] if rank < 5 else ""} for rank, row in enumerate(rows)]
 
     def expand(self, seeds, visible):
         self.budget.charge_tool()

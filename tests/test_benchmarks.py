@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 import unittest
 
-from compass.benchmarks import (check_snapshot, document_metrics, evaluate_core, evaluate_swe,
+from compass.benchmarks import (check_snapshot, document_metrics, evaluate_core, evaluate_swe, pack_regions,
                                 load_core, load_swe_instance, region_metrics, relative_path)
 from compass.index import RepositoryIndex, build_index
 
@@ -78,6 +78,16 @@ class CoreFormatTests(unittest.TestCase):
 
 
 class RegionMetricsTests(unittest.TestCase):
+    def test_packing_caps_long_symbols_and_deduplicates_overlap(self):
+        rows = [{"path": "a.py", "start_line": 1, "end_line": 1000},
+                {"path": "a.py", "start_line": 2, "end_line": 5},
+                {"path": "b.py", "start_line": 10, "end_line": 20}]
+        self.assertEqual(pack_regions(rows, 7, 3), [
+            {"path": "a.py", "start": 1, "end": 4}, {"path": "b.py", "start": 10, "end": 12}])
+        self.assertEqual(pack_regions(rows, 2, 3), [{"path": "a.py", "start": 1, "end": 2}])
+        with self.assertRaises(ValueError):
+            pack_regions(rows, 10, 0)
+
     def test_overlapping_predictions_do_not_inflate_line_precision_or_recall(self):
         pred = [{"path": "a.py", "start": 1, "end": 3}, {"path": "a.py", "start": 2, "end": 4}]
         core = [{"path": "a.py", "start": 2, "end": 3}]

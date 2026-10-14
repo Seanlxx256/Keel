@@ -34,6 +34,7 @@ def main(argv=None):
     parser.add_argument("--model-url", default="http://localhost:11434")
     parser.add_argument("--line-budget", type=int, default=100)
     parser.add_argument("--repeats", type=int, default=1)
+    parser.add_argument("--ranking", choices=["rrf", "code-aware"], default="rrf")
     parser.add_argument("--timeout", type=int, default=300)
     args = parser.parse_args(argv)
     if not 1 <= args.repositories <= 12 or not 1 <= args.line_budget <= 100000 or not 1 <= args.repeats <= 100 or args.timeout <= 0:
@@ -89,7 +90,8 @@ def main(argv=None):
                     with RepositoryIndex(repo) as index:
                         measured = run_swe_sweep(index, instance, instance_directory / "sweep", repository_id=repo_id,
                                                  modes=("t0", "t1", "t2", "adaptive"), line_budgets=(args.line_budget,),
-                                                 repeats=args.repeats, seed=args.seed, model=model, routing=Routing(max_steps=4),
+                                                 repeats=args.repeats, seed=args.seed, model=model,
+                                                 routing=Routing(max_steps=4, ranking=args.ranking),
                                                  limits=Limits(max_wallclock=300, max_tokens=30000, max_model_calls=4, max_tool_calls=100))
                     result.update(status="passed" if measured["all_passed"] else "incomplete", summary=measured["summary"],
                                   sweep=str(instance_directory / "sweep/sweep.json"))

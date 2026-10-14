@@ -5,12 +5,14 @@ param(
     [ValidateRange(1, 100)][int]$Repeats = 1,
     [ValidateRange(1, 2048)][int]$EmbeddingNumBatch = 32,
     [int]$Seed = 42,
+    [ValidateSet("rrf", "code-aware")][string]$Ranking = "rrf",
     [string]$PythonCommand = "python",
     [switch]$Offline,
     [switch]$PrepareOnly
 )
 $runnerArguments = @("-u", "-X", "faulthandler", (Join-Path $PSScriptRoot "run_swe_public.py"), "--repositories", $Repositories,
-    "--line-budget", $LineBudget, "--repeats", $Repeats, "--seed", $Seed, "--embedding-num-batch", $EmbeddingNumBatch)
+    "--line-budget", $LineBudget, "--repeats", $Repeats, "--seed", $Seed, "--embedding-num-batch", $EmbeddingNumBatch,
+    "--ranking", $Ranking)
 if ($Offline) { $runnerArguments += "--offline" }
 if ($PrepareOnly) { $runnerArguments += "--prepare-only" }
 # Stderr carries live progress. Python persists a separate progress JSONL and final result.

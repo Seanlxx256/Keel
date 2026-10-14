@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from compass.evaluation import evaluate, file_metrics, load_queries
 from compass.index import RepositoryIndex, build_index
-from compass.retrieval import Retriever, Routing, routing_from_dict
+from compass.retrieval import Retriever, Routing, routing_from_dict, rank_code_evidence
 from compass.vectors import HashEmbedder
 from keel.core import Budget, BudgetExceeded, Ledger, Limits, Trace
 from keel.models import Reply
@@ -26,6 +26,19 @@ class Scripted:
 
 
 class RetrievalTests(unittest.TestCase):
+    def test_code_aware_ranking_uses_identifiers_and_preserves_unanchored_order(self):
+        rows = [{"id": "noise", "path": "helpers.py", "qualname": "render", "code": "return name",
+                 "start_line": 1, "end_line": 1000, "score": .017},
+                {"id": "target", "path": "widgets.py", "qualname": "Widget.__init__", "code": "class Widget: pass",
+                 "start_line": 1, "end_line": 10, "score": .016}]
+        ranked = rank_code_evidence("Reject empty names for Widgets", rows)
+        self.assertEqual(ranked[0]["id"], "target")
+        self.assertIn("widget", ranked[0]["ranking_evidence"]["anchors"])
+        self.assertEqual([row["id"] for row in rank_code_evidence("reject empty names", rows)], ["noise", "target"])
+        self.assertEqual(rows[0]["score"], .017)
+        with self.assertRaises(ValueError):
+            Routing(ranking="unknown")
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -108,6 +121,13 @@ class RetrievalTests(unittest.TestCase):
             "purchase save_order", mode="t2")
         queries = [data["query"] for event, data in events if event == "retrieval_gate"]
         self.assertEqual(queries[1], "purchase save_order\ncheckout")
+
+    def test_preview_exposes_every_visible_id_with_bounded_code(self):
+        rows = [{"id": str(i), "path": "a.py", "qualname": "f", "signature": "def f():",
+                 "code": "x" * 2000} for i in range(8)]
+        preview = Retriever._preview(rows)
+        self.assertEqual([row["id"] for row in preview], [str(i) for i in range(8)])
+        self.assertEqual(sum(len(row["code"]) for row in preview), 5000)
 
     def test_unknown_model_ids_are_rejected_before_access(self):
         model = Scripted([{"read": "invented-id"}, {"final": [self.save_id]}])

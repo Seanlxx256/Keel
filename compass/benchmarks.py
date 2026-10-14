@@ -312,25 +312,47 @@ def region_metrics(predictions, core, optional, core_files):
             "first_useful_hit": first, "predicted_unique_lines": predicted, "core_lines": relevant}
 
 
-def evaluate_swe(index, instance, *, line_budget=300, mode="adaptive", model=None, routing=None, budget=None, record=None):
+def pack_regions(rows, line_budget, symbol_line_cap=32):
+    """Pack ranked symbol prefixes without charging overlapping lines twice."""
+    if type(symbol_line_cap) is not int or symbol_line_cap < 1:
+        raise ValueError("symbol_line_cap must be a positive integer")
+    predictions, seen, remaining = [], {}, line_budget
+    for row in rows:
+        used = seen.setdefault(row["path"], set())
+        stop = min(row["end_line"], row["start_line"] + symbol_line_cap - 1)
+        for line in range(row["start_line"], stop + 1):
+            if remaining == 0:
+                return predictions
+            if line in used:
+                continue
+            if predictions and predictions[-1]["path"] == row["path"] and predictions[-1]["end"] == line - 1:
+                predictions[-1]["end"] = line
+            else:
+                predictions.append({"path": row["path"], "start": line, "end": line})
+            used.add(line)
+            remaining -= 1
+    return predictions
+
+
+def evaluate_swe(index, instance, *, line_budget=300, mode="adaptive", model=None, routing=None, budget=None, record=None,
+                 symbol_line_cap=32):
     if type(line_budget) is not int or not 1 <= line_budget <= 100000:
         raise ValueError("line_budget must be between 1 and 100000")
     if Path(instance["repo"]).resolve() != index.root or index.metadata["git_ref"] != instance["base_commit"]:
         raise ValueError("SWE snapshot and index identities do not match")
     check_snapshot(index.root, instance["base_commit"])
     result = Retriever(index, model=model, routing=routing, budget=budget, record=record).retrieve(instance["query"], 100, mode)
-    predictions, remaining = [], line_budget
-    for row in result["results"]:
-        if remaining == 0:
-            break
-        count = min(remaining, row["end_line"] - row["start_line"] + 1)
-        predictions.append({"path": row["path"], "start": row["start_line"], "end": row["start_line"] + count - 1})
-        remaining -= count
+    predictions = pack_regions(result["results"], line_budget, symbol_line_cap)
+    candidates = [{"rank": rank, "id": row["id"], "path": row["path"], "start": row["start_line"],
+                   "end": row["end_line"]} for rank, row in enumerate(result["results"], 1)]
     check_snapshot(index.root, instance["base_commit"])
     indexed = {row[0] for row in index.db.execute("SELECT path FROM files WHERE status='indexed'")}
     return {"benchmark_format": "SWE-Explore", "instance_id": instance["id"], "base_commit": instance["base_commit"],
             "index_ref": result["index_ref"], "provenance": instance["provenance"], "line_budget": line_budget,
-            "emitted_lines": line_budget - remaining, "predictions": predictions,
+            "emitted_lines": _size(_merged(predictions)), "predictions": predictions,
+            "context_packing": {"policy": "ranked_symbol_prefixes", "symbol_line_cap": symbol_line_cap},
+            "candidates": candidates,
+            "candidate_metrics": region_metrics(candidates, instance["core_regions"], instance["optional_regions"], instance["core_files"]),
             "metrics": region_metrics(predictions, instance["core_regions"], instance["optional_regions"], instance["core_files"]),
             "unindexed_gold_files": sorted(set(instance["core_files"]) - indexed),
             "tier": result["tier"], "routing": result["routing"], "usage": result["usage"],
