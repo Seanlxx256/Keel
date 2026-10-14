@@ -522,5 +522,54 @@ Every attempt emits correlated `gateway_call_started` / `gateway_call_finished`
 events with status, duration, and exception type. Argument values and returned
 source text are omitted from these gateway events.
 
-This is the local gateway foundation for W6?7. External MCP client transport,
-OTel export, and live container isolation validation remain separate work.
+This is the local gateway foundation for W6-7. External MCP stdio tools can now be configured as described below.
+OTel export and live container isolation validation remain separate work.
+
+### External MCP tools (stdio)
+
+Install `python -m pip install -e ".[mcp]"` in the interpreter running Keel.
+Add an explicit server and tool allowlist to an agent task configuration:
+
+```json
+{
+  "mcp_servers": {
+    "repo": {
+      "command": "D:/keel/.venv/Scripts/python.exe",
+      "args": ["-m", "compass", "serve", "--repo", "D:/path/to/disposable-repo"],
+      "timeout": 30,
+      "tools": {
+        "find_symbol": {
+          "roles": ["scout", "planner", "implementer"],
+          "description": "{\"name\": \"exact Python symbol\"} -> matching symbols"
+        }
+      }
+    }
+  }
+}
+```
+
+Replace the executable and repository paths with your actual paths. The model sees
+`mcp__repo__find_symbol`; it cannot add servers, tools, or role permissions.
+Each call opens an official SDK session, initializes, discovers and validates the
+allowlisted tool's input schema, calls it, then closes the session and process.
+Session startup is included in latency. One external request consumes one shared
+tool call, including failed requests; the timeout is bounded by remaining run time.
+Internal server tools and model usage are not visible to Keel's budget accounting.
+
+Successful content and structured results enter the role's evidence ledger, with
+a 4000-character preview and explicit recall. Server tool errors become failed
+observations. Gateway events record correlation, transport, status and duration;
+server stderr is saved beside the run trace as `mcp-<server>.stderr.log`.
+The 1 MB result limit is checked after SDK decoding, not a transport memory limit.
+
+Only configure trusted server executables: stdio subprocesses run with host
+permissions, with the workspace as their working directory. Tool allowlists and
+server read-only annotations do not provide operating-system isolation. The run's
+declared-file audit still applies to repository changes. This client currently
+supports stdio, not remote HTTP transports, sampling, or elicitation.
+
+Validate the client against the actual Compass subprocess with:
+
+```powershell
+python -m unittest discover -s tests -p test_mcp_client.py -v
+```

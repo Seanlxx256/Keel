@@ -49,6 +49,8 @@ def validate(config: dict):
 
 
 def run(config: dict, repo: Path, output: Path, *, model=None) -> dict:
+    from .mcp_client import validate_servers
+    validate_servers(config.get("mcp_servers", {}))
     ordered = validate(config)
     mutation_samples = config.get("mutation_samples", 0)
     if type(mutation_samples) is not int or not 0 <= mutation_samples <= 20:
@@ -70,6 +72,8 @@ def run(config: dict, repo: Path, output: Path, *, model=None) -> dict:
     lifecycle = RoleStateMachine(trace)
     workspace = Workspace(repo, budget, ledger, trace, runner=CommandRunner(config.get("execution")),
                           retrieval=config.get("retrieval"), retrieval_model=model)
+    from .mcp_client import McpTools
+    workspace.mcp_tools = McpTools(config.get("mcp_servers", {}), workspace)
     result = {"run_id": output.name, "goal": config["goal"], "status": "running",
               "work_items": [], "baseline_verification": [], "verification": [], "failure": None}
     originals = {}

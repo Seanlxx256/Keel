@@ -13,6 +13,7 @@ dependencies = []
 compass = ["tree-sitter>=0.25,<0.27", "tree-sitter-python>=0.23,<0.26"]
 compass-vectors = ["lancedb>=0.20,<1"]
 validation = ["mcp>=1.28,<2"]
+mcp = ["mcp>=1.28,<2", "jsonschema>=4.20,<5"]
 
 [project.scripts]
 keel = "keel.cli:main"

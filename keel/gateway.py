@@ -33,6 +33,8 @@ class ToolGateway:
                          get_context='{"file": "relative/path.py", "line": 1} -> containing symbol and graph neighbors')
         if self.role == "implementer":
             tools["replace"] = '{"path": "declared file", "old": "unique text", "new": "replacement"}'
+        if getattr(self.ws, "mcp_tools", None):
+            tools.update(self.ws.mcp_tools.catalog(self.role))
         return tools
 
     def call(self, tool, args):
@@ -41,11 +43,14 @@ class ToolGateway:
         status = "failed"
         error_type = None
         self.ws.trace.emit(self.role, "gateway_call_started", call_id=call_id,
-                           tool=tool if isinstance(tool, str) else "<invalid>", transport="local")
+                           tool=tool if isinstance(tool, str) else "<invalid>", transport="mcp_stdio" if isinstance(tool, str) and tool.startswith("mcp__") else "local")
         try:
             if not isinstance(tool, str) or tool not in self.catalog():
                 raise PolicyDenied(f"Tool unavailable to {self.role}: {tool}")
-            self._validate(tool, args)
+            if not tool.startswith("mcp__"):
+                self._validate(tool, args)
+            elif not isinstance(args, dict):
+                raise ValueError("MCP arguments must be an object")
             self.ws.budget.check()
             result = self._dispatch(tool, args)
             self.ws.budget.check()
@@ -82,6 +87,13 @@ class ToolGateway:
             raise ValueError("line must be positive")
 
     def _dispatch(self, tool, args):
+        if tool.startswith("mcp__"):
+            value = self.ws.mcp_tools.call(self.role, tool, args)
+            fact_id = self.ws.ledger.add("symbol", self.role, tool + " evidence", value)
+            self.visible_facts.add(fact_id)
+            text = json.dumps(value, ensure_ascii=False)
+            self.ws.trace.emit(self.role, "ledger_write", fact_id=fact_id)
+            return {"fact_id": fact_id, "preview": text[:4000], "truncated": len(text) > 4000}
         if tool == "replace":
             path = args["path"]
             if path not in self.allowed_files:
