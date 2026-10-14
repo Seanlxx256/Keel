@@ -68,7 +68,9 @@ def run(config: dict, repo: Path, output: Path, *, model=None) -> dict:
     output = output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     ledger = Ledger(output / "ledger.sqlite")
-    trace = Trace(output / "trace.jsonl")
+    from .telemetry import LocalTelemetry
+    telemetry = LocalTelemetry(output / "spans.otlp.json")
+    trace = Trace(output / "trace.jsonl", telemetry=telemetry)
     lifecycle = RoleStateMachine(trace)
     workspace = Workspace(repo, budget, ledger, trace, runner=CommandRunner(config.get("execution")),
                           retrieval=config.get("retrieval"), retrieval_model=model)
@@ -230,6 +232,9 @@ def run(config: dict, repo: Path, output: Path, *, model=None) -> dict:
         result["artifacts"] = {name: str(output / name) for name in
                                ("changes.patch", "trace.jsonl", "ledger.sqlite")}
         trace.emit("runtime", "run_finished", status=result["status"])
+        result["telemetry"] = telemetry.report()
+        if telemetry.exported:
+            result["artifacts"]["spans.otlp.json"] = str(telemetry.path)
         (output / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
         ledger.close()
     return result

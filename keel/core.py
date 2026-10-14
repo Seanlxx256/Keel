@@ -81,14 +81,17 @@ class Budget:
 
 
 class Trace:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, telemetry=None):
         self.path = path
         self.sequence = 0
+        self.telemetry = telemetry
 
     def emit(self, role: str, event: str, **data):
         self.sequence += 1
         record = {"sequence": self.sequence, "time": time.time(),
                   "role": role, "event": event, **data}
+        if self.telemetry is not None:
+            self.telemetry.observe(record)
         with self.path.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(record, ensure_ascii=False) + "\n")
 

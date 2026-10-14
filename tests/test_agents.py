@@ -55,6 +55,11 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(result["status"], "passed")
         self.assertEqual(result["budget"]["model_calls"], 6)
         self.assertEqual(result["budget"]["tokens"], 600)
+        spans = json.loads(Path(result["telemetry"]["path"]).read_text())["resourceSpans"][0]["scopeSpans"][0]["spans"]
+        self.assertEqual(sum(span["name"] == "keel.model" for span in spans), 6)
+        self.assertEqual(sum(span["name"] == "keel.tool" for span in spans), 3)
+        self.assertEqual(sum(span["name"] == "keel.verification" for span in spans), 1)
+        self.assertTrue(all("endTimeUnixNano" in span for span in spans))
         self.assertEqual(len(model.calls[2]), 2)  # Planner gets impact, not Scout history.
         self.assertEqual(len(model.calls[3]), 2)  # Implementer starts fresh.
         self.assertNotIn('"fact_id"', model.calls[2][1]["content"])

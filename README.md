@@ -523,7 +523,7 @@ events with status, duration, and exception type. Argument values and returned
 source text are omitted from these gateway events.
 
 This is the local gateway foundation for W6-7. External MCP stdio tools can now be configured as described below.
-OTel export and live container isolation validation remain separate work.
+Local OTLP trace export is available as described below; live container isolation validation remains separate work.
 
 ### External MCP tools (stdio)
 
@@ -572,4 +572,34 @@ Validate the client against the actual Compass subprocess with:
 
 ```powershell
 python -m unittest discover -s tests -p test_mcp_client.py -v
+```
+
+### Local OpenTelemetry trace export
+
+Every Keel run now writes `spans.otlp.json`: one compact OTLP/JSON
+ExportTraceServiceRequest record, containing a run span, child role spans, and
+model, agent gateway tool, and verification command spans. No additional package
+or running Collector is required. `trace.jsonl` includes matching `trace_id`,
+`span_id`, and `trace_flags` fields; `result.json` reports export status and path.
+Span timestamps use an epoch anchor plus a monotonic clock. Interrupted calls
+close with ERROR status when their role ends, including unexpected exceptions.
+Export-file failures are reported in `result.telemetry` without replacing the
+actual task outcome.
+
+The OTLP file includes allowlisted operational metadata, not goals, prompts,
+source text, command arguments, or server error payloads. Existing trace and ledger
+artifacts retain their original evidence content. This is a local file exporter,
+not an OpenTelemetry SDK integration: Collector upload, remote context propagation,
+and server-internal spans are not implemented. Direct Workspace operations outside
+the agent gateway retain their existing events rather than measured tool spans.
+Hard process termination can prevent the final OTLP file from being written;
+the append-only event trace remains available.
+
+The encoding follows the [OTLP JSON specification](https://opentelemetry.io/docs/specs/otlp/)
+and [OTLP file format](https://opentelemetry.io/docs/specs/otel/protocol/file-exporter/).
+The local file has not yet been validated against a live Collector.
+
+```powershell
+python -m unittest discover -s tests -p test_telemetry.py -v
+python examples/demo.py
 ```
