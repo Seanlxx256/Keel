@@ -2,6 +2,9 @@ import importlib.util
 import json
 from pathlib import Path
 import sqlite3
+import subprocess
+import sys
+import textwrap
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -63,6 +66,27 @@ class ParserTests(unittest.TestCase):
         expected = PythonParser("python-ast").parse("pkg/main.py", raw)
         actual = PythonParser("tree-sitter").parse("pkg/main.py", raw)
         self.assertEqual(actual, expected)
+        # Native faults must fail an isolated child rather than terminate the test runner.
+        # A large class exercises GC and offsets far beyond its declaration line.
+        script = textwrap.dedent('''
+            import gc
+            from compass.parsing import PythonParser
+            gc.set_threshold(25, 5, 5)
+            source = '# Unicode: \\u4f60\\u597d\\nclass Large:\\n    """' + ('padding ' * 5000) + '"""\\n'
+            for number in range(180):
+                source += f'    @decorate\\n    def method_{number}(self, value):\\n        """Read a value."""\\n        return value + {number}\\n'
+            raw = source.encode()
+            expected = PythonParser('python-ast').parse('large.py', raw)
+            parser = PythonParser('tree-sitter')
+            for _ in range(5):
+                actual = parser.parse('large.py', raw)
+                assert actual == expected
+                gc.collect()
+            print('Large native-parser/GC regression passed')
+        ''')
+        completed = subprocess.run([sys.executable, "-X", "faulthandler", "-c", script],
+                                   cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, timeout=60)
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
 
 
 class IndexTests(unittest.TestCase):
@@ -209,11 +233,15 @@ class EmbeddingTests(unittest.TestCase):
             def __exit__(self, *args): pass
             def read(self, size): return b'{"embeddings": [[1, 0], [0, 1]]}'
         with patch("compass.vectors.urllib.request.urlopen", return_value=Response()) as request:
-            result = OllamaEmbedder("embedding-model").embed(["one", "two"])
+            embedder = OllamaEmbedder("embedding-model", num_batch=32)
+            result = embedder.embed(["one", "two"])
         self.assertEqual(result, [[1, 0], [0, 1]])
         payload = json.loads(request.call_args.args[0].data)
         self.assertEqual(payload["input"], ["one", "two"])
         self.assertFalse(payload["truncate"])
+        self.assertEqual(payload["options"], {"num_batch": 32})
+        from compass.vectors import embedder_from_spec
+        self.assertEqual(embedder_from_spec(embedder.spec).num_batch, 32)
 
 
 if __name__ == "__main__":

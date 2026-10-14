@@ -45,21 +45,28 @@ class HashEmbedder:
 
 
 class OllamaEmbedder:
-    def __init__(self, model, base_url="http://localhost:11434", timeout=60):
+    def __init__(self, model, base_url="http://localhost:11434", timeout=60, num_batch=None):
         parts = urlsplit(base_url)
         if parts.scheme not in {"http", "https"} or not parts.hostname or parts.username or parts.password:
             raise ValueError("Embedding URL must use HTTP(S) without embedded credentials")
         if not isinstance(model, str) or not model.strip():
             raise ValueError("An embedding model name is required")
+        if num_batch is not None and (type(num_batch) is not int or not 1 <= num_batch <= 2048):
+            raise ValueError("Embedding num_batch must be an integer between 1 and 2048")
         self.model, self.base_url, self.timeout = model, base_url.rstrip("/"), timeout
         self.spec = {"provider": "ollama", "model": model, "base_url": self.base_url}
+        self.num_batch = num_batch
+        if num_batch is not None:
+            self.spec["num_batch"] = num_batch
 
     def embed(self, texts):
         if not texts:
             return []
-        request = urllib.request.Request(self.base_url + "/api/embed", data=json.dumps({
-            "model": self.model, "input": texts, "truncate": False,
-        }).encode(), headers={"Content-Type": "application/json"}, method="POST")
+        payload = {"model": self.model, "input": texts, "truncate": False}
+        if self.num_batch is not None:
+            payload["options"] = {"num_batch": self.num_batch}
+        request = urllib.request.Request(self.base_url + "/api/embed", data=json.dumps(payload).encode(),
+                                         headers={"Content-Type": "application/json"}, method="POST")
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 raw = response.read(16_000_001)
@@ -69,7 +76,14 @@ class OllamaEmbedder:
             checked_vectors(vectors, len(texts))
             return vectors
         except urllib.error.HTTPError as error:
-            raise ValueError(f"Embedding HTTP request failed with status {error.code}") from None
+            detail = ""
+            try:
+                message = json.loads(error.read(4096)).get("error")
+                if isinstance(message, str):
+                    detail = ": " + " ".join(message.split())[:300]
+            except (ValueError, OSError, AttributeError):
+                pass
+            raise ValueError(f"Embedding HTTP request failed with status {error.code}{detail}") from None
         except (OSError, KeyError, TypeError, json.JSONDecodeError):
             raise ValueError("Embedding endpoint is unavailable or returned an invalid response") from None
 
@@ -78,7 +92,7 @@ def embedder_from_spec(spec):
     if spec["provider"] == "hash":
         return HashEmbedder(spec["dimensions"])
     if spec["provider"] == "ollama":
-        return OllamaEmbedder(spec["model"], spec["base_url"])
+        return OllamaEmbedder(spec["model"], spec["base_url"], num_batch=spec.get("num_batch"))
     raise ValueError("Unknown embedding provider")
 
 

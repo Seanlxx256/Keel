@@ -197,7 +197,7 @@ Each generation records the indexed Python-source fingerprint and available Git 
 
 All query results include index identity, freshness, completeness, and uncalibrated `confidence: null`. No retrieval-quality or latency improvement is claimed. Multi-language grammars and cross-encoder reranking remain unimplemented. Local CORE-Bench/SWE-Explore format adapters are available below; official evaluator parity and public-data runs remain unverified. The following milestones build on this index.
 
-**Validation status:** Python AST + SQLite symbols/graph/hash-vector paths are tested locally. The current environment cannot install tree-sitter/LanceDB because package-network access is unavailable; their real integration tests are present but skipped until dependencies are installed. Ollama embeddings are tested with mocked HTTP responses, not a live embedding model.
+**Validation status:** AST/SQLite paths and real tree-sitter/LanceDB integrations have passed local checks. Imported Ollama models have passed live embedding and T2 smoke checks; automated model tests still use mocks/scripted replies. See the evaluation notes for the scope of actual public-data measurements. Native dependency availability depends on the selected Python environment.
 
 Implementation references: [py-tree-sitter](https://github.com/tree-sitter/py-tree-sitter), [LanceDB quickstart](https://docs.lancedb.com/quickstart), and [Ollama embeddings](https://docs.ollama.com/api/embed).
 
@@ -452,3 +452,12 @@ python -u examples/run_swe_public.py --repositories 1 --repository-id pallets/fl
 ```
 
 Local tests simulate network transfer and exercise real Git checkout/identity/cleanliness checks. They do not establish that the live Hub export or GitHub transport is reachable. Public-data cascade scores remain unverified until an actual preparation/evaluation run succeeds.
+
+
+### Windows native-parser and embedding memory handling
+
+A native access violation was reproduced while parsing the real Flask `src/flask/app.py` with tree-sitter 0.26.0. The parser now keeps the syntax tree alive, traverses with a cursor rather than parent/child Node caches, and derives line numbers from byte offsets instead of temporary Point wrappers. The same Flask snapshot subsequently parsed all 80 Python files and 1,570 symbols without the native fault; symbol identities, calls and imports matched the AST extraction. Tree-sitter may retain trailing comments or decorator boundaries differently from AST, so byte-for-byte backend equivalence is not claimed for every chunk.
+
+The optional native parser regression runs a generated 180-method class repeatedly under aggressive garbage collection in an isolated subprocess. A native failure then fails the test rather than terminating the entire test runner. The SWE PowerShell entry point also enables Python's fault handler so a future native crash prints diagnostic stacks instead of disappearing behind the last heartbeat.
+
+The first real index retry also encountered a distinct Ollama embedding buffer-allocation failure (HTTP 500). The SWE runner now explicitly sets token compute `num_batch=32`; override it with `-EmbeddingNumBatch` or Python `--embedding-num-batch`. This is separate from the number of documents per HTTP request. The setting is retained in index embedding metadata and restored for subsequent queries/updates. Oversized inputs still fail because truncation remains disabled. Small-batch probes passed, but this setting is not a guarantee that every model/context fits available memory. Embedding HTTP errors include a bounded server error message when available.

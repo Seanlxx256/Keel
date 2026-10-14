@@ -29,6 +29,7 @@ def main(argv=None):
     parser.add_argument("--swe-files", nargs="+", help="Explicit Hub paths if automatic split discovery is ambiguous")
     parser.add_argument("--verified-files", nargs="+")
     parser.add_argument("--embedding-model", default="keel-embed")
+    parser.add_argument("--embedding-num-batch", type=int, default=32, help="Ollama token compute batch for low-memory hardware")
     parser.add_argument("--chat-model", default="keel-chat")
     parser.add_argument("--model-url", default="http://localhost:11434")
     parser.add_argument("--line-budget", type=int, default=100)
@@ -59,7 +60,7 @@ def main(argv=None):
             if not args.prepare_only:
                 progress.emit("model_preflight")
                 model = OllamaModel(args.chat_model, args.model_url)
-                embedder = OllamaEmbedder(args.embedding_model, args.model_url, timeout=args.timeout)
+                embedder = OllamaEmbedder(args.embedding_model, args.model_url, timeout=args.timeout, num_batch=args.embedding_num_batch)
                 embedder.embed(["Prepare semantic code retrieval."])
                 with urllib.request.urlopen(args.model_url.rstrip("/") + "/api/tags", timeout=15) as response:
                     inventory = json.load(response)

@@ -6,6 +6,7 @@ The stdlib range backend is explicit, never an invisible dependency fallback.
 from __future__ import annotations
 
 import ast
+from bisect import bisect_right
 from dataclasses import dataclass, field
 import hashlib
 from pathlib import PurePosixPath
@@ -80,27 +81,44 @@ class PythonParser:
     def parse(self, path: str, raw: bytes) -> ParsedFile:
         text = raw.decode("utf-8")
         tree = ast.parse(text, filename=path)
-        ranges = {}
-        if self.parser is not None:
-            root = self.parser.parse(raw).root_node
-            if root.has_error:
-                raise ValueError(f"Tree-sitter found syntax errors: {path}")
-            stack = [root]
-            while stack:
-                node = stack.pop()
-                if node.type in {"function_definition", "class_definition"}:
-                    name = node.child_by_field_name("name")
-                    body = node.child_by_field_name("body")
-                    outer = node.parent if node.parent.type == "decorated_definition" else node
-                    ranges[(node.start_point.row + 1, raw[name.start_byte:name.end_byte].decode())] = (
-                        outer.start_byte, outer.end_byte, node.start_byte, body.start_byte)
-                stack.extend(reversed(node.named_children))
-        result = ParsedFile(path, module_name(path))
         lines = raw.splitlines(keepends=True)
         offsets = [0]
         for line in lines:
             offsets.append(offsets[-1] + len(line))
-
+        ranges = {}
+        if self.parser is not None:
+            syntax_tree = self.parser.parse(raw)
+            root = syntax_tree.root_node
+            if root.has_error:
+                raise ValueError(f"Tree-sitter found syntax errors: {path}")
+            # Cursor traversal avoids cached parent/child Node graphs, whose GC can
+            # crash the 0.26 bindings on large Python files on Windows.
+            cursor = syntax_tree.walk()
+            ancestors = []
+            while True:
+                node = cursor.node
+                if node.type in {"function_definition", "class_definition"}:
+                    name = node.child_by_field_name("name")
+                    body = node.child_by_field_name("body")
+                    parent = ancestors[-1] if ancestors else None
+                    start, end = (parent[1], parent[2]) if parent and parent[0] == "decorated_definition" else (node.start_byte, node.end_byte)
+                    # Derive rows from stable byte offsets instead of temporary Point
+                    # wrappers (0.26 can return corrupted rows during long traversals).
+                    ranges[(bisect_right(offsets, node.start_byte), raw[name.start_byte:name.end_byte].decode())] = (
+                        start, end, node.start_byte, body.start_byte)
+                if cursor.goto_first_child():
+                    ancestors.append((node.type, node.start_byte, node.end_byte))
+                    continue
+                if cursor.goto_next_sibling():
+                    continue
+                while ancestors:
+                    cursor.goto_parent()
+                    ancestors.pop()
+                    if cursor.goto_next_sibling():
+                        break
+                else:
+                    break
+        result = ParsedFile(path, module_name(path))
         def source_range(node):
             if ranges:
                 return ranges[(node.lineno, node.name)]
