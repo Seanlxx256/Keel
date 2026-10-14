@@ -62,6 +62,15 @@ class PreparationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             select_instances(swe, verified, instances_per_repository=0)
 
+    def test_prior_instances_are_excluded_before_seeded_sampling(self):
+        swe, verified = self.records()
+        swe.append({**swe[0], "instance_id": "flask-new"})
+        verified.append({**verified[0], "instance_id": "flask-new"})
+        selected, audit = select_instances(swe, verified, exclude_instances=["flask-1"])
+        self.assertEqual(selected[0]["record"]["instance_id"], "flask-new")
+        self.assertEqual(audit["exclusions"]["previously_evaluated_instance"], 1)
+        self.assertEqual(audit["excluded_instance_ids"], ["flask-1"])
+
     def test_invalid_instance_ids_and_duplicate_metadata_are_rejected(self):
         swe, verified = self.records()
         with self.assertRaisesRegex(ValueError, "unique"):

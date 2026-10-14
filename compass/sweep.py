@@ -45,8 +45,10 @@ def summarize(records, configurations, repeats):
 
 
 def run_swe_sweep(index, instance, output_dir, *, modes=("t0", "t1", "adaptive"), line_budgets=(100, 300),
-                  repeats=3, seed=0, model=None, routing=None, limits=None, repository_id=None):
+                  repeats=3, seed=0, model=None, routing=None, limits=None, repository_id=None, symbol_line_cap=32):
     modes, line_budgets = list(modes), list(line_budgets)
+    if type(symbol_line_cap) is not int or not 1 <= symbol_line_cap <= 100000:
+        raise ValueError("symbol_line_cap must be between 1 and 100000")
     if not modes or len(set(modes)) != len(modes) or any(mode not in {"t0", "t1", "t2", "adaptive"} for mode in modes):
         raise ValueError("Choose unique t0/t1/t2/adaptive modes")
     if not line_budgets or any(type(value) is not int or not 1 <= value <= 100000 for value in line_budgets) or len(set(line_budgets)) != len(line_budgets):
@@ -72,7 +74,7 @@ def run_swe_sweep(index, instance, output_dir, *, modes=("t0", "t1", "adaptive")
                                              "event": event, "data": data}, ensure_ascii=False) + "\n")
             try:
                 result = evaluate_swe(index, instance, line_budget=count, mode=mode, model=model, routing=routing,
-                                      budget=budget, record=record)
+                                      budget=budget, record=record, symbol_line_cap=symbol_line_cap)
                 status = result["routing"]["mode_status"]
                 row["result"] = result
                 row["status"] = "passed"
@@ -101,7 +103,8 @@ def run_swe_sweep(index, instance, output_dir, *, modes=("t0", "t1", "adaptive")
                         "num_ctx": getattr(model, "num_ctx", None),
                         "keep_alive": 0 if getattr(model, "num_ctx", None) is not None else None},
               "query_embedding_keep_alive": 0,
-              "seed": seed, "repeats": repeats, "all_passed": all(row["eligible"] for row in rows),
+              "seed": seed, "repeats": repeats, "symbol_line_cap": symbol_line_cap,
+              "all_passed": all(row["eligible"] for row in rows),
               "summary": rows, "frontiers": frontiers, "public_benchmark_verified": False,
               "limitations": "One instance, reference region metrics, no official evaluator parity. Configuration order is shuffled per round. Each run has an independent budget; no global sweep budget. Repetitions share an index and uncontrolled OS/model caches. Timing excludes snapshot checks and index opening. Chat tokens exclude embeddings. Frontiers use observed means without statistical significance; deferred, failed and incomplete configurations are excluded."}
     (output_dir / "sweep.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")

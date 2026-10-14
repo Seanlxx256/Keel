@@ -107,13 +107,17 @@ def read_rows(path):
         raise ValueError("Only JSONL and Parquet public exports are supported")
 
 
-def select_instances(swe_rows, verified_rows, *, count=1, seed=42, repositories=None, instances_per_repository=1):
+def select_instances(swe_rows, verified_rows, *, count=1, seed=42, repositories=None, instances_per_repository=1,
+                     exclude_instances=()):
     import hashlib
     if type(count) is not int or not 1 <= count <= 12 or type(seed) is not int:
         raise ValueError("Choose 1..12 repositories and an integer seed")
     if type(instances_per_repository) is not int or not 1 <= instances_per_repository <= 20:
         raise ValueError("Choose 1..20 instances per repository")
     requested = {canonical_repository_id(repo) for repo in repositories} if repositories else None
+    excluded_ids = set(exclude_instances)
+    if any(not isinstance(identifier, str) or not identifier for identifier in excluded_ids):
+        raise ValueError("Excluded instance IDs must be nonempty strings")
     verified = {}
     for row in verified_rows:
         identifier = row.get("instance_id")
@@ -127,7 +131,9 @@ def select_instances(swe_rows, verified_rows, *, count=1, seed=42, repositories=
             raise ValueError("SWE-Explore data needs unique instance IDs")
         seen.add(identifier)
         reason = None
-        if identifier not in verified:
+        if identifier in excluded_ids:
+            reason = "previously_evaluated_instance"
+        elif identifier not in verified:
             reason = "not_in_verified"
         else:
             source = verified[identifier]
@@ -175,6 +181,7 @@ def select_instances(swe_rows, verified_rows, *, count=1, seed=42, repositories=
     selected = [item for repo in chosen for item in groups[repo][:instances_per_repository]]
     return selected, {"input_instances": len(seen), "eligible_instances": len(eligible), "exclusions": exclusions,
                       "instances_per_repository": instances_per_repository,
+                      "excluded_instance_ids": sorted(excluded_ids),
                       "selection": "Seeded instances per repository; predeclared small-repository preference; Verified-only intersection with at least one Python core file. No retrieval scores used."}
 
 

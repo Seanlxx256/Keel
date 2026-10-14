@@ -1,5 +1,6 @@
 """Prepare pinned SWE-Explore/Verified intersections and optionally run real Compass sweeps."""
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -8,7 +9,7 @@ import urllib.request
 import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from compass.benchmarks import load_swe_instance
+from compass.benchmarks import load_swe_instance, file_digest
 from compass.comparison import compare_rankings, comparison_markdown
 from compass.index import RepositoryIndex, build_index
 from compass.preparation import PublicData, SWE_DATASET, VERIFIED_DATASET, prepare_snapshot, select_instances
@@ -38,15 +39,18 @@ def main(argv=None):
     parser.add_argument("--chat-context", type=int, default=8192)
     parser.add_argument("--model-url", default="http://localhost:11434")
     parser.add_argument("--line-budget", type=int, default=100)
+    parser.add_argument("--symbol-line-cap", type=int, default=32)
+    parser.add_argument("--exclude-result", type=Path, nargs="+", default=[], help="Exclude all instance IDs from prior result files before sampling")
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--ranking", choices=["rrf", "code-aware"], default="rrf")
     parser.add_argument("--evidence-policy", choices=["preview", "read"], default="read")
     parser.add_argument("--timeout", type=int, default=300)
+    parser.add_argument("--output-dir", help="New artifact directory; existing directories are rejected")
     args = parser.parse_args(argv)
-    if not 1 <= args.repositories <= 12 or not 1 <= args.line_budget <= 100000 or not 1 <= args.repeats <= 100 or args.timeout <= 0:
+    if not 1 <= args.repositories <= 12 or not 1 <= args.line_budget <= 100000 or not 1 <= args.repeats <= 100 or args.timeout <= 0 or not 1 <= args.symbol_line_cap <= 100000:
         parser.error("Invalid repository count, line budget, repeats or timeout")
     project = Path(__file__).resolve().parents[1]
-    output = project / ".keel/swe-public" / uuid.uuid4().hex
+    output = Path(args.output_dir) if args.output_dir else project / ".keel/swe-public" / uuid.uuid4().hex
     output.mkdir(parents=True)
     print(f"Artifacts: {output}", flush=True)
     try:
@@ -56,15 +60,28 @@ def main(argv=None):
             swe, swe_source = data.dataset(SWE_DATASET, "train", filenames=args.swe_files)
             progress.emit("verified_metadata_loading")
             verified, verified_source = data.dataset(VERIFIED_DATASET, "test", filenames=args.verified_files)
+            exclusions, exclusion_sources = set(), {}
+            for path in args.exclude_result:
+                exclusion_raw = path.read_bytes()
+                previous = json.loads(exclusion_raw)
+                entries = previous.get("instances")
+                if not isinstance(entries, list) or any(not isinstance(item.get("instance_id"), str) for item in entries):
+                    raise ValueError("Exclusion sources must be measured result files with instance IDs")
+                exclusions.update(item["instance_id"] for item in entries)
+                exclusion_sources[str(path)] = hashlib.sha256(exclusion_raw).hexdigest()
             selected, selection = select_instances(swe, verified, count=args.repositories, seed=args.seed,
                                                    repositories=args.repository_id,
-                                                   instances_per_repository=args.instances_per_repository)
+                                                   instances_per_repository=args.instances_per_repository,
+                                                   exclude_instances=exclusions)
             plan = {"sources": [swe_source, verified_source], "selection": selection, "seed": args.seed,
                     "instances": [{"id": item["record"]["instance_id"], "repository_id": item["repository_id"],
                                    "base_commit": item["record"]["base_commit"]} for item in selected],
-                    "settings": vars(args), "public_benchmark_verified": False}
+                    "settings": {**vars(args), "exclude_result": [str(path) for path in args.exclude_result]},
+                    "exclusion_sources_sha256": exclusion_sources, "public_benchmark_verified": False}
             # Freeze the sample before checking out code, calling models or measuring quality.
             (output / "plan.json").write_text(json.dumps(plan, indent=2), encoding="utf-8")
+            if any(file_digest(Path(path)) != digest for path, digest in exclusion_sources.items()):
+                raise ValueError("Exclusion source changed while freezing the sample")
             if args.plan_only:
                 availability = [{**item, "snapshot_exists": (project / ".keel/swe-snapshots" /
                                  item["repository_id"].replace("/", "--") / item["base_commit"]).is_dir()}
@@ -109,7 +126,7 @@ def main(argv=None):
                         reuse = False
                         if (repo / ".compass/current.json").is_file():
                             with RepositoryIndex(repo) as existing:
-                                reuse = (not existing.stale and existing.metadata["parser"] == "tree-sitter" and
+                                reuse = (not existing.stale and existing.metadata["complete"] and existing.metadata["parser"] == "tree-sitter" and
                                          existing.metadata["vector_store"] == "sqlite" and
                                          existing.metadata["embedding"] == embedder.spec)
                         if reuse:
@@ -130,7 +147,8 @@ def main(argv=None):
                                                      modes=("t0", "t1", "t2", "adaptive"), line_budgets=(args.line_budget,),
                                                      repeats=args.repeats, seed=args.seed, model=model,
                                                      routing=Routing(max_steps=4, ranking=ranking, evidence_policy=args.evidence_policy),
-                                                     limits=Limits(max_wallclock=300, max_tokens=30000, max_model_calls=4, max_tool_calls=100))
+                                                     limits=Limits(max_wallclock=300, max_tokens=30000, max_model_calls=4, max_tool_calls=100),
+                                                     symbol_line_cap=args.symbol_line_cap)
                                 measurements.append({"ranking": ranking, "all_passed": measured["all_passed"],
                                                      "summary": measured["summary"], "sweep": str(sweep_dir / "sweep.json")})
                         result.update(status="passed" if all(row["all_passed"] for row in measurements) else "incomplete",

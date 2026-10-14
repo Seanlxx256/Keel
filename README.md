@@ -191,6 +191,8 @@ For `context`, choose a line inside the function or class of interest; a line ou
 
 The graph links statically identifiable lexical calls, imported aliases, relative imports, and candidate `self`/`cls` method calls. Unresolved or ambiguous targets are stored explicitly; Compass does not infer arbitrary receiver types, resolve re-exports, or guarantee dynamic dispatch. Imports are stored with scope and repository-module resolution where available. Module names assume the repository root or a leading `src/` directory; custom source roots are not configured yet.
 
+Historical triple-quoted docstrings containing malformed `\u`/`\U` escapes (for example a literal Windows `DOMAIN\username` path) have a narrow indexing compatibility path. It activates only after a Unicode-escape AST error, repairs an in-memory AST view without changing byte positions, confirms that every repaired literal is a module/class/function docstring, and restores its literal text. Tree-sitter and emitted code still use the original bytes. Ordinary runtime strings, other syntax errors, and unsupported Python-2 grammar remain rejected. This permits lexical indexing; it does not make the original source executable under Python 3. The public runner rebuilds incomplete indexes rather than reusing their old diagnostics after a parser fix.
+
 Indexes live under `.compass/generations/<id>/`, with a SQLite database and optional LanceDB files. Builds publish a generation through an atomic manifest replacement only after parsing, embeddings, and source consistency checks complete. Failed builds leave the previous generation selected. Old and failed generations remain on disk; automatic garbage collection is not implemented.
 
 Each generation records the indexed Python-source fingerprint and available Git HEAD. Query sessions check freshness on open; stale indexes refuse code/graph/vector queries until refreshed. Incremental refresh is described below. Sessions do not continuously watch edits after opening. Generated directories such as `.git`, `.keel`, `.compass`, virtual environments, `node_modules`, `tmp`, `build`, and `dist` are excluded. This is a fixed exclusion list, not a `.gitignore` interpreter. Symlinked entries are not followed. Invalid UTF-8, syntax errors, and Python files over 1 MB appear in diagnostics and mark the index incomplete.
@@ -435,6 +437,16 @@ python -m compass.budget_ablation --result .keel/swe-public/RUN_ID/result.json -
 ```
 
 This factorial replay fixes retrieval rankings and model selections, varying only packing. Source configurations must have completed all repetitions; exclusions and input hashes remain explicit. It reports emitted-line utilization and a line-count-only recall ceiling, plus the fraction of that ceiling attained. That ceiling can be unattainable with available symbol prefixes. Repetitions are averaged within tasks before task means. Source sweeps must contain a single original line budget to avoid counting configurations as extra tasks. Replay does not measure new retrieval latency, model behavior with larger prompts, or downstream coding performance. Existing output directories are rejected.
+
+To validate the candidate 300/64 configuration on new issues in Requests and Seaborn:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\examples\run_swe_independent.ps1
+```
+
+This workflow excludes every instance in `docs/evaluations/compass-final-policy-three-repo.json` before seeded sampling, records the exclusion-source hash, prepares exact snapshots, and runs code-aware retrieval with 300 total lines and a 64-line symbol cap. On success it replays 100/300-line budgets and 32/64-line caps on the saved rankings. Outputs are under `.keel/swe-independent/<run-id>/`, including `budget-analysis/budget-replay.md`. These are new issues in previously used repositories, not held-out repositories. `-PlanOnly -Offline` freezes the sample without Git/model calls; `-PrepareOnly` downloads snapshots without models. Missing eligible instances fail instead of falling back to old issues. Preparation/evaluation failure returns a nonzero exit and skips replay; existing compatible indexes are reused. The Python wrapper also accepts `--previous-result` for a different declared exclusion file.
+
+The underlying public runner, `benchmark swe`, and `benchmark swe-sweep` accept `--symbol-line-cap`; the PowerShell public runner accepts `-SymbolLineCap`. Defaults remain 100/32 in the public runner. Sweep metadata records the cap, and calibration rejects mixing different caps in one protocol.
 
 Deferred upgrades (including missing chat models), step-limited exploration, incomplete indexes, and failed runs make their entire configuration ineligible for frontiers. Errors retain consumed budget evidence and allow other configurations to run. Any ineligible configuration makes the CLI exit 1; existing output directories are rejected. Without `--model`, T0/T1 can be measured, while requested T2 or adaptive upgrades are recorded as deferred. Failed/deferred run records may still contain partial retrieval evidence, but it is excluded from eligible quality/cost means.
 

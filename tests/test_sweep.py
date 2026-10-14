@@ -50,6 +50,14 @@ class SweepTests(unittest.TestCase):
         self.assertTrue((self.root / "results" / "report.md").is_file())
         self.assertFalse(result["public_benchmark_verified"])
 
+    def test_symbol_cap_is_applied_and_recorded_in_live_sweep(self):
+        result = self.run_sweep(modes=["t0"], line_budgets=[3], repeats=1, symbol_line_cap=1)
+        self.assertEqual(result["symbol_line_cap"], 1)
+        self.assertAlmostEqual(result["summary"][0]["quality"]["line_recall"], 1 / 3)
+        run = json.loads((self.root / "results/runs.jsonl").read_text())
+        self.assertEqual(run["result"]["emitted_lines"], 1)
+        self.assertEqual(run["result"]["context_packing"]["symbol_line_cap"], 1)
+
     def test_deferred_t2_cannot_enter_frontier(self):
         result = self.run_sweep(modes=["t0", "t2"], line_budgets=[3], repeats=1)
         self.assertFalse(result["all_passed"])

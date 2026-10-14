@@ -6,6 +6,7 @@ The stdlib range backend is explicit, never an invisible dependency fallback.
 from __future__ import annotations
 
 import ast
+import re
 from bisect import bisect_right
 from dataclasses import dataclass, field
 import hashlib
@@ -64,6 +65,67 @@ def _assigned(statements):
     return names
 
 
+def _legacy_docstring_ast(text, path):
+    """Accept malformed Unicode escapes only inside historical docstrings."""
+    import io
+    import tokenize
+    try:
+        return ast.parse(text, filename=path)
+    except SyntaxError as original:
+        if "unicodeescape" not in str(original):
+            raise
+        lines = text.splitlines(keepends=True)
+        offsets = [0]
+        for line in lines:
+            offsets.append(offsets[-1] + len(line))
+        patched, values = list(text), {}
+        try:
+            string_tokens = list(tokenize.generate_tokens(io.StringIO(text).readline))
+        except tokenize.TokenError:
+            raise original
+        for token in string_tokens:
+            if token.type != tokenize.STRING or not re.match(r"(?i)^(?:u)?(?:\"\"\"|''')", token.string):
+                continue
+            try:
+                ast.literal_eval(token.string)
+                continue
+            except (SyntaxError, ValueError):
+                pass
+            bad, cursor = [], 0
+            while cursor < len(token.string):
+                if token.string[cursor] != "\\":
+                    cursor += 1
+                    continue
+                kind = token.string[cursor + 1:cursor + 2]
+                width = {"u": 4, "U": 8}.get(kind)
+                if width and not re.fullmatch(r"[0-9a-fA-F]{" + str(width) + "}", token.string[cursor + 2:cursor + 2 + width]):
+                    bad.append(cursor)
+                cursor += 2
+            if not bad:
+                continue
+            repaired = token.string
+            for position in reversed(bad):
+                repaired = repaired[:position] + "\\" + repaired[position:]
+                patched[offsets[token.start[0] - 1] + token.start[1] + position] = " "
+            key = (token.start[0], len(lines[token.start[0] - 1][:token.start[1]].encode("utf-8")))
+            values[key] = ast.literal_eval(repaired)
+        if not values:
+            raise original
+        tree = ast.parse("".join(patched), filename=path)
+        docstrings = {}
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.body:
+                first = node.body[0]
+                if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) and isinstance(first.value.value, str):
+                    literal = first.value
+                    docstrings[(literal.lineno, literal.col_offset)] = literal
+        if values.keys() - docstrings.keys():
+            raise original
+        for key, value in values.items():
+            docstrings[key].value = value
+        return tree
+
+
 class PythonParser:
     def __init__(self, backend="tree-sitter"):
         if backend not in {"tree-sitter", "python-ast"}:
@@ -80,7 +142,7 @@ class PythonParser:
 
     def parse(self, path: str, raw: bytes) -> ParsedFile:
         text = raw.decode("utf-8")
-        tree = ast.parse(text, filename=path)
+        tree = _legacy_docstring_ast(text, path)
         lines = raw.splitlines(keepends=True)
         offsets = [0]
         for line in lines:

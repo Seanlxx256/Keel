@@ -55,6 +55,7 @@ def load_sweeps(paths, line_budget):
                     "embedding": report["index_metadata"]["embedding"],
                     "dimensions": report["index_metadata"].get("dimensions"),
                     "parser": report["index_metadata"]["parser"], "model": report["model"],
+                    "symbol_line_cap": report.get("symbol_line_cap", 32),
                     "limits_per_run": report["limits_per_run"]}
         if protocol["embedding"] is not None and not isinstance(protocol["embedding"], dict):
             raise ValueError("Invalid embedding metadata")

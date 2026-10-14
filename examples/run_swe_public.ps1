@@ -3,6 +3,7 @@ param(
     [ValidateRange(1, 12)][int]$Repositories = 1,
     [ValidateRange(1, 20)][int]$InstancesPerRepository = 1,
     [ValidateRange(1, 100000)][int]$LineBudget = 100,
+    [ValidateRange(1, 100000)][int]$SymbolLineCap = 32,
     [ValidateRange(1, 100)][int]$Repeats = 1,
     [ValidateRange(1, 2048)][int]$EmbeddingNumBatch = 32,
     [int]$Seed = 42,
@@ -16,7 +17,7 @@ param(
     [switch]$PrepareOnly
 )
 $runnerArguments = @("-u", "-X", "faulthandler", (Join-Path $PSScriptRoot "run_swe_public.py"), "--repositories", $Repositories,
-    "--line-budget", $LineBudget, "--repeats", $Repeats, "--seed", $Seed, "--embedding-num-batch", $EmbeddingNumBatch,
+    "--line-budget", $LineBudget, "--symbol-line-cap", $SymbolLineCap, "--repeats", $Repeats, "--seed", $Seed, "--embedding-num-batch", $EmbeddingNumBatch,
     "--ranking", $Ranking, "--evidence-policy", $EvidencePolicy, "--chat-context", $ChatContext)
 $runnerArguments += @("--instances-per-repository", $InstancesPerRepository)
 if ($Offline) { $runnerArguments += "--offline" }

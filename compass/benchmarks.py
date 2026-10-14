@@ -342,6 +342,8 @@ def evaluate_swe(index, instance, *, line_budget=300, mode="adaptive", model=Non
                  symbol_line_cap=32):
     if type(line_budget) is not int or not 1 <= line_budget <= 100000:
         raise ValueError("line_budget must be between 1 and 100000")
+    if type(symbol_line_cap) is not int or not 1 <= symbol_line_cap <= 100000:
+        raise ValueError("symbol_line_cap must be between 1 and 100000")
     if Path(instance["repo"]).resolve() != index.root or index.metadata["git_ref"] != instance["base_commit"]:
         raise ValueError("SWE snapshot and index identities do not match")
     check_snapshot(index.root, instance["base_commit"])

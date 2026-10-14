@@ -1,0 +1,653 @@
+{
+  "kind": "fixed-ranking context budget replay",
+  "source_all_passed": true,
+  "implementation_sha256": {
+    "budget_ablation.py": "ce20ef28d3b95d3156b2f33bc1ef4cb0805e1dbc540582f8a80bef2a08463564",
+    "benchmarks.py": "2a95b9c5b093ed47cc569f43abe909536a593b2684770135d9c8e153b7023cfb"
+  },
+  "inputs_sha256": {
+    ".keel\\legacy-docstring-completed-analysis\\source-selection.json": "2b84c7fc273c013f938c66763697ff24d9f49e9a80ebce74ddaa7dc84cee7d72",
+    "D:\\keel\\.keel\\swe-public\\6024829cffad43528f4f17844ce9d0ae\\instance-001\\instance.jsonl": "7771965fe26aec24d6d74bbb1406dc8772bb513226bd19228203e2566ca156a8",
+    "D:\\keel\\.keel\\swe-public\\6024829cffad43528f4f17844ce9d0ae\\instance-001\\sweep\\sweep.json": "4b7bbf35f71444b5bf7af6d397f2200b30e201c6e9dea31b2e8fd9316d66a8dc",
+    "D:\\keel\\.keel\\swe-public\\6024829cffad43528f4f17844ce9d0ae\\instance-001\\sweep\\runs.jsonl": "ebfbd6f70aadb1f9e8c8d0599789d3098b02b85e96f7c85c898302df2a16ae1d",
+    "D:\\keel\\.keel\\swe-independent\\1bff32af396945b0937ef51469ba0a10\\instance-002\\instance.jsonl": "0394de347ff9f6685e5f76c51bc92674133b5bc2a47d298ea3b42509145555f6",
+    "D:\\keel\\.keel\\swe-independent\\1bff32af396945b0937ef51469ba0a10\\instance-002\\sweep\\sweep.json": "04e8fc4fe447c00ea968f0fd560990357d3eb67e6ecd83badf324228424e7ff5",
+    "D:\\keel\\.keel\\swe-independent\\1bff32af396945b0937ef51469ba0a10\\instance-002\\sweep\\runs.jsonl": "35ea73bf40eb4fcd5e226300bb644e41a8f57d4f1dc4f7e342812c52d9f2761b"
+  },
+  "excluded": [],
+  "summary": [
+    {
+      "ranking": "code-aware",
+      "mode": "adaptive",
+      "line_budget": 100,
+      "symbol_line_cap": 32,
+      "instances": 2,
+      "line_recall": 0.006026365348399247,
+      "line_precision": 0.5,
+      "emitted_lines": 17,
+      "budget_utilization": 0.17,
+      "recall_fraction_of_ceiling": 0.16
+    },
+    {
+      "ranking": "code-aware",
+      "mode": "adaptive",
+      "line_budget": 100,
+      "symbol_line_cap": 64,
+      "instances": 2,
+      "line_recall": 0.007156308851224105,
+      "line_precision": 0.5,
+      "emitted_lines": 20,
+      "budget_utilization": 0.2,
+      "recall_fraction_of_ceiling": 0.19
+    },
+    {
+      "ranking": "code-aware",
+      "mode": "adaptive",
+      "line_budget": 300,
+      "symbol_line_cap": 32,
+      "instances": 2,
+      "line_recall": 0.006026365348399247,
+      "line_precision": 0.5,
+      "emitted_lines": 17,
+      "budget_utilization": 0.05666666666666667,
+      "recall_fraction_of_ceiling": 0.05333333333333333
+    },
+    {
+      "ranking": "code-aware",
+      "mode": "adaptive",
+      "line_budget": 300,
+      "symbol_line_cap": 64,
+      "instances": 2,
+      "line_recall": 0.007156308851224105,
+      "line_precision": 0.5,
+      "emitted_lines": 20,
+      "budget_utilization": 0.06666666666666667,
+      "recall_fraction_of_ceiling": 0.06333333333333332
+    },
+    {
+      "ranking": "code-aware",
+      "mode": "t0",
+      "line_budget": 100,
+      "symbol_line_cap": 32,
+      "instances": 2,
+      "line_recall": 0.0,
+      "line_precision": 0.0,
+      "emitted_lines": 0,
+      "budget_utilization": 0.0,
+      "recall_fraction_of_ceiling": 0.0
+    },
+    {
+      "ranking": "code-aware",
+      "mode": "t0",
+      "line_budget": 100,
+      "symbol_line_cap": 64,
+      "instances": 2,
+      "line_recall": 0.0,
+      "line_precision": 0.0,
+      "emitted_lines": 0,
+      "budget_utilization": 0.0,
+      "recall_fraction_of_ceiling": 0.0
+    },
+    {
+      "ranking": "code-aware",
+      "mode": "t0",
+      "line_budget": 300,
+      "symbol_line_cap": 32,
+      "instances": 2,
+      "line_recall": 0.0,
+      "line_precision": 0.0,
+      "emitted_lines": 0,
+      "budget_utilization": 0.0,
+      "recall_fraction_of_ceiling": 0.0
+    },
+    {
+      "ranking": "code-aware",
+      "mode": "t0",
+      "line_budget": 300,
+      "symbol_line_cap": 64,
+      "instances": 2,
+      "line_recall": 0.0,
+      "line_precision": 0.0,
+      "emitted_lines": 0,
+      "budget_utilization": 0.0,
+      "recall_fraction_of_ceiling": 0.0
+    },
+    {
+      "ranking": "code-aware",
+      "mode": "t1",
+      "line_budget": 100,
+      "symbol_line_cap": 32,
+      "instances": 2,
+      "line_recall": 0.018832391713747645,
+      "line_precision": 0.5,
+      "emitted_lines": 100,
+      "budget_utilization": 1.0,
+      "recall_fraction_of_ceiling": 0.5
+    },
+    {
+      "ranking": "code-aware",
+      "mode": "t1",
+      "line_budget": 100,
+      "symbol_line_cap": 64,
+      "instances": 2,
+      "line_recall": 0.018832391713747645,
+      "line_precision": 0.5,
+      "emitted_lines": 100,
+      "budget_utilization": 1.0,
+      "recall_fraction_of_ceiling": 0.5
+    },
+    {
+      "ranking": "code-aware",
+      "mode": "t1",
+      "line_budget": 300,
+      "symbol_line_cap": 32,
+      "instances": 2,
+      "line_recall": 0.06003655699567963,
+      "line_precision": 0.3,
+      "emitted_lines": 300,
+      "budget_utilization": 1.0,
+      "recall_fraction_of_ceiling": 0.3
+    },
+    {
+      "ranking": "code-aware",
+      "mode": "t1",
+      "line_budget": 300,
+      "symbol_line_cap": 64,
+      "instances": 2,
+      "line_recall": 0.07654259443890551,
+      "line_precision": 0.39,
+      "emitted_lines": 300,
+      "budget_utilization": 1.0,
+      "recall_fraction_of_ceiling": 0.39
+    },
+    {
+      "ranking": "code-aware",
+      "mode": "t2",
+      "line_budget": 100,
+      "symbol_line_cap": 32,
+      "instances": 2,
+      "line_recall": 0.006026365348399247,
+      "line_precision": 0.5,
+      "emitted_lines": 17,
+      "budget_utilization": 0.17,
+      "recall_fraction_of_ceiling": 0.16
+    },
+    {
+      "ranking": "code-aware",
+      "mode": "t2",
+      "line_budget": 100,
+      "symbol_line_cap": 64,
+      "instances": 2,
+      "line_recall": 0.007156308851224105,
+      "line_precision": 0.5,
+      "emitted_lines": 20,
+      "budget_utilization": 0.2,
+      "recall_fraction_of_ceiling": 0.19
+    },
+    {
+      "ranking": "code-aware",
+      "mode": "t2",
+      "line_budget": 300,
+      "symbol_line_cap": 32,
+      "instances": 2,
+      "line_recall": 0.006026365348399247,
+      "line_precision": 0.5,
+      "emitted_lines": 17,
+      "budget_utilization": 0.05666666666666667,
+      "recall_fraction_of_ceiling": 0.05333333333333333
+    },
+    {
+      "ranking": "code-aware",
+      "mode": "t2",
+      "line_budget": 300,
+      "symbol_line_cap": 64,
+      "instances": 2,
+      "line_recall": 0.007156308851224105,
+      "line_precision": 0.5,
+      "emitted_lines": 20,
+      "budget_utilization": 0.06666666666666667,
+      "recall_fraction_of_ceiling": 0.06333333333333332
+    }
+  ],
+  "new_model_calls": 0,
+  "public_benchmark_verified": false,
+  "limitations": "Post-retrieval replay only. Rankings, model selections and source run costs are fixed; no live latency or downstream coding quality was measured. Recall ceiling uses line count only and may be unattainable with symbol prefixes. Partial runs are excluded; repetitions are not independent tasks.",
+  "source_selection": {
+    "kind": "selected completed instances from separate runs",
+    "all_passed": true,
+    "prepared_only": false,
+    "instances": [
+      {
+        "repository_id": "psf/requests",
+        "instance_id": "psf__requests-1142",
+        "snapshot": "D:\\keel\\.keel\\swe-snapshots\\psf--requests\\22623bd8c265b78b161542663ee980738441c307",
+        "status": "passed",
+        "measurements": [
+          {
+            "ranking": "code-aware",
+            "all_passed": true,
+            "summary": [
+              {
+                "mode": "t0",
+                "line_budget": 300,
+                "runs": 1,
+                "successful_runs": 1,
+                "eligible": true,
+                "exclusions": [],
+                "quality": {
+                  "line_recall": 0.0,
+                  "line_precision": 0.0,
+                  "line_f1": 0.0,
+                  "hit_file_rate": 0.0,
+                  "context_efficiency": 0.0
+                },
+                "cost": {
+                  "seconds": 0.000632,
+                  "tokens": 0,
+                  "model_calls": 0,
+                  "tool_calls": 1,
+                  "vector_queries": 0,
+                  "emitted_lines": 0
+                },
+                "seconds_stdev": 0.0
+              },
+              {
+                "mode": "t1",
+                "line_budget": 300,
+                "runs": 1,
+                "successful_runs": 1,
+                "eligible": true,
+                "exclusions": [],
+                "quality": {
+                  "line_recall": 0.0803921568627451,
+                  "line_precision": 0.13666666666666666,
+                  "line_f1": 0.10123456790123457,
+                  "hit_file_rate": 1.0,
+                  "context_efficiency": 0.37
+                },
+                "cost": {
+                  "seconds": 5.696954,
+                  "tokens": 0,
+                  "model_calls": 0,
+                  "tool_calls": 2,
+                  "vector_queries": 1,
+                  "emitted_lines": 300
+                },
+                "seconds_stdev": 0.0
+              },
+              {
+                "mode": "t2",
+                "line_budget": 300,
+                "runs": 1,
+                "successful_runs": 1,
+                "eligible": true,
+                "exclusions": [],
+                "quality": {
+                  "line_recall": 0.0,
+                  "line_precision": 0.0,
+                  "line_f1": 0.0,
+                  "hit_file_rate": 0.0,
+                  "context_efficiency": 1.0
+                },
+                "cost": {
+                  "seconds": 21.762259,
+                  "tokens": 4425,
+                  "model_calls": 2,
+                  "tool_calls": 3,
+                  "vector_queries": 1,
+                  "emitted_lines": 2
+                },
+                "seconds_stdev": 0.0
+              },
+              {
+                "mode": "adaptive",
+                "line_budget": 300,
+                "runs": 1,
+                "successful_runs": 1,
+                "eligible": true,
+                "exclusions": [],
+                "quality": {
+                  "line_recall": 0.0,
+                  "line_precision": 0.0,
+                  "line_f1": 0.0,
+                  "hit_file_rate": 0.0,
+                  "context_efficiency": 1.0
+                },
+                "cost": {
+                  "seconds": 21.591393,
+                  "tokens": 4474,
+                  "model_calls": 2,
+                  "tool_calls": 4,
+                  "vector_queries": 1,
+                  "emitted_lines": 2
+                },
+                "seconds_stdev": 0.0
+              }
+            ],
+            "sweep": "D:\\keel\\.keel\\swe-public\\6024829cffad43528f4f17844ce9d0ae\\instance-001\\sweep\\sweep.json"
+          }
+        ],
+        "summary": [
+          {
+            "mode": "t0",
+            "line_budget": 300,
+            "runs": 1,
+            "successful_runs": 1,
+            "eligible": true,
+            "exclusions": [],
+            "quality": {
+              "line_recall": 0.0,
+              "line_precision": 0.0,
+              "line_f1": 0.0,
+              "hit_file_rate": 0.0,
+              "context_efficiency": 0.0
+            },
+            "cost": {
+              "seconds": 0.000632,
+              "tokens": 0,
+              "model_calls": 0,
+              "tool_calls": 1,
+              "vector_queries": 0,
+              "emitted_lines": 0
+            },
+            "seconds_stdev": 0.0
+          },
+          {
+            "mode": "t1",
+            "line_budget": 300,
+            "runs": 1,
+            "successful_runs": 1,
+            "eligible": true,
+            "exclusions": [],
+            "quality": {
+              "line_recall": 0.0803921568627451,
+              "line_precision": 0.13666666666666666,
+              "line_f1": 0.10123456790123457,
+              "hit_file_rate": 1.0,
+              "context_efficiency": 0.37
+            },
+            "cost": {
+              "seconds": 5.696954,
+              "tokens": 0,
+              "model_calls": 0,
+              "tool_calls": 2,
+              "vector_queries": 1,
+              "emitted_lines": 300
+            },
+            "seconds_stdev": 0.0
+          },
+          {
+            "mode": "t2",
+            "line_budget": 300,
+            "runs": 1,
+            "successful_runs": 1,
+            "eligible": true,
+            "exclusions": [],
+            "quality": {
+              "line_recall": 0.0,
+              "line_precision": 0.0,
+              "line_f1": 0.0,
+              "hit_file_rate": 0.0,
+              "context_efficiency": 1.0
+            },
+            "cost": {
+              "seconds": 21.762259,
+              "tokens": 4425,
+              "model_calls": 2,
+              "tool_calls": 3,
+              "vector_queries": 1,
+              "emitted_lines": 2
+            },
+            "seconds_stdev": 0.0
+          },
+          {
+            "mode": "adaptive",
+            "line_budget": 300,
+            "runs": 1,
+            "successful_runs": 1,
+            "eligible": true,
+            "exclusions": [],
+            "quality": {
+              "line_recall": 0.0,
+              "line_precision": 0.0,
+              "line_f1": 0.0,
+              "hit_file_rate": 0.0,
+              "context_efficiency": 1.0
+            },
+            "cost": {
+              "seconds": 21.591393,
+              "tokens": 4474,
+              "model_calls": 2,
+              "tool_calls": 4,
+              "vector_queries": 1,
+              "emitted_lines": 2
+            },
+            "seconds_stdev": 0.0
+          }
+        ],
+        "sweep": "D:\\keel\\.keel\\swe-public\\6024829cffad43528f4f17844ce9d0ae\\instance-001\\sweep\\sweep.json"
+      },
+      {
+        "repository_id": "mwaskom/seaborn",
+        "instance_id": "mwaskom__seaborn-3187",
+        "snapshot": "D:\\keel\\.keel\\swe-snapshots\\mwaskom--seaborn\\22cdfb0c93f8ec78492d87edb810f10cb7f57a31",
+        "status": "passed",
+        "measurements": [
+          {
+            "ranking": "code-aware",
+            "all_passed": true,
+            "summary": [
+              {
+                "mode": "t0",
+                "line_budget": 300,
+                "runs": 1,
+                "successful_runs": 1,
+                "eligible": true,
+                "exclusions": [],
+                "quality": {
+                  "line_recall": 0.0,
+                  "line_precision": 0.0,
+                  "line_f1": 0.0,
+                  "hit_file_rate": 0.0,
+                  "context_efficiency": 0.0
+                },
+                "cost": {
+                  "seconds": 0.00053,
+                  "tokens": 0,
+                  "model_calls": 0,
+                  "tool_calls": 1,
+                  "vector_queries": 0,
+                  "emitted_lines": 0
+                },
+                "seconds_stdev": 0.0
+              },
+              {
+                "mode": "t1",
+                "line_budget": 300,
+                "runs": 1,
+                "successful_runs": 1,
+                "eligible": true,
+                "exclusions": [],
+                "quality": {
+                  "line_recall": 0.07269303201506591,
+                  "line_precision": 0.6433333333333333,
+                  "line_f1": 0.13062605752961082,
+                  "hit_file_rate": 0.6666666666666666,
+                  "context_efficiency": 0.6433333333333333
+                },
+                "cost": {
+                  "seconds": 6.846731,
+                  "tokens": 0,
+                  "model_calls": 0,
+                  "tool_calls": 2,
+                  "vector_queries": 1,
+                  "emitted_lines": 300
+                },
+                "seconds_stdev": 0.0
+              },
+              {
+                "mode": "t2",
+                "line_budget": 300,
+                "runs": 1,
+                "successful_runs": 1,
+                "eligible": true,
+                "exclusions": [],
+                "quality": {
+                  "line_recall": 0.01431261770244821,
+                  "line_precision": 1.0,
+                  "line_f1": 0.028221314519123655,
+                  "hit_file_rate": 0.3333333333333333,
+                  "context_efficiency": 1.0
+                },
+                "cost": {
+                  "seconds": 23.60827,
+                  "tokens": 5534,
+                  "model_calls": 2,
+                  "tool_calls": 3,
+                  "vector_queries": 1,
+                  "emitted_lines": 38
+                },
+                "seconds_stdev": 0.0
+              },
+              {
+                "mode": "adaptive",
+                "line_budget": 300,
+                "runs": 1,
+                "successful_runs": 1,
+                "eligible": true,
+                "exclusions": [],
+                "quality": {
+                  "line_recall": 0.01431261770244821,
+                  "line_precision": 1.0,
+                  "line_f1": 0.028221314519123655,
+                  "hit_file_rate": 0.3333333333333333,
+                  "context_efficiency": 1.0
+                },
+                "cost": {
+                  "seconds": 24.430591,
+                  "tokens": 5584,
+                  "model_calls": 2,
+                  "tool_calls": 4,
+                  "vector_queries": 1,
+                  "emitted_lines": 38
+                },
+                "seconds_stdev": 0.0
+              }
+            ],
+            "sweep": "D:\\keel\\.keel\\swe-independent\\1bff32af396945b0937ef51469ba0a10\\instance-002\\sweep\\sweep.json"
+          }
+        ],
+        "summary": [
+          {
+            "mode": "t0",
+            "line_budget": 300,
+            "runs": 1,
+            "successful_runs": 1,
+            "eligible": true,
+            "exclusions": [],
+            "quality": {
+              "line_recall": 0.0,
+              "line_precision": 0.0,
+              "line_f1": 0.0,
+              "hit_file_rate": 0.0,
+              "context_efficiency": 0.0
+            },
+            "cost": {
+              "seconds": 0.00053,
+              "tokens": 0,
+              "model_calls": 0,
+              "tool_calls": 1,
+              "vector_queries": 0,
+              "emitted_lines": 0
+            },
+            "seconds_stdev": 0.0
+          },
+          {
+            "mode": "t1",
+            "line_budget": 300,
+            "runs": 1,
+            "successful_runs": 1,
+            "eligible": true,
+            "exclusions": [],
+            "quality": {
+              "line_recall": 0.07269303201506591,
+              "line_precision": 0.6433333333333333,
+              "line_f1": 0.13062605752961082,
+              "hit_file_rate": 0.6666666666666666,
+              "context_efficiency": 0.6433333333333333
+            },
+            "cost": {
+              "seconds": 6.846731,
+              "tokens": 0,
+              "model_calls": 0,
+              "tool_calls": 2,
+              "vector_queries": 1,
+              "emitted_lines": 300
+            },
+            "seconds_stdev": 0.0
+          },
+          {
+            "mode": "t2",
+            "line_budget": 300,
+            "runs": 1,
+            "successful_runs": 1,
+            "eligible": true,
+            "exclusions": [],
+            "quality": {
+              "line_recall": 0.01431261770244821,
+              "line_precision": 1.0,
+              "line_f1": 0.028221314519123655,
+              "hit_file_rate": 0.3333333333333333,
+              "context_efficiency": 1.0
+            },
+            "cost": {
+              "seconds": 23.60827,
+              "tokens": 5534,
+              "model_calls": 2,
+              "tool_calls": 3,
+              "vector_queries": 1,
+              "emitted_lines": 38
+            },
+            "seconds_stdev": 0.0
+          },
+          {
+            "mode": "adaptive",
+            "line_budget": 300,
+            "runs": 1,
+            "successful_runs": 1,
+            "eligible": true,
+            "exclusions": [],
+            "quality": {
+              "line_recall": 0.01431261770244821,
+              "line_precision": 1.0,
+              "line_f1": 0.028221314519123655,
+              "hit_file_rate": 0.3333333333333333,
+              "context_efficiency": 1.0
+            },
+            "cost": {
+              "seconds": 24.430591,
+              "tokens": 5584,
+              "model_calls": 2,
+              "tool_calls": 4,
+              "vector_queries": 1,
+              "emitted_lines": 38
+            },
+            "seconds_stdev": 0.0
+          }
+        ],
+        "sweep": "D:\\keel\\.keel\\swe-independent\\1bff32af396945b0937ef51469ba0a10\\instance-002\\sweep\\sweep.json"
+      }
+    ],
+    "source_results": {
+      ".keel\\swe-independent\\1bff32af396945b0937ef51469ba0a10\\result.json": {
+        "sha256": "586a78093ee2c2c95a6b33eed1fdc4bbacffa870133dc1bd1df50f8a4365dc23",
+        "all_passed": false
+      },
+      ".keel\\swe-public\\6024829cffad43528f4f17844ce9d0ae\\result.json": {
+        "sha256": "ac3db3aaa14d2ae94dcdf332b88a2f5e74227db63d981a084d429f5cf55ec1a3",
+        "all_passed": true
+      }
+    },
+    "limitations": "Explicit replacement of one HTTP-failed Requests attempt by a later completed retry. The original batch remains incomplete. Separate-run analysis, not a single fully passing batch."
+  }
+}

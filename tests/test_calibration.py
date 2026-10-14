@@ -75,6 +75,13 @@ class CalibrationTests(unittest.TestCase):
         self.assertEqual(result["development"]["repository_mean_upgrade_rate"], 0)
         self.assertEqual(result["development"]["query_mean_cost"]["tokens"], 0)
 
+    def test_different_symbol_caps_cannot_be_mixed_for_calibration(self):
+        report = json.loads(self.paths[0].read_text())
+        report["symbol_line_cap"] = 64
+        self.paths[0].write_text(json.dumps(report))
+        with self.assertRaisesRegex(ValueError, "different"):
+            load_sweeps(self.paths, 100)
+
     def test_deferred_pair_and_duplicate_instance_are_rejected(self):
         with self.assertRaisesRegex(ValueError, "Duplicate"):
             load_sweeps(self.paths + [self.paths[0]], 100)

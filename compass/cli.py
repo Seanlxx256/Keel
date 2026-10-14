@@ -64,6 +64,7 @@ def main(argv=None):
     swe.add_argument("--issue-map", type=Path)
     swe.add_argument("--commit-map", type=Path)
     swe.add_argument("--line-budget", type=int, default=300)
+    swe.add_argument("--symbol-line-cap", type=int, default=32)
     swe.add_argument("--mode", choices=["t0", "t1", "t2", "adaptive"], default="adaptive")
     swe.add_argument("--model")
     swe.add_argument("--model-url", default="http://localhost:11434")
@@ -78,6 +79,7 @@ def main(argv=None):
     sweep.add_argument("--output-dir", type=Path, required=True)
     sweep.add_argument("--modes", nargs="+", choices=["t0", "t1", "t2", "adaptive"], default=["t0", "t1", "adaptive"])
     sweep.add_argument("--line-budgets", nargs="+", type=int, default=[100, 300])
+    sweep.add_argument("--symbol-line-cap", type=int, default=32)
     sweep.add_argument("--repeats", type=int, default=3)
     sweep.add_argument("--seed", type=int, default=0)
     sweep.add_argument("--routing", type=Path)
@@ -151,7 +153,7 @@ def main(argv=None):
                 with RepositoryIndex(args.repo) as index:
                     result = run_swe_sweep(index, instance, args.output_dir, modes=args.modes, line_budgets=args.line_budgets,
                                            repeats=args.repeats, seed=args.seed, model=model, routing=routing, limits=limits,
-                                           repository_id=args.repository_id)
+                                           repository_id=args.repository_id, symbol_line_cap=args.symbol_line_cap)
                 print(json.dumps(result, ensure_ascii=False, indent=2))
                 return 0 if result["all_passed"] else 1
             if args.benchmark_format == "core-batch":
@@ -173,7 +175,8 @@ def main(argv=None):
                 instance = load_swe_instance(args.dataset, args.instance, args.repo, issue_map=issue_map, commit_map=commit_map)
                 model = OllamaModel(args.model, args.model_url) if args.model else None
                 with RepositoryIndex(args.repo) as index:
-                    result = evaluate_swe(index, instance, line_budget=args.line_budget, mode=args.mode, model=model)
+                    result = evaluate_swe(index, instance, line_budget=args.line_budget, mode=args.mode, model=model,
+                                          symbol_line_cap=args.symbol_line_cap)
             if args.output:
                 args.output.parent.mkdir(parents=True, exist_ok=True)
                 with args.output.open("x", encoding="utf-8") as output:

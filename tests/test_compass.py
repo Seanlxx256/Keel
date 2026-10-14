@@ -16,6 +16,18 @@ from compass.vectors import HashEmbedder, OllamaEmbedder, checked_vectors
 
 
 class ParserTests(unittest.TestCase):
+    def test_legacy_docstring_escape_preserves_source_and_positions(self):
+        raw = 'def connect():\n    """示例 DOMAIN\\username path."""\n    return other()\n'.encode()
+        parsed = PythonParser("python-ast").parse("api.py", raw)
+        symbol = parsed.symbols[0]
+        self.assertEqual(symbol.docstring, "示例 DOMAIN\\username path.")
+        self.assertEqual(symbol.code, raw.decode().rstrip("\n"))
+        self.assertEqual((symbol.start_line, symbol.end_line), (1, 3))
+        self.assertEqual(parsed.calls[0]["line"], 3)
+        with self.assertRaises(SyntaxError):
+            PythonParser("python-ast").parse("api.py", b'VALUE = """DOMAIN\\username"""\n')
+        with self.assertRaises(SyntaxError):
+            PythonParser("python-ast").parse("api.py", b'def broken(:\n    pass\n')
     def test_decorated_async_nested_and_unicode_ranges(self):
         raw = ('# 中文 header\n@decorate\nasync def outer(x: str):\n'
                '    """Handle Unicode identifiers."""\n    def inner():\n        return "你好"\n'
