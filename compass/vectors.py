@@ -56,6 +56,7 @@ class OllamaEmbedder:
         self.model, self.base_url, self.timeout = model, base_url.rstrip("/"), timeout
         self.spec = {"provider": "ollama", "model": model, "base_url": self.base_url}
         self.num_batch = num_batch
+        self.keep_alive = None
         if num_batch is not None:
             self.spec["num_batch"] = num_batch
 
@@ -63,6 +64,8 @@ class OllamaEmbedder:
         if not texts:
             return []
         payload = {"model": self.model, "input": texts, "truncate": False}
+        if self.keep_alive is not None:
+            payload["keep_alive"] = self.keep_alive
         if self.num_batch is not None:
             payload["options"] = {"num_batch": self.num_batch}
         request = urllib.request.Request(self.base_url + "/api/embed", data=json.dumps(payload).encode(),

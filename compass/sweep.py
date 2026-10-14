@@ -97,7 +97,10 @@ def run_swe_sweep(index, instance, output_dir, *, modes=("t0", "t1", "adaptive")
               "index_metadata": index.metadata, "routing": asdict(routing), "limits_per_run": asdict(limits),
               "implementation_sha256": {name: file_digest(Path(__file__).parent / name) for name in ("sweep.py", "benchmarks.py", "retrieval.py", "lexical.py")},
               "model_adapter_sha256": file_digest(Path(__file__).resolve().parent.parent / "keel/models.py"),
-              "model": {"class": type(model).__name__ if model else None, "name": getattr(model, "model", None)},
+              "model": {"class": type(model).__name__ if model else None, "name": getattr(model, "model", None),
+                        "num_ctx": getattr(model, "num_ctx", None),
+                        "keep_alive": 0 if getattr(model, "num_ctx", None) is not None else None},
+              "query_embedding_keep_alive": 0,
               "seed": seed, "repeats": repeats, "all_passed": all(row["eligible"] for row in rows),
               "summary": rows, "frontiers": frontiers, "public_benchmark_verified": False,
               "limitations": "One instance, reference region metrics, no official evaluator parity. Configuration order is shuffled per round. Each run has an independent budget; no global sweep budget. Repetitions share an index and uncontrolled OS/model caches. Timing excludes snapshot checks and index opening. Chat tokens exclude embeddings. Frontiers use observed means without statistical significance; deferred, failed and incomplete configurations are excluded."}

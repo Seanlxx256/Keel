@@ -107,10 +107,12 @@ def read_rows(path):
         raise ValueError("Only JSONL and Parquet public exports are supported")
 
 
-def select_instances(swe_rows, verified_rows, *, count=1, seed=42, repositories=None):
+def select_instances(swe_rows, verified_rows, *, count=1, seed=42, repositories=None, instances_per_repository=1):
     import hashlib
     if type(count) is not int or not 1 <= count <= 12 or type(seed) is not int:
         raise ValueError("Choose 1..12 repositories and an integer seed")
+    if type(instances_per_repository) is not int or not 1 <= instances_per_repository <= 20:
+        raise ValueError("Choose 1..20 instances per repository")
     requested = {canonical_repository_id(repo) for repo in repositories} if repositories else None
     verified = {}
     for row in verified_rows:
@@ -161,17 +163,19 @@ def select_instances(swe_rows, verified_rows, *, count=1, seed=42, repositories=
     def key(item):
         digest = hashlib.sha256(json.dumps([seed, item["repository_id"], item["record"]["instance_id"]]).encode()).digest()
         return priority.get(item["repository_id"], 99), item["repository_id"], digest
-    selected, groups = [], set()
+    groups = {}
     for item in sorted(eligible, key=key):
-        if item["repository_id"] not in groups:
-            selected.append(item)
-            groups.add(item["repository_id"])
-        if len(selected) == count:
-            break
-    if len(selected) != count:
-        raise ValueError(f"Requested {count} repositories, but only {len(selected)} eligible groups matched. Exclusions: {exclusions}")
+        groups.setdefault(item["repository_id"], []).append(item)
+    chosen = list(groups)[:count]
+    if len(chosen) != count:
+        raise ValueError(f"Requested {count} repositories, but only {len(chosen)} eligible groups matched. Exclusions: {exclusions}")
+    for repo in chosen:
+        if len(groups[repo]) < instances_per_repository:
+            raise ValueError(f"Repository {repo} has only {len(groups[repo])} eligible instances; requested {instances_per_repository}")
+    selected = [item for repo in chosen for item in groups[repo][:instances_per_repository]]
     return selected, {"input_instances": len(seen), "eligible_instances": len(eligible), "exclusions": exclusions,
-                      "selection": "One seeded instance per repository; predeclared small-repository preference; Verified-only intersection with at least one Python core file. No retrieval scores used."}
+                      "instances_per_repository": instances_per_repository,
+                      "selection": "Seeded instances per repository; predeclared small-repository preference; Verified-only intersection with at least one Python core file. No retrieval scores used."}
 
 
 def prepare_snapshot(repository_id, commit, directory, *, offline=False, timeout=300, source=None):

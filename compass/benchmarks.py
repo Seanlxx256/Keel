@@ -191,8 +191,12 @@ def check_snapshot(repo: Path, expected):
                              stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=10)
     if changes.returncode != 0:
         raise ValueError("SWE repository has tracked changes or could not be checked")
-    untracked = subprocess.run(prefix + ["ls-files", "--others", "-z"],
-                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10, check=True)
+    for attempt in range(2):
+        untracked = subprocess.run(prefix + ["ls-files", "--others", "-z"],
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+        if untracked.returncode != 128:
+            break
+    untracked.check_returncode()
     for raw in untracked.stdout.split(b"\x00"):
         if not raw:
             continue

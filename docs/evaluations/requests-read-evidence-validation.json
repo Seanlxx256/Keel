@@ -1,0 +1,152 @@
+{
+  "artifact_directory": ".keel\\swe-public\\96e21fe1ccfd407b976c43bb14b16d08",
+  "source_result_sha256": "1bdac75e3143e14072117569960476265d947e7d7beadbaa39f1b0125d9970d1",
+  "all_passed": true,
+  "instance_id": "psf__requests-1724",
+  "summary": [
+    {
+      "mode": "t0",
+      "line_budget": 100,
+      "runs": 1,
+      "successful_runs": 1,
+      "eligible": true,
+      "exclusions": [],
+      "quality": {
+        "line_recall": 0.0,
+        "line_precision": 0.0,
+        "line_f1": 0.0,
+        "hit_file_rate": 0.0,
+        "context_efficiency": 0.0
+      },
+      "cost": {
+        "seconds": 0.000164,
+        "tokens": 0,
+        "model_calls": 0,
+        "tool_calls": 1,
+        "vector_queries": 0,
+        "emitted_lines": 0
+      },
+      "seconds_stdev": 0.0
+    },
+    {
+      "mode": "t1",
+      "line_budget": 100,
+      "runs": 1,
+      "successful_runs": 1,
+      "eligible": true,
+      "exclusions": [],
+      "quality": {
+        "line_recall": 0.046209386281588445,
+        "line_precision": 0.64,
+        "line_f1": 0.08619528619528619,
+        "hit_file_rate": 0.5,
+        "context_efficiency": 1.0
+      },
+      "cost": {
+        "seconds": 6.403059,
+        "tokens": 0,
+        "model_calls": 0,
+        "tool_calls": 2,
+        "vector_queries": 1,
+        "emitted_lines": 100
+      },
+      "seconds_stdev": 0.0
+    },
+    {
+      "mode": "t2",
+      "line_budget": 100,
+      "runs": 1,
+      "successful_runs": 1,
+      "eligible": true,
+      "exclusions": [],
+      "quality": {
+        "line_recall": 0.023104693140794223,
+        "line_precision": 1.0,
+        "line_f1": 0.04516584333098094,
+        "hit_file_rate": 0.25,
+        "context_efficiency": 1.0
+      },
+      "cost": {
+        "seconds": 26.573351,
+        "tokens": 9113,
+        "model_calls": 2,
+        "tool_calls": 3,
+        "vector_queries": 1,
+        "emitted_lines": 32
+      },
+      "seconds_stdev": 0.0
+    },
+    {
+      "mode": "adaptive",
+      "line_budget": 100,
+      "runs": 1,
+      "successful_runs": 1,
+      "eligible": true,
+      "exclusions": [],
+      "quality": {
+        "line_recall": 0.023104693140794223,
+        "line_precision": 1.0,
+        "line_f1": 0.04516584333098094,
+        "hit_file_rate": 0.25,
+        "context_efficiency": 1.0
+      },
+      "cost": {
+        "seconds": 26.595725,
+        "tokens": 9163,
+        "model_calls": 2,
+        "tool_calls": 4,
+        "vector_queries": 1,
+        "emitted_lines": 32
+      },
+      "seconds_stdev": 0.0
+    }
+  ],
+  "model_replies": [
+    {
+      "mode": "t2",
+      "line_budget": 100,
+      "repeat": 0,
+      "event": "retrieval_model_reply",
+      "data": {
+        "step": 0,
+        "content": "{\"read\": \"f453167de7ef007c147aab8c\", \"offset\": 0}",
+        "tokens": 4382
+      }
+    },
+    {
+      "mode": "t2",
+      "line_budget": 100,
+      "repeat": 0,
+      "event": "retrieval_model_reply",
+      "data": {
+        "step": 1,
+        "content": "{\"final\": [\"f453167de7ef007c147aab8c\"]}",
+        "tokens": 4731
+      }
+    },
+    {
+      "mode": "adaptive",
+      "line_budget": 100,
+      "repeat": 0,
+      "event": "retrieval_model_reply",
+      "data": {
+        "step": 0,
+        "content": "{\"read\": \"f453167de7ef007c147aab8c\", \"offset\": 0}",
+        "tokens": 4406
+      }
+    },
+    {
+      "mode": "adaptive",
+      "line_budget": 100,
+      "repeat": 0,
+      "event": "retrieval_model_reply",
+      "data": {
+        "step": 1,
+        "content": "{\"final\": [\"f453167de7ef007c147aab8c\"]}",
+        "tokens": 4757
+      }
+    }
+  ],
+  "public_benchmark_verified": false,
+  "limitations": "One development instance, one repetition. Simultaneous changes to ranking and evidence policy; no causal attribution or generalization claim."
+}

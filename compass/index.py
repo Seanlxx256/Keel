@@ -47,12 +47,21 @@ def _fingerprint_entries(entries):
 
 
 def git_ref(root):
-    try:
-        result = subprocess.run(["git", "-c", f"safe.directory={root.as_posix()}", "-C", str(root), "rev-parse", "HEAD"],
-                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=5, shell=False)
-        return result.stdout.decode().strip() if result.returncode == 0 else None
-    except (OSError, subprocess.TimeoutExpired):
-        return None
+    for attempt in range(2):
+        try:
+            result = subprocess.run(["git", "-c", f"safe.directory={root.as_posix()}", "-C", str(root), "rev-parse", "HEAD"],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5, shell=False)
+            if result.returncode == 0:
+                return result.stdout.decode().strip()
+            if result.returncode != 128:
+                return None
+            if b"unknown revision" in result.stderr or b"does not have any commits" in result.stderr:
+                return None
+            if attempt == 1 and (root / ".git").exists():
+                raise ValueError("Cannot inspect Git HEAD: " + result.stderr.decode(errors="replace")[:500])
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    return None
 
 
 def _schema(db):
@@ -329,6 +338,8 @@ class RepositoryIndex:
         if not self.metadata["symbols"]:
             return self.envelope([], tier="vector", embedding=self.metadata["embedding"])
         embedder = embedder_from_spec(self.metadata["embedding"])
+        if hasattr(embedder, "keep_alive"):
+            embedder.keep_alive = 0
         if timeout is not None and hasattr(embedder, "timeout"):
             embedder.timeout = min(embedder.timeout, timeout)
         vector = embedder.embed([query])[0]

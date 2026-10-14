@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from compass.graph import link_files
-from compass.index import RepositoryIndex, build_index
+from compass.index import RepositoryIndex, build_index, git_ref
 from compass.parsing import PythonParser
 from compass.vectors import HashEmbedder, OllamaEmbedder, checked_vectors
 
@@ -100,6 +100,17 @@ class IndexTests(unittest.TestCase):
 
     def build(self, **kwargs):
         return build_index(self.root, parser="python-ast", **kwargs)
+
+    def test_git_head_retries_exit_128_but_does_not_accept_persistent_failure(self):
+        (self.root / ".git").mkdir()
+        failed = subprocess.CompletedProcess([], 128, b"", b"not enough memory for initialization")
+        valid = subprocess.CompletedProcess([], 0, b"a" * 40 + b"\n", b"")
+        with patch("compass.index.subprocess.run", side_effect=[failed, valid]) as process:
+            self.assertEqual(git_ref(self.root), "a" * 40)
+            self.assertEqual(process.call_count, 2)
+        with patch("compass.index.subprocess.run", return_value=failed):
+            with self.assertRaisesRegex(ValueError, "not enough memory"):
+                git_ref(self.root)
 
     def test_persistent_symbols_graph_and_readonly_database(self):
         stats = self.build()

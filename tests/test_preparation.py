@@ -49,6 +49,19 @@ class PreparationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "only 1"):
             select_instances(swe[1:], verified, count=2, repositories=["psf/requests"])
 
+    def test_multiple_instances_are_seeded_without_replacement_and_fail_if_short(self):
+        swe, verified = self.records()
+        swe.append({**swe[0], "instance_id": "flask-2"})
+        verified.append({**verified[0], "instance_id": "flask-2"})
+        selected, _ = select_instances(swe, verified, instances_per_repository=2)
+        again, _ = select_instances(swe[::-1], verified[::-1], instances_per_repository=2)
+        self.assertEqual(selected, again)
+        self.assertEqual({row["record"]["instance_id"] for row in selected}, {"flask-1", "flask-2"})
+        with self.assertRaisesRegex(ValueError, "requested 2"):
+            select_instances(swe, verified, count=2, instances_per_repository=2)
+        with self.assertRaises(ValueError):
+            select_instances(swe, verified, instances_per_repository=0)
+
     def test_invalid_instance_ids_and_duplicate_metadata_are_rejected(self):
         swe, verified = self.records()
         with self.assertRaisesRegex(ValueError, "unique"):
@@ -128,6 +141,24 @@ class SnapshotPreparationTests(unittest.TestCase):
             self.assertEqual(plan["instances"][0]["base_commit"], commit)
             result = json.loads((plans[0].parent / "result.json").read_text())
             self.assertEqual(result["instances"][0]["status"], "prepared")
+            more_swe = [{**swe[0], "instance_id": str(i)} for i in range(3)]
+            more_verified = [{**verified[0], "instance_id": str(i), "repo": name}
+                             for i, name in enumerate(("pallets/flask", "psf/requests", "mwaskom/seaborn"))]
+            with patch.object(runner, "__file__", str(root / "examples/run_swe_public.py")), \
+                 patch.object(runner.PublicData, "dataset", side_effect=[(more_swe, {}), (more_verified, {})]), \
+                 patch.object(runner, "prepare_snapshot", side_effect=[ValueError("fixture missing"), repo, repo]), \
+                 patch.object(runner, "OllamaModel", side_effect=AssertionError("No model calls allowed")), \
+                 contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(runner.main(["--prepare-only", "--repositories", "3"]), 1)
+            results = [json.loads(path.read_text()) for path in (root / ".keel/swe-public").glob("*/result.json")]
+            batch = next(row for row in results if len(row["instances"]) == 3)
+            self.assertEqual([row["status"] for row in batch["instances"]], ["failed", "prepared", "prepared"])
+            with patch.object(runner, "__file__", str(root / "examples/run_swe_public.py")), \
+                 patch.object(runner.PublicData, "dataset", side_effect=[(more_swe, {}), (more_verified, {})]), \
+                 patch.object(runner, "prepare_snapshot", side_effect=AssertionError("Plan cannot fetch")), \
+                 patch.object(runner, "OllamaModel", side_effect=AssertionError("Plan cannot call models")), \
+                 contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(runner.main(["--plan-only", "--repositories", "3"]), 0)
             self.assertFalse(result["public_benchmark_verified"])
 
     def test_exact_commit_checkout_and_dirty_snapshot_refusal(self):

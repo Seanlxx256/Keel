@@ -114,6 +114,48 @@ class RetrievalTests(unittest.TestCase):
         self.assertEqual(result["usage"]["tokens"], 60)
         self.assertTrue(any(event == "retrieval_model_reply" for event, _ in events))
 
+    def test_read_policy_rejects_early_and_unread_final_selections(self):
+        model = Scripted([{"final": [self.save_id]}, {"read": self.save_id},
+                          {"final": [self.submit_id]}, {"final": [self.save_id]}])
+        result = Retriever(self.index, model=model, routing=self.relaxed(evidence_policy="read")).retrieve(
+            "persist purchase", mode="t2")
+        self.assertEqual(result["routing"]["mode_status"], "completed")
+        self.assertEqual(result["usage"]["model_calls"], 4)
+        self.assertEqual([row["id"] for row in result["results"]], [self.save_id])
+        actions = [row["action"] for row in result["routing"]["trace"][1:]]
+        self.assertEqual(actions, ["invalid", "read", "invalid", "final"])
+        self.assertEqual(result["routing"]["trace"][2]["id"], self.save_id)
+        state = json.loads(model.calls[2][1]["content"])
+        self.assertEqual(state["query"], "persist purchase")
+        self.assertEqual(state["read_evidence"][0]["id"], self.save_id)
+        self.assertLessEqual(len(state["read_evidence"][0]["code"]), 1000)
+        self.assertEqual(len(model.calls[2]), 3)
+
+    def test_invalid_read_offset_does_not_verify_evidence(self):
+        model = Scripted([{"read": self.save_id, "offset": 999999}, {"final": [self.save_id]}])
+        result = Retriever(self.index, model=model, routing=self.relaxed(evidence_policy="read", max_steps=2)).retrieve(
+            "persist purchase", mode="t2")
+        self.assertEqual(result["routing"]["mode_status"], "step_limit")
+
+    def test_full_catalog_requires_read_instead_of_noop_expansion(self):
+        model = Scripted([{"expand": [self.save_id]}, {"read": self.save_id}, {"final": [self.save_id]}])
+        result = Retriever(self.index, model=model, routing=self.relaxed(evidence_policy="read", max_nodes=3)).retrieve(
+            "persist purchase", mode="t2")
+        self.assertEqual(result["routing"]["trace"][1]["action"], "invalid")
+        schema = json.loads(model.calls[0][-1]["content"])["action_schema"]
+        self.assertEqual([list(row["properties"]) for row in schema["oneOf"]], [["read", "offset"]])
+        self.assertEqual(result["routing"]["mode_status"], "completed")
+
+    def test_code_locations_promote_containing_symbols_without_changing_candidates(self):
+        rows = [{"id": "noise", "path": "a.py", "qualname": "f", "code": "pass", "start_line": 1,
+                 "end_line": 10, "score": .017},
+                {"id": "target", "path": "src/engine.py", "qualname": "g", "code": "pass", "start_line": 40,
+                 "end_line": 60, "score": .014}]
+        ranked = rank_code_evidence("Failure at engine.py:52", rows)
+        self.assertEqual(ranked[0]["id"], "target")
+        self.assertEqual({row["id"] for row in ranked}, {"noise", "target"})
+        self.assertEqual(rank_code_evidence("Failure at engine.py:99", rows)[0]["id"], "noise")
+
     def test_query_expansion_preserves_original_error_and_api_anchors(self):
         model = Scripted([{"query": "checkout"}, {"final": [self.save_id]}])
         events = []
@@ -121,6 +163,10 @@ class RetrievalTests(unittest.TestCase):
             "purchase save_order", mode="t2")
         queries = [data["query"] for event, data in events if event == "retrieval_gate"]
         self.assertEqual(queries[1], "purchase save_order\ncheckout")
+        self.assertEqual(sum('"action_schema"' in message["content"] for message in model.calls[1]), 1)
+        observations = [data["observation"] for event, data in events if event == "retrieval_observation"]
+        self.assertEqual(observations[0]["additional_terms"], "checkout")
+        self.assertNotIn("query", observations[0])
 
     def test_preview_exposes_every_visible_id_with_bounded_code(self):
         rows = [{"id": str(i), "path": "a.py", "qualname": "f", "signature": "def f():",
@@ -157,6 +203,7 @@ class RetrievalTests(unittest.TestCase):
         feedback = json.loads(model.calls[1][-2]["content"])
         self.assertIn(self.save_id, feedback["visible_ids"])
         self.assertEqual(len(schemas[-1]["oneOf"]), 1)
+        self.assertTrue(all('"action_schema"' not in message["content"] for message in model.calls[1]))
         self.assertIn(self.save_id, schemas[-1]["oneOf"][0]["properties"]["final"]["items"]["enum"])
 
     def test_model_and_tool_budget_exhaustion_stop_retrieval(self):

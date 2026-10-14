@@ -22,13 +22,16 @@ class Model(Protocol):
 
 
 class OllamaModel:
-    def __init__(self, model: str, base_url: str = "http://localhost:11434"):
+    def __init__(self, model: str, base_url: str = "http://localhost:11434", *, num_ctx=None):
         parsed = urlsplit(base_url)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
             raise ValueError("Model endpoint must be an HTTP(S) URL without embedded credentials")
         if not isinstance(model, str) or not model.strip():
             raise ValueError("A model name is required")
         self.model, self.url = model, base_url.rstrip("/") + "/api/chat"
+        if num_ctx is not None and (type(num_ctx) is not int or not 1024 <= num_ctx <= 131072):
+            raise ValueError("num_ctx must be an integer from 1024 to 131072")
+        self.num_ctx = num_ctx
 
     def complete(self, messages, *, timeout, max_output):
         return self._complete(messages, timeout=timeout, max_output=max_output, response_format="json")
@@ -37,9 +40,13 @@ class OllamaModel:
         return self._complete(messages, timeout=timeout, max_output=max_output, response_format=schema)
 
     def _complete(self, messages, *, timeout, max_output, response_format):
+        options = {"num_predict": max_output, "temperature": 0}
+        if self.num_ctx is not None:
+            options.update(num_ctx=self.num_ctx, num_batch=32)
         request = urllib.request.Request(self.url, data=json.dumps({
             "model": self.model, "messages": messages, "stream": False, "format": response_format,
-            "options": {"num_predict": max_output, "temperature": 0},
+            **({"keep_alive": 0} if self.num_ctx is not None else {}),
+            "options": options,
         }).encode(), headers={"Content-Type": "application/json"}, method="POST")
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:

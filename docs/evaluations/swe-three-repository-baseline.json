@@ -1,0 +1,723 @@
+{
+  "source_run": ".keel\\swe-public\\60684397b18344489bf89fcdadae590c",
+  "result_sha256": "a63a8f2235ab2dea514f95f3c8b5cdf35a88edc07296c3f6bdbba17dfbf149e3",
+  "all_passed": false,
+  "independent_instances": 3,
+  "attempted_runs": 72,
+  "completed_runs": 60,
+  "records": [
+    {
+      "repository": "pallets/flask",
+      "instance_id": "pallets__flask-5014",
+      "ranking": "rrf",
+      "mode": "t0",
+      "line_budget": 100,
+      "runs": 3,
+      "successful_runs": 3,
+      "eligible": true,
+      "exclusions": [],
+      "quality": {
+        "line_recall": 0.0,
+        "line_precision": 0.0,
+        "line_f1": 0.0,
+        "hit_file_rate": 0.0,
+        "context_efficiency": 0.0
+      },
+      "cost": {
+        "seconds": 0.001231,
+        "tokens": 0,
+        "model_calls": 0,
+        "tool_calls": 1,
+        "vector_queries": 0,
+        "emitted_lines": 0
+      },
+      "seconds_stdev": 0.0006065121598121508
+    },
+    {
+      "repository": "pallets/flask",
+      "instance_id": "pallets__flask-5014",
+      "ranking": "rrf",
+      "mode": "t1",
+      "line_budget": 100,
+      "runs": 3,
+      "successful_runs": 3,
+      "eligible": true,
+      "exclusions": [],
+      "quality": {
+        "line_recall": 0.0,
+        "line_precision": 0.0,
+        "line_f1": 0.0,
+        "hit_file_rate": 0.5,
+        "context_efficiency": 0.18
+      },
+      "cost": {
+        "seconds": 7.4384543333333335,
+        "tokens": 0,
+        "model_calls": 0,
+        "tool_calls": 2,
+        "vector_queries": 1,
+        "emitted_lines": 100
+      },
+      "seconds_stdev": 4.1274728836917065
+    },
+    {
+      "repository": "pallets/flask",
+      "instance_id": "pallets__flask-5014",
+      "ranking": "rrf",
+      "mode": "t2",
+      "line_budget": 100,
+      "runs": 3,
+      "successful_runs": 3,
+      "eligible": true,
+      "exclusions": [],
+      "quality": {
+        "line_recall": 0.0,
+        "line_precision": 0.0,
+        "line_f1": 0.0,
+        "hit_file_rate": 0.0,
+        "context_efficiency": 0.0
+      },
+      "cost": {
+        "seconds": 15.645235,
+        "tokens": 2076,
+        "model_calls": 1,
+        "tool_calls": 2,
+        "vector_queries": 1,
+        "emitted_lines": 32
+      },
+      "seconds_stdev": 3.3694951790931538
+    },
+    {
+      "repository": "pallets/flask",
+      "instance_id": "pallets__flask-5014",
+      "ranking": "rrf",
+      "mode": "adaptive",
+      "line_budget": 100,
+      "runs": 3,
+      "successful_runs": 3,
+      "eligible": true,
+      "exclusions": [],
+      "quality": {
+        "line_recall": 0.0,
+        "line_precision": 0.0,
+        "line_f1": 0.0,
+        "hit_file_rate": 0.0,
+        "context_efficiency": 0.0
+      },
+      "cost": {
+        "seconds": 13.565571333333333,
+        "tokens": 2076,
+        "model_calls": 1,
+        "tool_calls": 3,
+        "vector_queries": 1,
+        "emitted_lines": 32
+      },
+      "seconds_stdev": 3.630522305912653
+    },
+    {
+      "repository": "pallets/flask",
+      "instance_id": "pallets__flask-5014",
+      "ranking": "code-aware",
+      "mode": "t0",
+      "line_budget": 100,
+      "runs": 3,
+      "successful_runs": 3,
+      "eligible": true,
+      "exclusions": [],
+      "quality": {
+        "line_recall": 0.0,
+        "line_precision": 0.0,
+        "line_f1": 0.0,
+        "hit_file_rate": 0.0,
+        "context_efficiency": 0.0
+      },
+      "cost": {
+        "seconds": 0.0007926666666666667,
+        "tokens": 0,
+        "model_calls": 0,
+        "tool_calls": 1,
+        "vector_queries": 0,
+        "emitted_lines": 0
+      },
+      "seconds_stdev": 0.0006207014848808833
+    },
+    {
+      "repository": "pallets/flask",
+      "instance_id": "pallets__flask-5014",
+      "ranking": "code-aware",
+      "mode": "t1",
+      "line_budget": 100,
+      "runs": 3,
+      "successful_runs": 3,
+      "eligible": true,
+      "exclusions": [],
+      "quality": {
+        "line_recall": 0.03194888178913738,
+        "line_precision": 0.2,
+        "line_f1": 0.055096418732782364,
+        "hit_file_rate": 1.0,
+        "context_efficiency": 1.0
+      },
+      "cost": {
+        "seconds": 7.065435666666667,
+        "tokens": 0,
+        "model_calls": 0,
+        "tool_calls": 2,
+        "vector_queries": 1,
+        "emitted_lines": 100
+      },
+      "seconds_stdev": 3.77435259490397
+    },
+    {
+      "repository": "pallets/flask",
+      "instance_id": "pallets__flask-5014",
+      "ranking": "code-aware",
+      "mode": "t2",
+      "line_budget": 100,
+      "runs": 3,
+      "successful_runs": 3,
+      "eligible": true,
+      "exclusions": [],
+      "quality": {
+        "line_recall": 0.0,
+        "line_precision": 0.0,
+        "line_f1": 0.0,
+        "hit_file_rate": 0.5,
+        "context_efficiency": 1.0
+      },
+      "cost": {
+        "seconds": 17.399131,
+        "tokens": 1602,
+        "model_calls": 1,
+        "tool_calls": 2,
+        "vector_queries": 1,
+        "emitted_lines": 15
+      },
+      "seconds_stdev": 0.2220500719027129
+    },
+    {
+      "repository": "pallets/flask",
+      "instance_id": "pallets__flask-5014",
+      "ranking": "code-aware",
+      "mode": "adaptive",
+      "line_budget": 100,
+      "runs": 3,
+      "successful_runs": 3,
+      "eligible": true,
+      "exclusions": [],
+      "quality": {
+        "line_recall": 0.0,
+        "line_precision": 0.0,
+        "line_f1": 0.0,
+        "hit_file_rate": 0.5,
+        "context_efficiency": 1.0
+      },
+      "cost": {
+        "seconds": 13.661383333333333,
+        "tokens": 1602,
+        "model_calls": 1,
+        "tool_calls": 3,
+        "vector_queries": 1,
+        "emitted_lines": 15
+      },
+      "seconds_stdev": 4.282591575967795
+    },
+    {
+      "repository": "psf/requests",
+      "instance_id": "psf__requests-1724",
+      "ranking": "code-aware",
+      "mode": "t0",
+      "line_budget": 100,
+      "runs": 3,
+      "successful_runs": 3,
+      "eligible": true,
+      "exclusions": [],
+      "quality": {
+        "line_recall": 0.0,
+        "line_precision": 0.0,
+        "line_f1": 0.0,
+        "hit_file_rate": 0.0,
+        "context_efficiency": 0.0
+      },
+      "cost": {
+        "seconds": 0.0005323333333333333,
+        "tokens": 0,
+        "model_calls": 0,
+        "tool_calls": 1,
+        "vector_queries": 0,
+        "emitted_lines": 0
+      },
+      "seconds_stdev": 0.00015314154672502604
+    },
+    {
+      "repository": "psf/requests",
+      "instance_id": "psf__requests-1724",
+      "ranking": "code-aware",
+      "mode": "t1",
+      "line_budget": 100,
+      "runs": 3,
+      "successful_runs": 3,
+      "eligible": true,
+      "exclusions": [],
+      "quality": {
+        "line_recall": 0.0,
+        "line_precision": 0.0,
+        "line_f1": 0.0,
+        "hit_file_rate": 0.25,
+        "context_efficiency": 1.0
+      },
+      "cost": {
+        "seconds": 3.496557333333333,
+        "tokens": 0,
+        "model_calls": 0,
+        "tool_calls": 2,
+        "vector_queries": 1,
+        "emitted_lines": 100
+      },
+      "seconds_stdev": 0.06668085056696077
+    },
+    {
+      "repository": "psf/requests",
+      "instance_id": "psf__requests-1724",
+      "ranking": "code-aware",
+      "mode": "t2",
+      "line_budget": 100,
+      "runs": 3,
+      "successful_runs": 0,
+      "eligible": false,
+      "exclusions": [
+        "failed"
+      ]
+    },
+    {
+      "repository": "psf/requests",
+      "instance_id": "psf__requests-1724",
+      "ranking": "code-aware",
+      "mode": "adaptive",
+      "line_budget": 100,
+      "runs": 3,
+      "successful_runs": 0,
+      "eligible": false,
+      "exclusions": [
+        "failed"
+      ]
+    },
+    {
+      "repository": "psf/requests",
+      "instance_id": "psf__requests-1724",
+      "ranking": "rrf",
+      "mode": "t0",
+      "line_budget": 100,
+      "runs": 3,
+      "successful_runs": 3,
+      "eligible": true,
+      "exclusions": [],
+      "quality": {
+        "line_recall": 0.0,
+        "line_precision": 0.0,
+        "line_f1": 0.0,
+        "hit_file_rate": 0.0,
+        "context_efficiency": 0.0
+      },
+      "cost": {
+        "seconds": 0.00044866666666666666,
+        "tokens": 0,
+        "model_calls": 0,
+        "tool_calls": 1,
+        "vector_queries": 0,
+        "emitted_lines": 0
+      },
+      "seconds_stdev": 0.0001073421321445281
+    },
+    {
+      "repository": "psf/requests",
+      "instance_id": "psf__requests-1724",
+      "ranking": "rrf",
+      "mode": "t1",
+      "line_budget": 100,
+      "runs": 3,
+      "successful_runs": 3,
+      "eligible": true,
+      "exclusions": [],
+      "quality": {
+        "line_recall": 0.0,
+        "line_precision": 0.0,
+        "line_f1": 0.0,
+        "hit_file_rate": 0.25,
+        "context_efficiency": 0.97
+      },
+      "cost": {
+        "seconds": 3.443805333333333,
+        "tokens": 0,
+        "model_calls": 0,
+        "tool_calls": 2,
+        "vector_queries": 1,
+        "emitted_lines": 100
+      },
+      "seconds_stdev": 0.1742712119494593
+    },
+    {
+      "repository": "psf/requests",
+      "instance_id": "psf__requests-1724",
+      "ranking": "rrf",
+      "mode": "t2",
+      "line_budget": 100,
+      "runs": 3,
+      "successful_runs": 0,
+      "eligible": false,
+      "exclusions": [
+        "failed"
+      ]
+    },
+    {
+      "repository": "psf/requests",
+      "instance_id": "psf__requests-1724",
+      "ranking": "rrf",
+      "mode": "adaptive",
+      "line_budget": 100,
+      "runs": 3,
+      "successful_runs": 0,
+      "eligible": false,
+      "exclusions": [
+        "failed"
+      ]
+    },
+    {
+      "repository": "mwaskom/seaborn",
+      "instance_id": "mwaskom__seaborn-3069",
+      "ranking": "rrf",
+      "mode": "t0",
+      "line_budget": 100,
+      "runs": 3,
+      "successful_runs": 3,
+      "eligible": true,
+      "exclusions": [],
+      "quality": {
+        "line_recall": 0.0,
+        "line_precision": 0.0,
+        "line_f1": 0.0,
+        "hit_file_rate": 0.0,
+        "context_efficiency": 0.0
+      },
+      "cost": {
+        "seconds": 0.00016,
+        "tokens": 0,
+        "model_calls": 0,
+        "tool_calls": 1,
+        "vector_queries": 0,
+        "emitted_lines": 0
+      },
+      "seconds_stdev": 8.888194417315594e-06
+    },
+    {
+      "repository": "mwaskom/seaborn",
+      "instance_id": "mwaskom__seaborn-3069",
+      "ranking": "rrf",
+      "mode": "t1",
+      "line_budget": 100,
+      "runs": 3,
+      "successful_runs": 3,
+      "eligible": true,
+      "exclusions": [],
+      "quality": {
+        "line_recall": 0.016368481157213552,
+        "line_precision": 0.43,
+        "line_f1": 0.031536486982031535,
+        "hit_file_rate": 0.6666666666666666,
+        "context_efficiency": 1.0
+      },
+      "cost": {
+        "seconds": 4.229706333333334,
+        "tokens": 0,
+        "model_calls": 0,
+        "tool_calls": 2,
+        "vector_queries": 1,
+        "emitted_lines": 100
+      },
+      "seconds_stdev": 1.0566390964138765
+    },
+    {
+      "repository": "mwaskom/seaborn",
+      "instance_id": "mwaskom__seaborn-3069",
+      "ranking": "rrf",
+      "mode": "t2",
+      "line_budget": 100,
+      "runs": 3,
+      "successful_runs": 3,
+      "eligible": true,
+      "exclusions": [],
+      "quality": {
+        "line_recall": 0.016368481157213552,
+        "line_precision": 0.43,
+        "line_f1": 0.031536486982031535,
+        "hit_file_rate": 0.6666666666666666,
+        "context_efficiency": 1.0
+      },
+      "cost": {
+        "seconds": 9.791694333333332,
+        "tokens": 2671,
+        "model_calls": 1,
+        "tool_calls": 2,
+        "vector_queries": 1,
+        "emitted_lines": 100
+      },
+      "seconds_stdev": 3.153776365074945
+    },
+    {
+      "repository": "mwaskom/seaborn",
+      "instance_id": "mwaskom__seaborn-3069",
+      "ranking": "rrf",
+      "mode": "adaptive",
+      "line_budget": 100,
+      "runs": 3,
+      "successful_runs": 3,
+      "eligible": true,
+      "exclusions": [],
+      "quality": {
+        "line_recall": 0.016368481157213552,
+        "line_precision": 0.43,
+        "line_f1": 0.031536486982031535,
+        "hit_file_rate": 0.6666666666666666,
+        "context_efficiency": 1.0
+      },
+      "cost": {
+        "seconds": 7.950928666666667,
+        "tokens": 2671,
+        "model_calls": 1,
+        "tool_calls": 3,
+        "vector_queries": 1,
+        "emitted_lines": 100
+      },
+      "seconds_stdev": 0.14437195288674776
+    },
+    {
+      "repository": "mwaskom/seaborn",
+      "instance_id": "mwaskom__seaborn-3069",
+      "ranking": "code-aware",
+      "mode": "t0",
+      "line_budget": 100,
+      "runs": 3,
+      "successful_runs": 3,
+      "eligible": true,
+      "exclusions": [],
+      "quality": {
+        "line_recall": 0.0,
+        "line_precision": 0.0,
+        "line_f1": 0.0,
+        "hit_file_rate": 0.0,
+        "context_efficiency": 0.0
+      },
+      "cost": {
+        "seconds": 0.00015866666666666666,
+        "tokens": 0,
+        "model_calls": 0,
+        "tool_calls": 1,
+        "vector_queries": 0,
+        "emitted_lines": 0
+      },
+      "seconds_stdev": 2.0231987873991363e-05
+    },
+    {
+      "repository": "mwaskom/seaborn",
+      "instance_id": "mwaskom__seaborn-3069",
+      "ranking": "code-aware",
+      "mode": "t1",
+      "line_budget": 100,
+      "runs": 3,
+      "successful_runs": 3,
+      "eligible": true,
+      "exclusions": [],
+      "quality": {
+        "line_recall": 0.01674914350970689,
+        "line_precision": 0.44,
+        "line_f1": 0.032269893656032264,
+        "hit_file_rate": 0.6666666666666666,
+        "context_efficiency": 1.0
+      },
+      "cost": {
+        "seconds": 3.6072543333333336,
+        "tokens": 0,
+        "model_calls": 0,
+        "tool_calls": 2,
+        "vector_queries": 1,
+        "emitted_lines": 100
+      },
+      "seconds_stdev": 0.0650940092046368
+    },
+    {
+      "repository": "mwaskom/seaborn",
+      "instance_id": "mwaskom__seaborn-3069",
+      "ranking": "code-aware",
+      "mode": "t2",
+      "line_budget": 100,
+      "runs": 3,
+      "successful_runs": 3,
+      "eligible": true,
+      "exclusions": [],
+      "quality": {
+        "line_recall": 0.01674914350970689,
+        "line_precision": 0.44,
+        "line_f1": 0.032269893656032264,
+        "hit_file_rate": 0.6666666666666666,
+        "context_efficiency": 1.0
+      },
+      "cost": {
+        "seconds": 8.203175333333334,
+        "tokens": 2514,
+        "model_calls": 1,
+        "tool_calls": 2,
+        "vector_queries": 1,
+        "emitted_lines": 100
+      },
+      "seconds_stdev": 0.5861029674300695
+    },
+    {
+      "repository": "mwaskom/seaborn",
+      "instance_id": "mwaskom__seaborn-3069",
+      "ranking": "code-aware",
+      "mode": "adaptive",
+      "line_budget": 100,
+      "runs": 3,
+      "successful_runs": 3,
+      "eligible": true,
+      "exclusions": [],
+      "quality": {
+        "line_recall": 0.01674914350970689,
+        "line_precision": 0.44,
+        "line_f1": 0.032269893656032264,
+        "hit_file_rate": 0.6666666666666666,
+        "context_efficiency": 1.0
+      },
+      "cost": {
+        "seconds": 7.947511333333333,
+        "tokens": 2514,
+        "model_calls": 1,
+        "tool_calls": 3,
+        "vector_queries": 1,
+        "emitted_lines": 100
+      },
+      "seconds_stdev": 0.039733237601953804
+    }
+  ],
+  "comparison": {
+    "modes": {
+      "t0": {
+        "paired_instances": 3,
+        "excluded_instances": [],
+        "instance_mean": {
+          "rrf": {
+            "line_recall": 0.0,
+            "line_precision": 0.0,
+            "line_f1": 0.0,
+            "hit_file_rate": 0.0,
+            "context_efficiency": 0.0
+          },
+          "code-aware": {
+            "line_recall": 0.0,
+            "line_precision": 0.0,
+            "line_f1": 0.0,
+            "hit_file_rate": 0.0,
+            "context_efficiency": 0.0
+          }
+        },
+        "code_aware_minus_rrf": {
+          "line_recall": 0.0,
+          "line_precision": 0.0,
+          "line_f1": 0.0,
+          "hit_file_rate": 0.0,
+          "context_efficiency": 0.0
+        }
+      },
+      "t1": {
+        "paired_instances": 3,
+        "excluded_instances": [],
+        "instance_mean": {
+          "rrf": {
+            "line_recall": 0.00545616038573785,
+            "line_precision": 0.14333333333333334,
+            "line_f1": 0.010512162327343845,
+            "hit_file_rate": 0.4722222222222222,
+            "context_efficiency": 0.7166666666666667
+          },
+          "code-aware": {
+            "line_recall": 0.016232675099614756,
+            "line_precision": 0.21333333333333335,
+            "line_f1": 0.029122104129604875,
+            "hit_file_rate": 0.6388888888888888,
+            "context_efficiency": 1.0
+          }
+        },
+        "code_aware_minus_rrf": {
+          "line_recall": 0.010776514713876906,
+          "line_precision": 0.07,
+          "line_f1": 0.01860994180226103,
+          "hit_file_rate": 0.16666666666666663,
+          "context_efficiency": 0.2833333333333333
+        }
+      },
+      "t2": {
+        "paired_instances": 2,
+        "excluded_instances": [
+          "psf__requests-1724"
+        ],
+        "instance_mean": {
+          "rrf": {
+            "line_recall": 0.008184240578606776,
+            "line_precision": 0.215,
+            "line_f1": 0.015768243491015767,
+            "hit_file_rate": 0.3333333333333333,
+            "context_efficiency": 0.5
+          },
+          "code-aware": {
+            "line_recall": 0.008374571754853444,
+            "line_precision": 0.22,
+            "line_f1": 0.016134946828016132,
+            "hit_file_rate": 0.5833333333333333,
+            "context_efficiency": 1.0
+          }
+        },
+        "code_aware_minus_rrf": {
+          "line_recall": 0.00019033117624666848,
+          "line_precision": 0.0050000000000000044,
+          "line_f1": 0.0003667033370003646,
+          "hit_file_rate": 0.24999999999999994,
+          "context_efficiency": 0.5
+        }
+      },
+      "adaptive": {
+        "paired_instances": 2,
+        "excluded_instances": [
+          "psf__requests-1724"
+        ],
+        "instance_mean": {
+          "rrf": {
+            "line_recall": 0.008184240578606776,
+            "line_precision": 0.215,
+            "line_f1": 0.015768243491015767,
+            "hit_file_rate": 0.3333333333333333,
+            "context_efficiency": 0.5
+          },
+          "code-aware": {
+            "line_recall": 0.008374571754853444,
+            "line_precision": 0.22,
+            "line_f1": 0.016134946828016132,
+            "hit_file_rate": 0.5833333333333333,
+            "context_efficiency": 1.0
+          }
+        },
+        "code_aware_minus_rrf": {
+          "line_recall": 0.00019033117624666848,
+          "line_precision": 0.0050000000000000044,
+          "line_f1": 0.0003667033370003646,
+          "hit_file_rate": 0.24999999999999994,
+          "context_efficiency": 0.5
+        }
+      }
+    },
+    "planned_instances": 3,
+    "public_benchmark_verified": false,
+    "limitations": "Paired completed configurations only; means weight instances equally, not repositories. Repetitions are not independent tasks. No significance or official evaluator claims."
+  },
+  "public_benchmark_verified": false,
+  "limitations": "Three development instances; repeated runs do not add task coverage. Failed Requests model modes excluded from paired means."
+}

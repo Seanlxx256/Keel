@@ -122,8 +122,11 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(reply.tokens, 15)
         schema = {"type": "object", "properties": {"final": {"type": "array"}}, "required": ["final"]}
         with patch("keel.models.urllib.request.urlopen", return_value=Response()) as request:
-            OllamaModel("local-model").complete_json([], schema=schema, timeout=2, max_output=100)
+            OllamaModel("local-model", num_ctx=8192).complete_json([], schema=schema, timeout=2, max_output=100)
         self.assertEqual(json.loads(request.call_args.args[0].data)["format"], schema)
+        self.assertEqual(json.loads(request.call_args.args[0].data)["options"]["num_ctx"], 8192)
+        self.assertEqual(json.loads(request.call_args.args[0].data)["options"]["num_batch"], 32)
+        self.assertEqual(json.loads(request.call_args.args[0].data)["keep_alive"], 0)
 
     def test_transport_error_is_reported_without_credentials(self):
         from urllib.error import URLError
