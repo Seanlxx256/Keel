@@ -423,3 +423,32 @@ This is offline outcome replay, not a new adaptive run, a calibrated probability
 
 
 Local GGUF imports named `keel-embed` and `keel-chat` have passed a real semantic-index/T2 integration smoke check; see [the local model integration note](docs/evaluations/local-model-integration.md). This synthetic check does not establish public-data cascade quality or calibrated routing.
+
+
+## Prepare the first real SWE cascade experiment
+
+On Windows, with Git, curl, tree-sitter, PyArrow, and the imported Ollama models available:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\examples\run_swe_public.ps1
+```
+
+The default prepares **one instance from one repository**, builds a semantic index using `keel-embed`, and evaluates T0/T1/T2/adaptive with `keel-chat`, a 100-line context budget, and one repetition. It is a hardware/integration first pass. It does not provide enough repository groups for calibration. Use `-Repositories 3 -LineBudget 300 -Repeats 3` only after this first pass succeeds. `-PrepareOnly` skips model calls and indexing; `-Offline` requires both downloaded data and verified Git snapshots to exist. The active environment's Python is used, or specify `-PythonCommand` explicitly.
+
+Data comes from the [released SWE-Explore dataset](https://huggingface.co/datasets/SWE-Explore-Bench/SWE-Explore-Bench) intersected by instance ID with [SWE-bench Verified](https://huggingface.co/datasets/princeton-nlp/SWE-bench_Verified). The upstream [commit-map utility](https://github.com/Qiushao-E/SWE-Explore-Bench/blob/main/build_commit_map.py) also uses Verified as one source of base-commit metadata. Our first preparation path intentionally excludes unmatched/rebench instances. It supplements missing issue text and base commits from Verified, rejects conflicting supplied values, and preserves all core/optional labels, including non-Python files.
+
+On the first download, Hub metadata resolves each dataset to a full commit SHA. Subsequent data downloads use that immutable revision. Metadata and file receipts are cached with local hashes; these are integrity checks, not independent origin authentication. Standard JSONL or Parquet split files are discovered automatically without executing remote dataset-loader code. Ambiguous layouts fail with file names and can be resolved using Python runner options `--swe-files` and `--verified-files`.
+
+Eligibility and selection are explicit in `plan.json`: Verified intersection, available labels with at least one Python core file, issue text within the current 8,000-character query limit, one seeded instance per repository. A predeclared preference for small repositories (Flask, Requests, Seaborn, Pytest, Xarray) makes the first local experiment manageable. No retrieval scores influence selection. The plan is written before checkout, model calls, and quality measurement; this convenience sample is not representative of the full benchmark.
+
+Snapshots are shallow-fetched from canonical GitHub repositories at the exact labeled commit. Existing snapshots must match HEAD and pass clean-input checks. Interrupted managed staging directories can retry a fetch; unrelated staging paths are not overwritten. Checkout preserves LF source content. No target-repository test suite, package installation, or source code is executed. The first semantic index uses exact SQLite vector search to avoid native-storage variables; real LanceDB storage has a separate integration check.
+
+Artifacts live under `.keel/swe-public/<run_id>/`: source/selection plan, model inventory when evaluating, extracted enriched instance JSONL, heartbeat progress, per-instance sweeps, and final results or `failure.json`. Caches are in `.keel/datasets/swe/`; snapshots are in `.keel/swe-snapshots/`. An incomplete/deferred sweep exits nonzero while retaining evidence. Each retrieval run has an independent limit of 300 seconds, 30,000 tokens, four model calls, and 100 tool calls. Index construction and the overall preparation process have no aggregate budget. Model names/digests should be frozen across subsequent experiments.
+
+Python entry point (also exposes explicit repository allowlists and custom model names/endpoints):
+
+```powershell
+python -u examples/run_swe_public.py --repositories 1 --repository-id pallets/flask --embedding-model keel-embed --chat-model keel-chat
+```
+
+Local tests simulate network transfer and exercise real Git checkout/identity/cleanliness checks. They do not establish that the live Hub export or GitHub transport is reachable. Public-data cascade scores remain unverified until an actual preparation/evaluation run succeeds.
