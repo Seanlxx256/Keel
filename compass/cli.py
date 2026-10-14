@@ -58,6 +58,24 @@ def main(argv=None):
     swe.add_argument("--model")
     swe.add_argument("--model-url", default="http://localhost:11434")
     swe.add_argument("--output", type=Path)
+    sweep = formats.add_parser("swe-sweep", help="Compare cascade modes and line budgets on one clean SWE snapshot")
+    sweep.add_argument("--dataset", type=Path, required=True)
+    sweep.add_argument("--instance", required=True)
+    sweep.add_argument("--repo", type=Path, required=True)
+    sweep.add_argument("--issue-map", type=Path)
+    sweep.add_argument("--commit-map", type=Path)
+    sweep.add_argument("--output-dir", type=Path, required=True)
+    sweep.add_argument("--modes", nargs="+", choices=["t0", "t1", "t2", "adaptive"], default=["t0", "t1", "adaptive"])
+    sweep.add_argument("--line-budgets", nargs="+", type=int, default=[100, 300])
+    sweep.add_argument("--repeats", type=int, default=3)
+    sweep.add_argument("--seed", type=int, default=0)
+    sweep.add_argument("--routing", type=Path)
+    sweep.add_argument("--model")
+    sweep.add_argument("--model-url", default="http://localhost:11434")
+    sweep.add_argument("--max-tokens", type=int, default=20000)
+    sweep.add_argument("--max-model-calls", type=int, default=8)
+    sweep.add_argument("--max-tool-calls", type=int, default=100)
+    sweep.add_argument("--max-wallclock", type=float, default=120)
     for name in ("symbol", "context", "search", "status"):
         command = sub.add_parser(name)
         command.add_argument("--repo", type=Path, required=True)
@@ -103,6 +121,21 @@ def main(argv=None):
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 1 if any(check["status"] == "failed" for check in result["checks"]) or (args.require_all and not result["all_passed"]) else 0
         elif args.command == "benchmark":
+            if args.benchmark_format == "swe-sweep":
+                from .benchmarks import load_swe_instance
+                from .sweep import run_swe_sweep
+                issue_map = json.loads(args.issue_map.read_text(encoding="utf-8")) if args.issue_map else None
+                commit_map = json.loads(args.commit_map.read_text(encoding="utf-8")) if args.commit_map else None
+                instance = load_swe_instance(args.dataset, args.instance, args.repo, issue_map=issue_map, commit_map=commit_map)
+                model = OllamaModel(args.model, args.model_url) if args.model else None
+                routing = routing_from_dict(json.loads(args.routing.read_text(encoding="utf-8")) if args.routing else None)
+                limits = Limits(max_tokens=args.max_tokens, max_model_calls=args.max_model_calls,
+                                max_tool_calls=args.max_tool_calls, max_wallclock=args.max_wallclock)
+                with RepositoryIndex(args.repo) as index:
+                    result = run_swe_sweep(index, instance, args.output_dir, modes=args.modes, line_budgets=args.line_budgets,
+                                           repeats=args.repeats, seed=args.seed, model=model, routing=routing, limits=limits)
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+                return 0 if result["all_passed"] else 1
             if args.benchmark_format == "core-batch":
                 from .experiments import run_core_batch
                 result = run_core_batch(args.manifest, args.output_dir, repeats=args.repeats,

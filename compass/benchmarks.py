@@ -314,4 +314,5 @@ def evaluate_swe(index, instance, *, line_budget=300, mode="adaptive", model=Non
             "metrics": region_metrics(predictions, instance["core_regions"], instance["optional_regions"], instance["core_files"]),
             "unindexed_gold_files": sorted(set(instance["core_files"]) - indexed),
             "tier": result["tier"], "routing": result["routing"], "usage": result["usage"],
+            "complete": result["complete"], "elapsed_seconds": result["elapsed_seconds"],
             "public_benchmark_verified": False, "limitations": "Reference metric subset; official evaluator parity is not verified; Python-only index"}

@@ -152,6 +152,8 @@ Exit codes: `0` for a passed run, `1` for a recorded failed run, and `2` for inv
 
 No benchmark improvements or production reliability claims are reported yet.
 
+The first public-data BM25 reference run is recorded in [the Flask evaluation note](docs/evaluations/core-flask-baseline.md): one query over 1,000 documents, with zero NDCG@10 and Recall@100. A full-ranking diagnostic placed the positive document at rank 225. This small selected export is not a full-cascade or official benchmark result.
+
 ## Compass index prototype (W1–2)
 
 Compass is a separate package in this repository. The current milestone indexes Python functions, async functions, classes, and methods. Each chunk includes its original code, signature, docstring, qualified name, parent symbol, and line range. Retrieval text contains the path, qualified name, signature, and docstring; raw code is kept separately for display. Generated responsibility descriptions are not implemented yet.
@@ -364,3 +366,22 @@ Omit `--max-queries` to evaluate every judged query. Sampling is stable under JS
 Outputs include `batch.json`, `datasets.csv`, and one canonical evaluation JSON per dataset/repetition. Reports retain selected query IDs, declared revisions, input/implementation/manifest hashes, timing mean and standard deviation, query-weighted means, repository means, and separate Level-2/Level-3 aggregates. Combined means describe only the manifest's selected exports. Failed datasets are visible and excluded from means; any failure makes the batch exit 1. Existing output directories are rejected.
 
 For input pinning, add a `sha256` object to each dataset entry containing all consumed input names and their lowercase SHA-256 values (`corpus.jsonl`, `queries.jsonl`, and `qrels.jsonl` or `qrels/test.tsv`). Partial pins and mismatches fail. Files are checked for changes during loading and after every repetition. Hashes establish local integrity, not trusted dataset provenance. This remains a BM25 reference workflow; routing calibration and full-cascade public evaluation are not performed by this command.
+
+
+## SWE cascade and context-budget sweeps
+
+Compare the actual Compass modes on one explicit clean SWE-Explore snapshot:
+
+```powershell
+python -m compass benchmark swe-sweep --dataset D:/datasets/swe.jsonl --instance INSTANCE_ID --repo D:/snapshots/project --issue-map D:/datasets/issues.json --commit-map D:/datasets/commits.json --output-dir .keel/swe-sweep-001 --modes t0 t1 t2 adaptive --line-budgets 100 300 600 --repeats 3 --seed 42 --model YOUR_OLLAMA_CHAT_MODEL
+```
+
+Build the snapshot index first, as shown above. Store outputs under `.keel` or outside the snapshot so reports do not become untracked source inputs. Omit maps when the record includes issue text and the base commit. `--routing` accepts the same routing JSON as `retrieve`; the sweep does not fit thresholds against its evaluation labels.
+
+Every mode/context-budget configuration receives its own fresh tool/model/token/time budget. Configure these with `--max-tool-calls`, `--max-model-calls`, `--max-tokens`, and `--max-wallclock`; limits apply per run, not to the entire sweep. Configuration order is shuffled reproducibly within each round. Repetitions reuse the same index and have uncontrolled model/OS caches. They do not establish statistical significance or independent task coverage.
+
+Outputs are `runs.jsonl` (incremental evidence), `sweep.json`, `comparison.csv`, and `report.md`. Metrics keep SWE's region granularity: line recall/precision/F1, core-file hit rate, and context efficiency. Costs include retrieval seconds, emitted lines, chat tokens, tool/model calls, and vector queries. JSON includes separate nondominated configurations for every quality/cost pair, routing settings, index identity, implementation hashes, model name, and limits.
+
+Deferred upgrades (including missing chat models), step-limited exploration, incomplete indexes, and failed runs make their entire configuration ineligible for frontiers. Errors retain consumed budget evidence and allow other configurations to run. Any ineligible configuration makes the CLI exit 1; existing output directories are rejected. Without `--model`, T0/T1 can be measured, while requested T2 or adaptive upgrades are recorded as deferred. Failed/deferred run records may still contain partial retrieval evidence, but it is excluded from eligible quality/cost means.
+
+This command compares the real cascade implementation with fixed context budgets. It is a single-instance reference experiment, not a full public-data evaluation, an official SWE-Explore score, or routing calibration. Scripted-model tests validate execution and accounting only; they do not establish live-model retrieval quality.
