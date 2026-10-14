@@ -418,7 +418,23 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\examples\run_swe_public.ps
 
 This selects one seeded eligible instance from each of Flask, Requests and Seaborn, then runs both policies across all four modes (72 retrieval runs). `-PlanOnly -Offline` writes the sample and reports cached snapshot existence without Git/model calls or claiming verified snapshots. `-InstancesPerRepository N` selects N distinct seeded instances in each selected repository; insufficient groups fail before evaluation, without silently shrinking the sample. Selection uses metadata and eligibility checks, never retrieval outcomes. Cached compatible fresh semantic indexes are reused; mismatched settings rebuild the index.
 
-Paired runs alternate policy order across instances and retain separate sweep directories. `comparison.json` reports equally weighted instance means and code-aware-minus-RRF quality deltas per mode, using only instances where both policy configurations completed all repetitions. Excluded IDs and denominators remain explicit; repetitions do not increase task coverage. One instance failure is persisted to `instances.jsonl` and does not prevent later instances from running. Any failed/incomplete instance makes the runner exit 1. These are exploratory reference comparisons; shuffled runs and alternating policy order do not control OS/model caches or establish statistical significance.
+Paired runs alternate policy order across instances and retain separate sweep directories. `comparison.json` and `comparison.md` report equally weighted instance quality/cost means and code-aware-minus-RRF quality deltas per mode, using only instances where both policy configurations completed all repetitions. A separate escalation section compares T2/adaptive against T1 on exactly the same completed instances within each ranking policy, reporting quality and cost deltas. Its denominator can differ from the ranking comparison; excluded IDs remain explicit. Repetitions do not increase task coverage. One instance failure is persisted to `instances.jsonl` and does not prevent later instances from running. Any failed/incomplete instance makes the runner exit 1. These are exploratory reference comparisons; shuffled runs and alternating policy order do not control OS/model caches or establish statistical significance.
+
+Saved results can be summarized without model calls or retrieval:
+
+```powershell
+python -m compass.comparison --result .keel/swe-public/RUN_ID/result.json --output-dir .keel/swe-public/RUN_ID/analysis
+```
+
+Replace `RUN_ID` with the printed artifact identifier. The export preserves a source-result SHA-256 and the original batch completion flag, reports per-metric improved/tied/regressed task counts, and refuses to overwrite an existing output directory. Its Markdown report includes recall, precision, file hit rate and costs; deltas are descriptive, not a calibrated upgrade rule.
+
+Context budgets can also be replayed against saved candidate ranges without new model or embedding calls:
+
+```powershell
+python -m compass.budget_ablation --result .keel/swe-public/RUN_ID/result.json --output-dir .keel/swe-public/RUN_ID/budget-analysis --line-budgets 100 300 500 --symbol-line-caps 32 64
+```
+
+This factorial replay fixes retrieval rankings and model selections, varying only packing. Source configurations must have completed all repetitions; exclusions and input hashes remain explicit. It reports emitted-line utilization and a line-count-only recall ceiling, plus the fraction of that ceiling attained. That ceiling can be unattainable with available symbol prefixes. Repetitions are averaged within tasks before task means. Source sweeps must contain a single original line budget to avoid counting configurations as extra tasks. Replay does not measure new retrieval latency, model behavior with larger prompts, or downstream coding performance. Existing output directories are rejected.
 
 Deferred upgrades (including missing chat models), step-limited exploration, incomplete indexes, and failed runs make their entire configuration ineligible for frontiers. Errors retain consumed budget evidence and allow other configurations to run. Any ineligible configuration makes the CLI exit 1; existing output directories are rejected. Without `--model`, T0/T1 can be measured, while requested T2 or adaptive upgrades are recorded as deferred. Failed/deferred run records may still contain partial retrieval evidence, but it is excluded from eligible quality/cost means.
 

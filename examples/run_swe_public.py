@@ -9,7 +9,7 @@ import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from compass.benchmarks import load_swe_instance
-from compass.comparison import compare_rankings
+from compass.comparison import compare_rankings, comparison_markdown
 from compass.index import RepositoryIndex, build_index
 from compass.preparation import PublicData, SWE_DATASET, VERIFIED_DATASET, prepare_snapshot, select_instances
 from compass.progress import ProgressLog
@@ -150,6 +150,7 @@ def main(argv=None):
             if args.compare_rankings and not args.prepare_only:
                 result["comparison"] = compare_rankings(completed)
                 (output / "comparison.json").write_text(json.dumps(result["comparison"], indent=2), encoding="utf-8")
+                (output / "comparison.md").write_text(comparison_markdown(result["comparison"]), encoding="utf-8")
             (output / "result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
             print(json.dumps(result, indent=2), flush=True)
             return 0 if result["all_passed"] else 1

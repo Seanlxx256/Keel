@@ -1,0 +1,1075 @@
+{
+  "artifact_directory": ".keel\\swe-public\\bdb1b28a48574f5fa371d7f53271854e",
+  "all_passed": true,
+  "independent_instances": 3,
+  "attempted_runs": 24,
+  "sources": [
+    {
+      "dataset": "SWE-Explore-Bench/SWE-Explore-Bench",
+      "revision": "bdb0ae45d7c337d9e1dc3ebfe2a0af6bc7c1fbd9",
+      "split": "train",
+      "info_sha256": "d53107f27875f223190e6221f7d0ed577483fe5d69408b13e282e5b5e9da3b24",
+      "files": {
+        "D:\\keel\\.keel\\datasets\\swe\\SWE-Explore-Bench--SWE-Explore-Bench\\bdb0ae45d7c337d9e1dc3ebfe2a0af6bc7c1fbd9\\bench.final.public.jsonl": "dc4f114ececd0bfb987361c26ae5e2440456e2cccb36adfccb09ea5385aec202"
+      },
+      "authenticity_verified": false
+    },
+    {
+      "dataset": "princeton-nlp/SWE-bench_Verified",
+      "revision": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a",
+      "split": "test",
+      "info_sha256": "4056f21cb91dec91b95864d6c8a0dd6b00f01b47d15e22fe4bbb4d200c37a13f",
+      "files": {
+        "D:\\keel\\.keel\\datasets\\swe\\princeton-nlp--SWE-bench_Verified\\c104f840cc67f8b6eec6f759ebc8b2693d585d4a\\data\\test-00000-of-00001.parquet": "a45b1fe4e2f0c8390b2b2938ac83e92ed5979000856808f3679c07812e9e6dcd"
+      },
+      "authenticity_verified": false
+    }
+  ],
+  "settings": {
+    "repositories": 3,
+    "repository_id": null,
+    "seed": 42,
+    "offline": true,
+    "prepare_only": false,
+    "plan_only": false,
+    "instances_per_repository": 1,
+    "compare_rankings": true,
+    "swe_files": null,
+    "verified_files": null,
+    "embedding_model": "keel-embed",
+    "embedding_num_batch": 32,
+    "chat_model": "keel-chat",
+    "chat_context": 8192,
+    "model_url": "http://localhost:11434",
+    "line_budget": 100,
+    "repeats": 1,
+    "ranking": "rrf",
+    "evidence_policy": "read",
+    "timeout": 300
+  },
+  "comparison": {
+    "modes": {
+      "t0": {
+        "paired_instances": 3,
+        "excluded_instances": [],
+        "instance_mean": {
+          "rrf": {
+            "line_recall": 0.0,
+            "line_precision": 0.0,
+            "line_f1": 0.0,
+            "hit_file_rate": 0.0,
+            "context_efficiency": 0.0
+          },
+          "code-aware": {
+            "line_recall": 0.0,
+            "line_precision": 0.0,
+            "line_f1": 0.0,
+            "hit_file_rate": 0.0,
+            "context_efficiency": 0.0
+          }
+        },
+        "code_aware_minus_rrf": {
+          "line_recall": 0.0,
+          "line_precision": 0.0,
+          "line_f1": 0.0,
+          "hit_file_rate": 0.0,
+          "context_efficiency": 0.0
+        },
+        "instance_mean_cost": {
+          "rrf": {
+            "seconds": 0.0012456666666666666,
+            "tokens": 0,
+            "model_calls": 0,
+            "tool_calls": 1,
+            "vector_queries": 0,
+            "emitted_lines": 0
+          },
+          "code-aware": {
+            "seconds": 0.00041933333333333335,
+            "tokens": 0,
+            "model_calls": 0,
+            "tool_calls": 1,
+            "vector_queries": 0,
+            "emitted_lines": 0
+          }
+        }
+      },
+      "t1": {
+        "paired_instances": 3,
+        "excluded_instances": [],
+        "instance_mean": {
+          "rrf": {
+            "line_recall": 0.00545616038573785,
+            "line_precision": 0.14333333333333334,
+            "line_f1": 0.010512162327343845,
+            "hit_file_rate": 0.4722222222222222,
+            "context_efficiency": 0.7166666666666667
+          },
+          "code-aware": {
+            "line_recall": 0.03163580386014424,
+            "line_precision": 0.4266666666666667,
+            "line_f1": 0.057853866194700274,
+            "hit_file_rate": 0.7222222222222222,
+            "context_efficiency": 1.0
+          }
+        },
+        "code_aware_minus_rrf": {
+          "line_recall": 0.026179643474406388,
+          "line_precision": 0.2833333333333333,
+          "line_f1": 0.04734170386735643,
+          "hit_file_rate": 0.25,
+          "context_efficiency": 0.2833333333333333
+        },
+        "instance_mean_cost": {
+          "rrf": {
+            "seconds": 6.315689,
+            "tokens": 0,
+            "model_calls": 0,
+            "tool_calls": 2,
+            "vector_queries": 1,
+            "emitted_lines": 100
+          },
+          "code-aware": {
+            "seconds": 6.183511666666667,
+            "tokens": 0,
+            "model_calls": 0,
+            "tool_calls": 2,
+            "vector_queries": 1,
+            "emitted_lines": 100
+          }
+        }
+      },
+      "t2": {
+        "paired_instances": 3,
+        "excluded_instances": [],
+        "instance_mean": {
+          "rrf": {
+            "line_recall": 0.000634437254155564,
+            "line_precision": 0.05555555555555555,
+            "line_f1": 0.0012545477355413372,
+            "hit_file_rate": 0.1111111111111111,
+            "context_efficiency": 0.6666666666666666
+          },
+          "code-aware": {
+            "line_recall": 0.007701564380264741,
+            "line_precision": 0.3333333333333333,
+            "line_f1": 0.01505528111032698,
+            "hit_file_rate": 0.25,
+            "context_efficiency": 1.0
+          }
+        },
+        "code_aware_minus_rrf": {
+          "line_recall": 0.007067127126109177,
+          "line_precision": 0.2777777777777778,
+          "line_f1": 0.013800733374785643,
+          "hit_file_rate": 0.1388888888888889,
+          "context_efficiency": 0.33333333333333337
+        },
+        "instance_mean_cost": {
+          "rrf": {
+            "seconds": 23.74112733333333,
+            "tokens": 6349,
+            "model_calls": 2,
+            "tool_calls": 3,
+            "vector_queries": 1,
+            "emitted_lines": 31.333333333333332
+          },
+          "code-aware": {
+            "seconds": 23.767694,
+            "tokens": 6332,
+            "model_calls": 2,
+            "tool_calls": 3,
+            "vector_queries": 1,
+            "emitted_lines": 26.333333333333332
+          }
+        }
+      },
+      "adaptive": {
+        "paired_instances": 3,
+        "excluded_instances": [],
+        "instance_mean": {
+          "rrf": {
+            "line_recall": 0.000634437254155564,
+            "line_precision": 0.05555555555555555,
+            "line_f1": 0.0012545477355413372,
+            "hit_file_rate": 0.1111111111111111,
+            "context_efficiency": 0.6666666666666666
+          },
+          "code-aware": {
+            "line_recall": 0.007701564380264741,
+            "line_precision": 0.3333333333333333,
+            "line_f1": 0.01505528111032698,
+            "hit_file_rate": 0.25,
+            "context_efficiency": 1.0
+          }
+        },
+        "code_aware_minus_rrf": {
+          "line_recall": 0.007067127126109177,
+          "line_precision": 0.2777777777777778,
+          "line_f1": 0.013800733374785643,
+          "hit_file_rate": 0.1388888888888889,
+          "context_efficiency": 0.33333333333333337
+        },
+        "instance_mean_cost": {
+          "rrf": {
+            "seconds": 23.681578666666667,
+            "tokens": 6402.666666666667,
+            "model_calls": 2,
+            "tool_calls": 4,
+            "vector_queries": 1,
+            "emitted_lines": 31.333333333333332
+          },
+          "code-aware": {
+            "seconds": 28.703548,
+            "tokens": 8340.333333333334,
+            "model_calls": 2.6666666666666665,
+            "tool_calls": 4.666666666666667,
+            "vector_queries": 1,
+            "emitted_lines": 26.333333333333332
+          }
+        }
+      }
+    },
+    "escalation": {
+      "rrf": {
+        "t2_minus_t1": {
+          "paired_instances": 3,
+          "excluded_instances": [],
+          "quality_delta": {
+            "line_recall": -0.004821723131582287,
+            "line_precision": -0.08777777777777777,
+            "line_f1": -0.009257614591802507,
+            "hit_file_rate": -0.3611111111111111,
+            "context_efficiency": -0.04999999999999999
+          },
+          "cost_delta": {
+            "seconds": 17.425438333333332,
+            "tokens": 6349,
+            "model_calls": 2,
+            "tool_calls": 1,
+            "vector_queries": 0,
+            "emitted_lines": -68.66666666666667
+          },
+          "quality_outcomes": {
+            "line_recall": {
+              "improved": 0,
+              "tied": 2,
+              "regressed": 1
+            },
+            "line_precision": {
+              "improved": 0,
+              "tied": 2,
+              "regressed": 1
+            },
+            "line_f1": {
+              "improved": 0,
+              "tied": 2,
+              "regressed": 1
+            },
+            "hit_file_rate": {
+              "improved": 0,
+              "tied": 0,
+              "regressed": 3
+            },
+            "context_efficiency": {
+              "improved": 1,
+              "tied": 1,
+              "regressed": 1
+            }
+          }
+        },
+        "adaptive_minus_t1": {
+          "paired_instances": 3,
+          "excluded_instances": [],
+          "quality_delta": {
+            "line_recall": -0.004821723131582287,
+            "line_precision": -0.08777777777777777,
+            "line_f1": -0.009257614591802507,
+            "hit_file_rate": -0.3611111111111111,
+            "context_efficiency": -0.04999999999999999
+          },
+          "cost_delta": {
+            "seconds": 17.365889666666668,
+            "tokens": 6402.666666666667,
+            "model_calls": 2,
+            "tool_calls": 2,
+            "vector_queries": 0,
+            "emitted_lines": -68.66666666666667
+          },
+          "quality_outcomes": {
+            "line_recall": {
+              "improved": 0,
+              "tied": 2,
+              "regressed": 1
+            },
+            "line_precision": {
+              "improved": 0,
+              "tied": 2,
+              "regressed": 1
+            },
+            "line_f1": {
+              "improved": 0,
+              "tied": 2,
+              "regressed": 1
+            },
+            "hit_file_rate": {
+              "improved": 0,
+              "tied": 0,
+              "regressed": 3
+            },
+            "context_efficiency": {
+              "improved": 1,
+              "tied": 1,
+              "regressed": 1
+            }
+          }
+        }
+      },
+      "code-aware": {
+        "t2_minus_t1": {
+          "paired_instances": 3,
+          "excluded_instances": [],
+          "quality_delta": {
+            "line_recall": -0.023934239479879497,
+            "line_precision": -0.09333333333333334,
+            "line_f1": -0.04279858508437329,
+            "hit_file_rate": -0.4722222222222222,
+            "context_efficiency": 0.0
+          },
+          "cost_delta": {
+            "seconds": 17.584182333333334,
+            "tokens": 6332,
+            "model_calls": 2,
+            "tool_calls": 1,
+            "vector_queries": 0,
+            "emitted_lines": -73.66666666666667
+          },
+          "quality_outcomes": {
+            "line_recall": {
+              "improved": 0,
+              "tied": 0,
+              "regressed": 3
+            },
+            "line_precision": {
+              "improved": 1,
+              "tied": 0,
+              "regressed": 2
+            },
+            "line_f1": {
+              "improved": 0,
+              "tied": 0,
+              "regressed": 3
+            },
+            "hit_file_rate": {
+              "improved": 0,
+              "tied": 0,
+              "regressed": 3
+            },
+            "context_efficiency": {
+              "improved": 0,
+              "tied": 3,
+              "regressed": 0
+            }
+          }
+        },
+        "adaptive_minus_t1": {
+          "paired_instances": 3,
+          "excluded_instances": [],
+          "quality_delta": {
+            "line_recall": -0.023934239479879497,
+            "line_precision": -0.09333333333333334,
+            "line_f1": -0.04279858508437329,
+            "hit_file_rate": -0.4722222222222222,
+            "context_efficiency": 0.0
+          },
+          "cost_delta": {
+            "seconds": 22.520036333333334,
+            "tokens": 8340.333333333334,
+            "model_calls": 2.6666666666666665,
+            "tool_calls": 2.6666666666666665,
+            "vector_queries": 0,
+            "emitted_lines": -73.66666666666667
+          },
+          "quality_outcomes": {
+            "line_recall": {
+              "improved": 0,
+              "tied": 0,
+              "regressed": 3
+            },
+            "line_precision": {
+              "improved": 1,
+              "tied": 0,
+              "regressed": 2
+            },
+            "line_f1": {
+              "improved": 0,
+              "tied": 0,
+              "regressed": 3
+            },
+            "hit_file_rate": {
+              "improved": 0,
+              "tied": 0,
+              "regressed": 3
+            },
+            "context_efficiency": {
+              "improved": 0,
+              "tied": 3,
+              "regressed": 0
+            }
+          }
+        }
+      }
+    },
+    "planned_instances": 3,
+    "public_benchmark_verified": false,
+    "limitations": "Paired completed configurations only; means weight instances equally, not repositories. Repetitions are not independent tasks. No significance or official evaluator claims.",
+    "source_result_sha256": "76decfe8e90b3477054dc905996c1a1903f965e4fea8e5316760d595c3b27ef5",
+    "source_all_passed": true
+  },
+  "instances": [
+    {
+      "repository_id": "pallets/flask",
+      "instance_id": "pallets__flask-5014",
+      "snapshot": "D:\\keel\\.keel\\swe-snapshots\\pallets--flask\\7ee9ceb71e868944a46e1ff00b506772a53a4f1d",
+      "status": "passed",
+      "measurements": [
+        {
+          "ranking": "rrf",
+          "all_passed": true,
+          "summary": [
+            {
+              "mode": "t0",
+              "line_budget": 100,
+              "runs": 1,
+              "successful_runs": 1,
+              "eligible": true,
+              "exclusions": [],
+              "quality": {
+                "line_recall": 0.0,
+                "line_precision": 0.0,
+                "line_f1": 0.0,
+                "hit_file_rate": 0.0,
+                "context_efficiency": 0.0
+              },
+              "cost": {
+                "seconds": 0.001558,
+                "tokens": 0,
+                "model_calls": 0,
+                "tool_calls": 1,
+                "vector_queries": 0,
+                "emitted_lines": 0
+              },
+              "seconds_stdev": 0.0
+            },
+            {
+              "mode": "t1",
+              "line_budget": 100,
+              "runs": 1,
+              "successful_runs": 1,
+              "eligible": true,
+              "exclusions": [],
+              "quality": {
+                "line_recall": 0.0,
+                "line_precision": 0.0,
+                "line_f1": 0.0,
+                "hit_file_rate": 0.5,
+                "context_efficiency": 0.18
+              },
+              "cost": {
+                "seconds": 5.831452,
+                "tokens": 0,
+                "model_calls": 0,
+                "tool_calls": 2,
+                "vector_queries": 1,
+                "emitted_lines": 100
+              },
+              "seconds_stdev": 0.0
+            },
+            {
+              "mode": "t2",
+              "line_budget": 100,
+              "runs": 1,
+              "successful_runs": 1,
+              "eligible": true,
+              "exclusions": [],
+              "quality": {
+                "line_recall": 0.0,
+                "line_precision": 0.0,
+                "line_f1": 0.0,
+                "hit_file_rate": 0.0,
+                "context_efficiency": 0.0
+              },
+              "cost": {
+                "seconds": 22.038697,
+                "tokens": 4707,
+                "model_calls": 2,
+                "tool_calls": 3,
+                "vector_queries": 1,
+                "emitted_lines": 32
+              },
+              "seconds_stdev": 0.0
+            },
+            {
+              "mode": "adaptive",
+              "line_budget": 100,
+              "runs": 1,
+              "successful_runs": 1,
+              "eligible": true,
+              "exclusions": [],
+              "quality": {
+                "line_recall": 0.0,
+                "line_precision": 0.0,
+                "line_f1": 0.0,
+                "hit_file_rate": 0.0,
+                "context_efficiency": 0.0
+              },
+              "cost": {
+                "seconds": 22.00072,
+                "tokens": 4760,
+                "model_calls": 2,
+                "tool_calls": 4,
+                "vector_queries": 1,
+                "emitted_lines": 32
+              },
+              "seconds_stdev": 0.0
+            }
+          ],
+          "sweep": "D:\\keel\\.keel\\swe-public\\bdb1b28a48574f5fa371d7f53271854e\\instance-001\\sweep-rrf\\sweep.json"
+        },
+        {
+          "ranking": "code-aware",
+          "all_passed": true,
+          "summary": [
+            {
+              "mode": "t0",
+              "line_budget": 100,
+              "runs": 1,
+              "successful_runs": 1,
+              "eligible": true,
+              "exclusions": [],
+              "quality": {
+                "line_recall": 0.0,
+                "line_precision": 0.0,
+                "line_f1": 0.0,
+                "hit_file_rate": 0.0,
+                "context_efficiency": 0.0
+              },
+              "cost": {
+                "seconds": 0.000446,
+                "tokens": 0,
+                "model_calls": 0,
+                "tool_calls": 1,
+                "vector_queries": 0,
+                "emitted_lines": 0
+              },
+              "seconds_stdev": 0.0
+            },
+            {
+              "mode": "t1",
+              "line_budget": 100,
+              "runs": 1,
+              "successful_runs": 1,
+              "eligible": true,
+              "exclusions": [],
+              "quality": {
+                "line_recall": 0.03194888178913738,
+                "line_precision": 0.2,
+                "line_f1": 0.055096418732782364,
+                "hit_file_rate": 1.0,
+                "context_efficiency": 1.0
+              },
+              "cost": {
+                "seconds": 5.859133,
+                "tokens": 0,
+                "model_calls": 0,
+                "tool_calls": 2,
+                "vector_queries": 1,
+                "emitted_lines": 100
+              },
+              "seconds_stdev": 0.0
+            },
+            {
+              "mode": "t2",
+              "line_budget": 100,
+              "runs": 1,
+              "successful_runs": 1,
+              "eligible": true,
+              "exclusions": [],
+              "quality": {
+                "line_recall": 0.0,
+                "line_precision": 0.0,
+                "line_f1": 0.0,
+                "hit_file_rate": 0.5,
+                "context_efficiency": 1.0
+              },
+              "cost": {
+                "seconds": 22.3862,
+                "tokens": 4651,
+                "model_calls": 2,
+                "tool_calls": 3,
+                "vector_queries": 1,
+                "emitted_lines": 15
+              },
+              "seconds_stdev": 0.0
+            },
+            {
+              "mode": "adaptive",
+              "line_budget": 100,
+              "runs": 1,
+              "successful_runs": 1,
+              "eligible": true,
+              "exclusions": [],
+              "quality": {
+                "line_recall": 0.0,
+                "line_precision": 0.0,
+                "line_f1": 0.0,
+                "hit_file_rate": 0.5,
+                "context_efficiency": 1.0
+              },
+              "cost": {
+                "seconds": 29.831745,
+                "tokens": 7437,
+                "model_calls": 3,
+                "tool_calls": 5,
+                "vector_queries": 1,
+                "emitted_lines": 15
+              },
+              "seconds_stdev": 0.0
+            }
+          ],
+          "sweep": "D:\\keel\\.keel\\swe-public\\bdb1b28a48574f5fa371d7f53271854e\\instance-001\\sweep-code-aware\\sweep.json"
+        }
+      ]
+    },
+    {
+      "repository_id": "psf/requests",
+      "instance_id": "psf__requests-1724",
+      "snapshot": "D:\\keel\\.keel\\swe-snapshots\\psf--requests\\1ba83c47ce7b177efe90d5f51f7760680f72eda0",
+      "status": "passed",
+      "measurements": [
+        {
+          "ranking": "code-aware",
+          "all_passed": true,
+          "summary": [
+            {
+              "mode": "t0",
+              "line_budget": 100,
+              "runs": 1,
+              "successful_runs": 1,
+              "eligible": true,
+              "exclusions": [],
+              "quality": {
+                "line_recall": 0.0,
+                "line_precision": 0.0,
+                "line_f1": 0.0,
+                "hit_file_rate": 0.0,
+                "context_efficiency": 0.0
+              },
+              "cost": {
+                "seconds": 0.000495,
+                "tokens": 0,
+                "model_calls": 0,
+                "tool_calls": 1,
+                "vector_queries": 0,
+                "emitted_lines": 0
+              },
+              "seconds_stdev": 0.0
+            },
+            {
+              "mode": "t1",
+              "line_budget": 100,
+              "runs": 1,
+              "successful_runs": 1,
+              "eligible": true,
+              "exclusions": [],
+              "quality": {
+                "line_recall": 0.046209386281588445,
+                "line_precision": 0.64,
+                "line_f1": 0.08619528619528619,
+                "hit_file_rate": 0.5,
+                "context_efficiency": 1.0
+              },
+              "cost": {
+                "seconds": 6.147302,
+                "tokens": 0,
+                "model_calls": 0,
+                "tool_calls": 2,
+                "vector_queries": 1,
+                "emitted_lines": 100
+              },
+              "seconds_stdev": 0.0
+            },
+            {
+              "mode": "t2",
+              "line_budget": 100,
+              "runs": 1,
+              "successful_runs": 1,
+              "eligible": true,
+              "exclusions": [],
+              "quality": {
+                "line_recall": 0.023104693140794223,
+                "line_precision": 1.0,
+                "line_f1": 0.04516584333098094,
+                "hit_file_rate": 0.25,
+                "context_efficiency": 1.0
+              },
+              "cost": {
+                "seconds": 26.258305,
+                "tokens": 9113,
+                "model_calls": 2,
+                "tool_calls": 3,
+                "vector_queries": 1,
+                "emitted_lines": 32
+              },
+              "seconds_stdev": 0.0
+            },
+            {
+              "mode": "adaptive",
+              "line_budget": 100,
+              "runs": 1,
+              "successful_runs": 1,
+              "eligible": true,
+              "exclusions": [],
+              "quality": {
+                "line_recall": 0.023104693140794223,
+                "line_precision": 1.0,
+                "line_f1": 0.04516584333098094,
+                "hit_file_rate": 0.25,
+                "context_efficiency": 1.0
+              },
+              "cost": {
+                "seconds": 25.724484,
+                "tokens": 9163,
+                "model_calls": 2,
+                "tool_calls": 4,
+                "vector_queries": 1,
+                "emitted_lines": 32
+              },
+              "seconds_stdev": 0.0
+            }
+          ],
+          "sweep": "D:\\keel\\.keel\\swe-public\\bdb1b28a48574f5fa371d7f53271854e\\instance-002\\sweep-code-aware\\sweep.json"
+        },
+        {
+          "ranking": "rrf",
+          "all_passed": true,
+          "summary": [
+            {
+              "mode": "t0",
+              "line_budget": 100,
+              "runs": 1,
+              "successful_runs": 1,
+              "eligible": true,
+              "exclusions": [],
+              "quality": {
+                "line_recall": 0.0,
+                "line_precision": 0.0,
+                "line_f1": 0.0,
+                "hit_file_rate": 0.0,
+                "context_efficiency": 0.0
+              },
+              "cost": {
+                "seconds": 0.000425,
+                "tokens": 0,
+                "model_calls": 0,
+                "tool_calls": 1,
+                "vector_queries": 0,
+                "emitted_lines": 0
+              },
+              "seconds_stdev": 0.0
+            },
+            {
+              "mode": "t1",
+              "line_budget": 100,
+              "runs": 1,
+              "successful_runs": 1,
+              "eligible": true,
+              "exclusions": [],
+              "quality": {
+                "line_recall": 0.0,
+                "line_precision": 0.0,
+                "line_f1": 0.0,
+                "hit_file_rate": 0.25,
+                "context_efficiency": 0.97
+              },
+              "cost": {
+                "seconds": 6.402165,
+                "tokens": 0,
+                "model_calls": 0,
+                "tool_calls": 2,
+                "vector_queries": 1,
+                "emitted_lines": 100
+              },
+              "seconds_stdev": 0.0
+            },
+            {
+              "mode": "t2",
+              "line_budget": 100,
+              "runs": 1,
+              "successful_runs": 1,
+              "eligible": true,
+              "exclusions": [],
+              "quality": {
+                "line_recall": 0.0,
+                "line_precision": 0.0,
+                "line_f1": 0.0,
+                "hit_file_rate": 0.0,
+                "context_efficiency": 1.0
+              },
+              "cost": {
+                "seconds": 25.978647,
+                "tokens": 9140,
+                "model_calls": 2,
+                "tool_calls": 3,
+                "vector_queries": 1,
+                "emitted_lines": 32
+              },
+              "seconds_stdev": 0.0
+            },
+            {
+              "mode": "adaptive",
+              "line_budget": 100,
+              "runs": 1,
+              "successful_runs": 1,
+              "eligible": true,
+              "exclusions": [],
+              "quality": {
+                "line_recall": 0.0,
+                "line_precision": 0.0,
+                "line_f1": 0.0,
+                "hit_file_rate": 0.0,
+                "context_efficiency": 1.0
+              },
+              "cost": {
+                "seconds": 26.459216,
+                "tokens": 9191,
+                "model_calls": 2,
+                "tool_calls": 4,
+                "vector_queries": 1,
+                "emitted_lines": 32
+              },
+              "seconds_stdev": 0.0
+            }
+          ],
+          "sweep": "D:\\keel\\.keel\\swe-public\\bdb1b28a48574f5fa371d7f53271854e\\instance-002\\sweep-rrf\\sweep.json"
+        }
+      ]
+    },
+    {
+      "repository_id": "mwaskom/seaborn",
+      "instance_id": "mwaskom__seaborn-3069",
+      "snapshot": "D:\\keel\\.keel\\swe-snapshots\\mwaskom--seaborn\\54cab15bdacfaa05a88fbc5502a5b322d99f148e",
+      "status": "passed",
+      "measurements": [
+        {
+          "ranking": "rrf",
+          "all_passed": true,
+          "summary": [
+            {
+              "mode": "t0",
+              "line_budget": 100,
+              "runs": 1,
+              "successful_runs": 1,
+              "eligible": true,
+              "exclusions": [],
+              "quality": {
+                "line_recall": 0.0,
+                "line_precision": 0.0,
+                "line_f1": 0.0,
+                "hit_file_rate": 0.0,
+                "context_efficiency": 0.0
+              },
+              "cost": {
+                "seconds": 0.001754,
+                "tokens": 0,
+                "model_calls": 0,
+                "tool_calls": 1,
+                "vector_queries": 0,
+                "emitted_lines": 0
+              },
+              "seconds_stdev": 0.0
+            },
+            {
+              "mode": "t1",
+              "line_budget": 100,
+              "runs": 1,
+              "successful_runs": 1,
+              "eligible": true,
+              "exclusions": [],
+              "quality": {
+                "line_recall": 0.016368481157213552,
+                "line_precision": 0.43,
+                "line_f1": 0.031536486982031535,
+                "hit_file_rate": 0.6666666666666666,
+                "context_efficiency": 1.0
+              },
+              "cost": {
+                "seconds": 6.71345,
+                "tokens": 0,
+                "model_calls": 0,
+                "tool_calls": 2,
+                "vector_queries": 1,
+                "emitted_lines": 100
+              },
+              "seconds_stdev": 0.0
+            },
+            {
+              "mode": "t2",
+              "line_budget": 100,
+              "runs": 1,
+              "successful_runs": 1,
+              "eligible": true,
+              "exclusions": [],
+              "quality": {
+                "line_recall": 0.001903311762466692,
+                "line_precision": 0.16666666666666666,
+                "line_f1": 0.003763643206624012,
+                "hit_file_rate": 0.3333333333333333,
+                "context_efficiency": 1.0
+              },
+              "cost": {
+                "seconds": 23.206038,
+                "tokens": 5200,
+                "model_calls": 2,
+                "tool_calls": 3,
+                "vector_queries": 1,
+                "emitted_lines": 30
+              },
+              "seconds_stdev": 0.0
+            },
+            {
+              "mode": "adaptive",
+              "line_budget": 100,
+              "runs": 1,
+              "successful_runs": 1,
+              "eligible": true,
+              "exclusions": [],
+              "quality": {
+                "line_recall": 0.001903311762466692,
+                "line_precision": 0.16666666666666666,
+                "line_f1": 0.003763643206624012,
+                "hit_file_rate": 0.3333333333333333,
+                "context_efficiency": 1.0
+              },
+              "cost": {
+                "seconds": 22.5848,
+                "tokens": 5257,
+                "model_calls": 2,
+                "tool_calls": 4,
+                "vector_queries": 1,
+                "emitted_lines": 30
+              },
+              "seconds_stdev": 0.0
+            }
+          ],
+          "sweep": "D:\\keel\\.keel\\swe-public\\bdb1b28a48574f5fa371d7f53271854e\\instance-003\\sweep-rrf\\sweep.json"
+        },
+        {
+          "ranking": "code-aware",
+          "all_passed": true,
+          "summary": [
+            {
+              "mode": "t0",
+              "line_budget": 100,
+              "runs": 1,
+              "successful_runs": 1,
+              "eligible": true,
+              "exclusions": [],
+              "quality": {
+                "line_recall": 0.0,
+                "line_precision": 0.0,
+                "line_f1": 0.0,
+                "hit_file_rate": 0.0,
+                "context_efficiency": 0.0
+              },
+              "cost": {
+                "seconds": 0.000317,
+                "tokens": 0,
+                "model_calls": 0,
+                "tool_calls": 1,
+                "vector_queries": 0,
+                "emitted_lines": 0
+              },
+              "seconds_stdev": 0.0
+            },
+            {
+              "mode": "t1",
+              "line_budget": 100,
+              "runs": 1,
+              "successful_runs": 1,
+              "eligible": true,
+              "exclusions": [],
+              "quality": {
+                "line_recall": 0.01674914350970689,
+                "line_precision": 0.44,
+                "line_f1": 0.032269893656032264,
+                "hit_file_rate": 0.6666666666666666,
+                "context_efficiency": 1.0
+              },
+              "cost": {
+                "seconds": 6.5441,
+                "tokens": 0,
+                "model_calls": 0,
+                "tool_calls": 2,
+                "vector_queries": 1,
+                "emitted_lines": 100
+              },
+              "seconds_stdev": 0.0
+            },
+            {
+              "mode": "t2",
+              "line_budget": 100,
+              "runs": 1,
+              "successful_runs": 1,
+              "eligible": true,
+              "exclusions": [],
+              "quality": {
+                "line_recall": 0.0,
+                "line_precision": 0.0,
+                "line_f1": 0.0,
+                "hit_file_rate": 0.0,
+                "context_efficiency": 1.0
+              },
+              "cost": {
+                "seconds": 22.658577,
+                "tokens": 5232,
+                "model_calls": 2,
+                "tool_calls": 3,
+                "vector_queries": 1,
+                "emitted_lines": 32
+              },
+              "seconds_stdev": 0.0
+            },
+            {
+              "mode": "adaptive",
+              "line_budget": 100,
+              "runs": 1,
+              "successful_runs": 1,
+              "eligible": true,
+              "exclusions": [],
+              "quality": {
+                "line_recall": 0.0,
+                "line_precision": 0.0,
+                "line_f1": 0.0,
+                "hit_file_rate": 0.0,
+                "context_efficiency": 1.0
+              },
+              "cost": {
+                "seconds": 30.554415,
+                "tokens": 8421,
+                "model_calls": 3,
+                "tool_calls": 5,
+                "vector_queries": 1,
+                "emitted_lines": 32
+              },
+              "seconds_stdev": 0.0
+            }
+          ],
+          "sweep": "D:\\keel\\.keel\\swe-public\\bdb1b28a48574f5fa371d7f53271854e\\instance-003\\sweep-code-aware\\sweep.json"
+        }
+      ]
+    }
+  ],
+  "public_benchmark_verified": false,
+  "limitations": "Three development instances; one repetition; no held-out validation, causal attribution, or official evaluator parity. Timings include uncontrolled reload/cache effects."
+}
