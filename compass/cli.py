@@ -31,6 +31,15 @@ def main(argv=None):
     validation.add_argument("--components", nargs="+", choices=["tree_sitter", "lancedb", "mcp_sdk"])
     validation.add_argument("--require-all", action="store_true", help="Fail if any selected integration is unavailable")
     validation.add_argument("--output", type=Path)
+    calibration = sub.add_parser("calibrate", help="Select a T1-to-T2 gate on development repositories; evaluate held-out repositories")
+    calibration.add_argument("--sweeps", type=Path, nargs="+", required=True)
+    calibration.add_argument("--line-budget", type=int, required=True)
+    calibration.add_argument("--output-dir", type=Path, required=True)
+    calibration.add_argument("--seed", type=int, default=42)
+    calibration.add_argument("--holdout-fraction", type=float, default=0.25)
+    calibration.add_argument("--upgrade-penalty", type=float, default=0.02)
+    calibration.add_argument("--max-upgrade-rate", type=float, default=1.0)
+    calibration.add_argument("--grid", type=Path, help="JSON threshold grid; at most 4096 combinations")
     benchmark = sub.add_parser("benchmark", help="Evaluate local canonical CORE or SWE-Explore exports")
     formats = benchmark.add_subparsers(dest="benchmark_format", required=True)
     batch = formats.add_parser("core-batch", help="Run a manifest of local CORE exports with repeated timing")
@@ -62,6 +71,7 @@ def main(argv=None):
     sweep = formats.add_parser("swe-sweep", help="Compare cascade modes and line budgets on one clean SWE snapshot")
     sweep.add_argument("--dataset", type=Path, required=True)
     sweep.add_argument("--instance", required=True)
+    sweep.add_argument("--repository-id", help="Canonical owner/repository identity for repository-held-out calibration")
     sweep.add_argument("--repo", type=Path, required=True)
     sweep.add_argument("--issue-map", type=Path)
     sweep.add_argument("--commit-map", type=Path)
@@ -110,7 +120,13 @@ def main(argv=None):
             command.add_argument("--auto-update", action="store_true", help="Refresh stale indexes between MCP calls")
     args = parser.parse_args(argv)
     try:
-        if args.command == "validate":
+        if args.command == "calibrate":
+            from .calibration import calibrate
+            grid = json.loads(args.grid.read_text(encoding="utf-8")) if args.grid else None
+            result = calibrate(args.sweeps, args.output_dir, line_budget=args.line_budget, seed=args.seed,
+                               holdout_fraction=args.holdout_fraction, upgrade_penalty=args.upgrade_penalty,
+                               max_upgrade_rate=args.max_upgrade_rate, grid=grid)
+        elif args.command == "validate":
             from .validation import validate_components
             if args.output and args.output.exists():
                 raise ValueError("Validation output already exists; choose a new path")
@@ -134,7 +150,8 @@ def main(argv=None):
                                 max_tool_calls=args.max_tool_calls, max_wallclock=args.max_wallclock)
                 with RepositoryIndex(args.repo) as index:
                     result = run_swe_sweep(index, instance, args.output_dir, modes=args.modes, line_budgets=args.line_budgets,
-                                           repeats=args.repeats, seed=args.seed, model=model, routing=routing, limits=limits)
+                                           repeats=args.repeats, seed=args.seed, model=model, routing=routing, limits=limits,
+                                           repository_id=args.repository_id)
                 print(json.dumps(result, ensure_ascii=False, indent=2))
                 return 0 if result["all_passed"] else 1
             if args.benchmark_format == "core-batch":

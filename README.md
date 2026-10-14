@@ -391,7 +391,7 @@ For input pinning, add a `sha256` object to each dataset entry containing all co
 Compare the actual Compass modes on one explicit clean SWE-Explore snapshot:
 
 ```powershell
-python -m compass benchmark swe-sweep --dataset D:/datasets/swe.jsonl --instance INSTANCE_ID --repo D:/snapshots/project --issue-map D:/datasets/issues.json --commit-map D:/datasets/commits.json --output-dir .keel/swe-sweep-001 --modes t0 t1 t2 adaptive --line-budgets 100 300 600 --repeats 3 --seed 42 --model YOUR_OLLAMA_CHAT_MODEL
+python -m compass benchmark swe-sweep --dataset D:/datasets/swe.jsonl --instance INSTANCE_ID --repository-id OWNER/REPOSITORY --repo D:/snapshots/project --issue-map D:/datasets/issues.json --commit-map D:/datasets/commits.json --output-dir .keel/swe-sweep-001 --modes t0 t1 t2 adaptive --line-budgets 100 300 600 --repeats 3 --seed 42 --model YOUR_OLLAMA_CHAT_MODEL
 ```
 
 Build the snapshot index first, as shown above. Store outputs under `.keel` or outside the snapshot so reports do not become untracked source inputs. Omit maps when the record includes issue text and the base commit. `--routing` accepts the same routing JSON as `retrieve`; the sweep does not fit thresholds against its evaluation labels.
@@ -403,3 +403,20 @@ Outputs are `runs.jsonl` (incremental evidence), `sweep.json`, `comparison.csv`,
 Deferred upgrades (including missing chat models), step-limited exploration, incomplete indexes, and failed runs make their entire configuration ineligible for frontiers. Errors retain consumed budget evidence and allow other configurations to run. Any ineligible configuration makes the CLI exit 1; existing output directories are rejected. Without `--model`, T0/T1 can be measured, while requested T2 or adaptive upgrades are recorded as deferred. Failed/deferred run records may still contain partial retrieval evidence, but it is excluded from eligible quality/cost means.
 
 This command compares the real cascade implementation with fixed context budgets. It is a single-instance reference experiment, not a full public-data evaluation, an official SWE-Explore score, or routing calibration. Scripted-model tests validate execution and accounting only; they do not establish live-model retrieval quality.
+
+
+## Repository-held-out routing calibration
+
+`calibrate` selects the four T1-to-T2 thresholds from completed paired SWE sweeps. Collect T0, T1, and T2 runs at the same line budget for instances from **at least three repositories**, supplying `--repository-id owner/repository` to `swe-sweep`. Repository IDs are case-normalized; do not substitute commit IDs, checkout paths, or instance IDs. The current collector requires explicit GitHub-style owner/repository identities without a `.git` suffix.
+
+```powershell
+python -m compass calibrate --sweeps .keel/sweep-a/sweep.json .keel/sweep-b/sweep.json .keel/sweep-c/sweep.json --line-budget 300 --seed 42 --holdout-fraction 0.25 --upgrade-penalty 0.02 --output-dir .keel/calibration-001
+```
+
+The command hashes seed/repository identity to split entire repositories into development and holdout groups. It searches up to 4,096 grid combinations using development results only, then evaluates the chosen settings on the holdout. Default utility is repository-mean line recall minus `0.02 * repository-mean upgrade rate`. `--max-upgrade-rate` caps the development upgrade rate; it does not guarantee the same rate on unseen repositories. Declare the seed, penalty, grid, line budget, and repository sample before examining holdout results. Repeatedly selecting experiments based on the holdout invalidates its role as an independent evaluation set; the tool cannot police that history.
+
+Each sample averages repeated runs within one instance. T0 exact-hit bypasses are preserved; remaining cases choose the measured T1 or T2 outcome using the **same gate function as online retrieval**. T2 costs already include its T1 prefix, so that prefix is not charged twice. Candidate selection uses repository means so a repository with many issues does not dominate the objective. Reported costs are query means. Each instance must use one index generation across its paired runs. Embedding configuration/dimension, chat-model identity, parser, per-run limits, and exploration settings must match across input sweeps. Failed, deferred, incomplete, missing, or duplicated pairs are rejected. Repeated instances and changing T1 signals are rejected as well.
+
+Outputs are `calibration.json` (input and implementation hashes, grid candidates, split identities, selected settings, simulated decisions, costs, and development/holdout metrics) and `routing.json` (accepted by `retrieve` and `swe-sweep --routing`). Existing output directories are rejected. A custom `--grid` JSON must supply lists for exactly `min_relevance`, `min_overlap`, `max_entropy`, and `max_files`.
+
+This is offline outcome replay, not a new adaptive run, a calibrated probability, or completed real-model validation. Hash embeddings and scripted-model fixtures are suitable only for testing the workflow. Use a real semantic embedding index and chat model for the intended experiment; then run fresh adaptive sweeps using the exported routing settings to measure actual behavior. `public_benchmark_verified` and `online_adaptive_verified` remain false in calibration reports. CORE's document-only BM25 baseline is not used as if it contained T1/T2 traces or region-level supervision.

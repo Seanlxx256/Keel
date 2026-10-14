@@ -41,6 +41,24 @@ def routing_from_dict(settings=None):
     return Routing(**(settings or {}))
 
 
+def upgrade_reasons(signals, complete, routing):
+    """Shared online/offline gate; only retrieval evidence may enter this decision."""
+    reasons = []
+    if not signals["lexical_hits"] and not signals["vector_hits"]:
+        reasons.append("no_candidates")
+    if signals["top_relevance"] < routing.min_relevance:
+        reasons.append("low_top_relevance")
+    if signals["score_entropy"] > routing.max_entropy:
+        reasons.append("flat_score_distribution")
+    if signals["channel_overlap"] is not None and signals["channel_overlap"] < routing.min_overlap:
+        reasons.append("low_channel_overlap")
+    if signals["file_span"] > routing.max_files:
+        reasons.append("wide_file_span")
+    if not complete:
+        reasons.append("incomplete_index")
+    return reasons
+
+
 def validate_retrieval(settings):
     if not isinstance(settings, dict) or set(settings) - {"provider", "allow_t2", "auto_update", "routing"}:
         raise ValueError("retrieval accepts provider, allow_t2, auto_update and routing")
@@ -123,19 +141,7 @@ class Retriever:
                    "file_span": len({row["path"] for row in rows}), "vector_available": available,
                    "embedding_provider": (self.index.metadata["embedding"] or {}).get("provider"),
                    "lexical_hits": len(lexical), "vector_hits": len(vector)}
-        reasons = []
-        if not rows:
-            reasons.append("no_candidates")
-        if relevance < self.routing.min_relevance:
-            reasons.append("low_top_relevance")
-        if entropy > self.routing.max_entropy:
-            reasons.append("flat_score_distribution")
-        if overlap is not None and overlap < self.routing.min_overlap:
-            reasons.append("low_channel_overlap")
-        if signals["file_span"] > self.routing.max_files:
-            reasons.append("wide_file_span")
-        if not self.index.metadata["complete"]:
-            reasons.append("incomplete_index")
+        reasons = upgrade_reasons(signals, self.index.metadata["complete"], self.routing)
         self.record("retrieval_gate", {"query": query, "signals": signals, "reasons": reasons})
         return rows, signals, reasons
 

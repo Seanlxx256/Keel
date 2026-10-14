@@ -96,11 +96,16 @@ class SweepTests(unittest.TestCase):
             model = "scripted-test-only"
             def complete(self, *args, **kwargs):
                 return Reply(json.dumps({"final": [identifier]}), 7)
-        result = self.run_sweep(modes=["t2"], line_budgets=[3], repeats=2, model=Model())
+        result = self.run_sweep(modes=["t0", "t1", "t2"], line_budgets=[3], repeats=2, model=Model(), repository_id="Org/Repo")
         self.assertTrue(result["all_passed"])
-        self.assertEqual(result["summary"][0]["cost"]["model_calls"], 1)
-        self.assertEqual(result["summary"][0]["cost"]["tokens"], 7)
-        self.assertEqual(result["summary"][0]["quality"]["line_recall"], 1)
+        t2 = next(row for row in result["summary"] if row["mode"] == "t2")
+        self.assertEqual(t2["cost"]["model_calls"], 1)
+        self.assertEqual(t2["cost"]["tokens"], 7)
+        self.assertEqual(t2["quality"]["line_recall"], 1)
+        from compass.calibration import load_sweeps
+        samples, _, _ = load_sweeps([self.root / "results/sweep.json"], 3)
+        self.assertEqual(samples[0]["repository"], "org/repo")
+        self.assertEqual(samples[0]["t2"]["tokens"], 7)
 
 
 class FrontierTests(unittest.TestCase):

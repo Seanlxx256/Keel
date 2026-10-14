@@ -175,6 +175,14 @@ def relative_path(value):
     return path.as_posix()
 
 
+def canonical_repository_id(value):
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", value):
+        raise ValueError("Repository identity must be an explicit owner/repository name")
+    if any(part in {".", ".."} for part in value.split("/")) or value.casefold().endswith(".git"):
+        raise ValueError("Use a canonical owner/repository identity without .git")
+    return value.casefold()
+
+
 def check_snapshot(repo: Path, expected):
     if not isinstance(expected, str) or not re.fullmatch(r"[0-9a-fA-F]{40,64}", expected) or git_ref(repo) != expected:
         raise ValueError("SWE evaluation requires the exact labeled Git base commit")
@@ -326,5 +334,6 @@ def evaluate_swe(index, instance, *, line_budget=300, mode="adaptive", model=Non
             "metrics": region_metrics(predictions, instance["core_regions"], instance["optional_regions"], instance["core_files"]),
             "unindexed_gold_files": sorted(set(instance["core_files"]) - indexed),
             "tier": result["tier"], "routing": result["routing"], "usage": result["usage"],
+            "signals": result["signals"],
             "complete": result["complete"], "elapsed_seconds": result["elapsed_seconds"],
             "public_benchmark_verified": False, "limitations": "Reference metric subset; official evaluator parity is not verified; Python-only index"}

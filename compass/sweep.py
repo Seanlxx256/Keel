@@ -8,7 +8,7 @@ import random
 import statistics
 
 from keel.core import Budget, BudgetExceeded, Limits, ModelError
-from .benchmarks import evaluate_swe, file_digest
+from .benchmarks import canonical_repository_id, evaluate_swe, file_digest
 from .retrieval import Routing
 
 
@@ -45,7 +45,7 @@ def summarize(records, configurations, repeats):
 
 
 def run_swe_sweep(index, instance, output_dir, *, modes=("t0", "t1", "adaptive"), line_budgets=(100, 300),
-                  repeats=3, seed=0, model=None, routing=None, limits=None):
+                  repeats=3, seed=0, model=None, routing=None, limits=None, repository_id=None):
     modes, line_budgets = list(modes), list(line_budgets)
     if not modes or len(set(modes)) != len(modes) or any(mode not in {"t0", "t1", "t2", "adaptive"} for mode in modes):
         raise ValueError("Choose unique t0/t1/t2/adaptive modes")
@@ -53,6 +53,8 @@ def run_swe_sweep(index, instance, output_dir, *, modes=("t0", "t1", "adaptive")
         raise ValueError("Choose unique line budgets between 1 and 100000")
     if type(repeats) is not int or not 1 <= repeats <= 100 or type(seed) is not int:
         raise ValueError("repeats must be 1..100 and seed must be an integer")
+    if repository_id is not None:
+        repository_id = canonical_repository_id(repository_id)
     routing, limits = routing or Routing(), limits or Limits()
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=False)
@@ -84,6 +86,7 @@ def run_swe_sweep(index, instance, output_dir, *, modes=("t0", "t1", "adaptive")
                 stream.write(json.dumps(row, ensure_ascii=False) + "\n")
     rows, frontiers = summarize(records, configurations, repeats)
     result = {"benchmark_format": "SWE-Explore reference sweep", "instance_id": instance["id"],
+              "repository_id": repository_id,
               "base_commit": instance["base_commit"], "provenance": instance["provenance"],
               "query_sha256": hashlib.sha256(instance["query"].encode()).hexdigest(),
               "index_metadata": index.metadata, "routing": asdict(routing), "limits_per_run": asdict(limits),
