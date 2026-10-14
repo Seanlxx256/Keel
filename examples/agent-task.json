@@ -1,0 +1,12 @@
+{
+  "mode": "agent",
+  "goal": "Find API_VERSION and migrate its value from 1 to 2. Preserve all other behavior.",
+  "model": {
+    "provider": "ollama",
+    "name": "your-installed-model",
+    "base_url": "http://localhost:11434"
+  },
+  "agent": {"max_steps": 12, "max_output": 1024},
+  "budget": {"max_wallclock": 300, "max_tool_calls": 100, "max_tokens": 50000, "max_model_calls": 40},
+  "acceptance": [["python", "-c", "import app; assert app.API_VERSION == 2"]]
+}

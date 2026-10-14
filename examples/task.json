@@ -1,0 +1,11 @@
+{
+  "goal": "Migrate API_VERSION from 1 to 2",
+  "queries": ["API_VERSION"],
+  "budget": {"max_wallclock": 60, "max_tool_calls": 30, "max_tokens": 20000},
+  "work_items": [
+    {"id": "migrate-api", "depends_on": [], "edits": [
+      {"path": "app.py", "old": "API_VERSION = 1", "new": "API_VERSION = 2"}
+    ]}
+  ],
+  "acceptance": [["python", "-c", "import app; assert app.API_VERSION == 2"]]
+}
