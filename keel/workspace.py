@@ -10,7 +10,7 @@ from .core import AuditFailed, Budget, Ledger, PolicyDenied, Trace, digest
 from .execution import CommandRunner, normalize_acceptance
 
 
-IGNORED = {".git", ".keel", ".venv", "node_modules", "__pycache__"}
+IGNORED = {".git", ".keel", ".compass", ".venv", ".venv-deps", "node_modules", "__pycache__"}
 
 
 class Workspace:
@@ -29,7 +29,7 @@ class Workspace:
         if not path.is_relative_to(self.root) or path == self.root:
             raise PolicyDenied(f"Path escapes repository: {relative}")
         resolved_parts = {p.lower() for p in path.relative_to(self.root).parts}
-        if resolved_parts & {".git", ".keel"}:
+        if resolved_parts & {".git", ".keel", ".compass", ".venv-deps"}:
             raise PolicyDenied("Internal repository and run metadata are not tool-readable")
         if write:
             if protected_path(relative) or protected_path(path.relative_to(self.root).as_posix()):

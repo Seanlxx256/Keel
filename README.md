@@ -4,7 +4,7 @@ A reliability runtime for long-horizon coding tasks.
 
 Keel is a governance layer around coding-agent execution. It targets runtime failures such as wasted retries, timeouts, premature completion, and misleading validation. The goal is to measure improvements under a fixed model and budget.
 
-Compass, the planned adaptive repository-retrieval MCP server, will provide repository intelligence. The design also calls for an early-stopping predictor and isolated concurrent workspaces. Those components are not implemented yet.
+Compass now has a Python-first index prototype with structural chunks, a SQLite symbol/call/import graph, optional vector adapters, and its own CLI. Adaptive retrieval, MCP serving, the early-stopping predictor, and isolated concurrent workspaces remain planned.
 
 ## Current implementation
 
@@ -35,6 +35,7 @@ From the repository root:
 
 ```powershell
 python examples/demo.py
+python examples/compass_demo.py
 python -m unittest discover -s tests -v
 python -m keel --help
 ```
@@ -147,3 +148,48 @@ Exit codes: `0` for a passed run, `1` for a recorded failed run, and `2` for inv
 - Run public benchmarks and controlled ablations under fixed models and budgets.
 
 No benchmark improvements or production reliability claims are reported yet.
+
+## Compass index prototype (W1–2)
+
+Compass is a separate package in this repository. The current milestone indexes Python functions, async functions, classes, and methods. Each chunk includes its original code, signature, docstring, qualified name, parent symbol, and line range. Retrieval text contains the path, qualified name, signature, and docstring; raw code is kept separately for display. Generated responsibility descriptions are not implemented yet.
+
+Tree-sitter supplies structural byte ranges, with Python AST supplying Python-specific metadata. The optional `python-ast` backend uses stdlib ranges and must be selected explicitly; missing dependencies never cause a silent fallback.
+
+Install optional packages when package-registry access is available:
+
+```powershell
+python -m pip install -e ".[compass,compass-vectors]"
+python -m compass index --repo . --parser tree-sitter --vectors lancedb --embedding hash
+```
+
+The `hash` embedding is deterministic **lexical feature hashing, not a learned semantic model**. It supports storage and query smoke tests without a downloaded model. For semantic embeddings, configure an existing Ollama embedding model:
+
+```powershell
+python -m compass index --repo . --parser tree-sitter --vectors lancedb --embedding ollama --embedding-model YOUR_EMBEDDING_MODEL
+```
+
+Embedding input is sent to the configured endpoint, which defaults to localhost. The embedding endpoint is used only when explicitly selected. Model name and endpoint are recorded, but model-weight digest pinning is not implemented: rebuild if a model tag changes.
+
+A dependency-free path exercises SQLite symbols, graph linking, and an exact cosine scan over stored hash vectors:
+
+```powershell
+python -m compass index --repo . --parser python-ast --vectors sqlite --embedding hash
+python -m compass symbol --repo . RepositoryIndex
+python -m compass context --repo . examples/compass_demo.py 20
+python -m compass search --repo . "repository symbol index" --limit 5
+python -m compass status --repo .
+```
+
+For `context`, choose a line inside the function or class of interest; a line outside any symbol returns an empty result. Use `--vectors none` to build only the symbol and graph index. The SQLite vector backend is a small exact-search reference implementation, not a substitute for LanceDB scalability. These vector queries are not the planned T1 hybrid retriever.
+
+The graph links statically identifiable lexical calls, imported aliases, relative imports, and candidate `self`/`cls` method calls. Unresolved or ambiguous targets are stored explicitly; Compass does not infer arbitrary receiver types, resolve re-exports, or guarantee dynamic dispatch. Imports are stored with scope and repository-module resolution where available. Module names assume the repository root or a leading `src/` directory; custom source roots are not configured yet.
+
+Indexes live under `.compass/generations/<id>/`, with a SQLite database and optional LanceDB files. Builds publish a generation through an atomic manifest replacement only after parsing, embeddings, and source consistency checks complete. Failed builds leave the previous generation selected. Old and failed generations remain on disk; automatic garbage collection is not implemented.
+
+Each generation records the indexed Python-source fingerprint and available Git HEAD. Query sessions check freshness on open; stale indexes refuse code/graph/vector queries and must be rebuilt. This is full rebuild plus stale detection, **not incremental indexing**. Sessions do not continuously watch edits after opening. Generated directories such as `.git`, `.keel`, `.compass`, virtual environments, `node_modules`, `tmp`, `build`, and `dist` are excluded. This is a fixed exclusion list, not a `.gitignore` interpreter. Symlinked entries are not followed. Invalid UTF-8, syntax errors, and Python files over 1 MB appear in diagnostics and mark the index incomplete.
+
+All query results include index identity, freshness, completeness, and uncalibrated `confidence: null`. No retrieval-quality or latency improvement is claimed. Multi-language grammars, hybrid/BM25 retrieval, reranking, T2 exploration, escalation gates, CORE-Bench/SWE-Explore evaluation, MCP serving, and automatic Keel integration are not implemented in this milestone.
+
+**Validation status:** Python AST + SQLite symbols/graph/hash-vector paths are tested locally. The current environment cannot install tree-sitter/LanceDB because package-network access is unavailable; their real integration tests are present but skipped until dependencies are installed. Ollama embeddings are tested with mocked HTTP responses, not a live embedding model.
+
+Implementation references: [py-tree-sitter](https://github.com/tree-sitter/py-tree-sitter), [LanceDB quickstart](https://docs.lancedb.com/quickstart), and [Ollama embeddings](https://docs.ollama.com/api/embed).

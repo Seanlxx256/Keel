@@ -10,7 +10,7 @@ import tomllib
 import xml.etree.ElementTree as ET
 
 
-PROTECTED_PARTS = {"test", "tests", "__tests__", ".github", ".git", ".keel"}
+PROTECTED_PARTS = {"test", "tests", "__tests__", ".github", ".git", ".keel", ".compass"}
 PROTECTED_NAMES = {"conftest.py", "pytest.ini", "tox.ini", ".gitlab-ci.yml", "jenkinsfile",
                    "azure-pipelines.yml", ".circleci", "noxfile.py"}
 TEST_SUFFIXES = ("_test.py", ".test.js", ".test.jsx", ".test.ts", ".test.tsx",
