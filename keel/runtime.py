@@ -61,9 +61,10 @@ def run(config: dict, repo: Path, output: Path, *, model=None) -> dict:
     if agent_mode and ordered:
         raise ValueError("Agent mode generates its own plan; omit work_items")
     settings = config.get("agent", {})
-    if not isinstance(settings, dict) or set(settings) - {"max_steps", "max_output"} or any(
-            type(v) is not int or v <= 0 for v in settings.values()):
-        raise ValueError("agent accepts positive integer max_steps and max_output")
+    if not isinstance(settings, dict) or set(settings) - {"max_steps", "max_output", "require_evidence", "max_work_items"} or any(
+            type(v) is not int or v <= 0 for key, v in settings.items() if key != "require_evidence") or (
+            "require_evidence" in settings and type(settings["require_evidence"]) is not bool):
+        raise ValueError("agent accepts positive integer max_steps/max_output/max_work_items and boolean require_evidence")
     budget = Budget(Limits(**config.get("budget", {})))
     output = output.resolve()
     output.mkdir(parents=True, exist_ok=False)
@@ -229,6 +230,7 @@ def run(config: dict, repo: Path, output: Path, *, model=None) -> dict:
         (output / "changes.patch").write_text("".join(patch), encoding="utf-8")
         result["budget"] = budget.report()
         result["facts"] = ledger.summaries()
+        result["memory"] = ledger.statistics()
         result["artifacts"] = {name: str(output / name) for name in
                                ("changes.patch", "trace.jsonl", "ledger.sqlite")}
         trace.emit("runtime", "run_finished", status=result["status"])

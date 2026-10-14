@@ -138,6 +138,11 @@ class Ledger:
                         (key, json.dumps(value, ensure_ascii=False)))
         self.db.commit()
 
+    def statistics(self):
+        entries, hits = self.db.execute("SELECT COUNT(*), COALESCE(SUM(hits), 0) FROM cache").fetchone()
+        return {"cache_entries": entries, "cache_hits": hits,
+                "facts": self.db.execute("SELECT COUNT(*) FROM facts").fetchone()[0]}
+
     def close(self):
         self.db.close()
 

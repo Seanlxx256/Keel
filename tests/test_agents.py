@@ -133,6 +133,63 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(json.loads(request.call_args.args[0].data)["options"]["num_batch"], 32)
         self.assertEqual(json.loads(request.call_args.args[0].data)["keep_alive"], 0)
 
+    def test_plan_item_cap_is_enforced_before_implementation(self):
+        config = {**self.config, "agent": {"max_work_items": 1}}
+        items = plan()["final"]
+        items.append({"id": "extra", "description": "Another item", "files": ["app.py"]})
+        result, _ = self.execute([self.impact(), {"final": items}], config)
+        self.assertEqual(result["failure"]["category"], "model_error")
+        self.assertEqual((self.repo / "app.py").read_text(), "VERSION = 1\n")
+
+    def test_evidence_gate_rejects_early_final_and_recovers(self):
+        config = {**self.config, "agent": {"require_evidence": True}}
+        result, _ = self.execute([
+            self.impact(),
+            {"tool": "read_file", "arguments": {"path": "app.py"}},
+            self.impact(), plan(),
+            {"tool": "read_file", "arguments": {"path": "app.py"}},
+            {"tool": "replace", "arguments": {"path": "app.py", "old": "VERSION = 1", "new": "VERSION = 2"}},
+            {"final": "Changed version"},
+        ], config)
+        self.assertEqual(result["status"], "passed")
+        self.assertTrue(any(f["kind"] == "failed_attempt" and f["role"] == "scout" for f in result["facts"]))
+
+    def test_structured_role_contracts_and_final_turn(self):
+        from keel.agents import AgentSession
+        from keel.core import Budget, Ledger, Limits, Trace
+        from keel.workspace import Workspace
+        class StructuredModel:
+            def __init__(self):
+                self.schemas = []
+            def complete_json(self, messages, *, schema, **kwargs):
+                self.schemas.append(schema)
+                return Reply(json.dumps({"final": {"summary": "Inspect app", "files": ["app.py"]}}), 10)
+        ledger = Ledger(self.repo / "ledger.sqlite")
+        self.addCleanup(ledger.close)
+        workspace = Workspace(self.repo, Budget(Limits(max_tokens=100000)), ledger,
+                              Trace(self.repo / "trace.jsonl"))
+        model = StructuredModel()
+        value = AgentSession("scout", model, workspace, max_steps=1).execute({}, "impact")
+        self.assertEqual(value["files"], ["app.py"])
+        self.assertEqual(model.schemas[0]["required"], ["final"])
+        self.assertEqual(model.schemas[0]["properties"]["final"]["required"], ["summary", "files"])
+
+    def test_cpu_configuration_reaches_ollama_request(self):
+        from keel.models import from_config
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *args): pass
+            def read(self, size):
+                return json.dumps({"done": True, "message": {"content": "{}"},
+                                   "prompt_eval_count": 1, "eval_count": 1}).encode()
+        model = from_config({"name": "keel-chat", "num_ctx": 8192, "num_gpu": 0})
+        with patch("keel.models.urllib.request.urlopen", return_value=Response()) as request:
+            model.complete([], timeout=1, max_output=32)
+        self.assertEqual(json.loads(request.call_args.args[0].data)["options"]["num_gpu"], 0)
+        for value in [-1, True, "0"]:
+            with self.assertRaises(ValueError):
+                OllamaModel("keel-chat", num_gpu=value)
+
     def test_transport_error_is_reported_without_credentials(self):
         from urllib.error import URLError
         with patch("keel.models.urllib.request.urlopen", side_effect=URLError("secret")):

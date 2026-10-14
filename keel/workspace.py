@@ -94,6 +94,27 @@ class Workspace:
     def snapshot(self):
         return {name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in self.files()}
 
+    def _memoized(self, tool, arguments, compute, role):
+        """Only deterministic local observations; never cache writes or verification."""
+        self.budget.charge_tool()
+        before = self.snapshot()
+        key = digest(["local-observation-v1", str(self.root), tool, arguments, before])
+        cached = self.ledger.cached(key)
+        value = cached["value"] if cached else compute(before)
+        if self.snapshot() != before:
+            raise ValueError("Repository changed during memoized observation; retry the tool")
+        if cached is None:
+            self.ledger.cache(key, value)
+        self.trace.emit(role, "tool_cache", tool=tool, cache_hit=cached is not None,
+                        repeat_count=cached["repeat_count"] if cached else 0)
+        return value, {"cache_hit": cached is not None,
+                       "repeat_count": cached["repeat_count"] if cached else 0}
+
+    def list_files(self, role="scout"):
+        value, metadata = self._memoized("list_files", {}, lambda snapshot: sorted(snapshot), role)
+        self.trace.emit(role, "tool_call", tool="list_files", **metadata)
+        return {"files": value, **metadata}
+
     def read(self, relative: str, role="implementer"):
         self.budget.charge_tool()
         path = self.path(relative)
@@ -140,26 +161,28 @@ class Workspace:
                                  for row in result["results"]]
             self.trace.emit(role, "tool_call", tool="search_code", query=query, matches=len(result["matches"]), tier=result["tier"])
             return result
-        self.budget.charge_tool()
-        matches = []
-        for name, path in self.files():
-            self.budget.check()
-            if path.stat().st_size > 1_000_000:
-                continue
-            try:
-                content = path.read_text(encoding="utf-8")
-            except (UnicodeError, OSError):
-                continue
-            for number, line in enumerate(content.splitlines(), 1):
-                if query.casefold() in line.casefold():
-                    matches.append({"file": name, "line": number, "text": line[:400]})
-                    if len(matches) >= limit:
-                        break
-            if len(matches) >= limit:
-                break
-        result = {"tier": "T0", "confidence": None, "index_ref": digest(self.snapshot()),
-                  "matches": matches, "truncated": len(matches) >= limit}
-        self.trace.emit(role, "tool_call", tool="search_code", query=query, matches=len(matches))
+        def compute(snapshot):
+            matches = []
+            for name, path in self.files():
+                self.budget.check()
+                if path.stat().st_size > 1_000_000:
+                    continue
+                try:
+                    content = path.read_text(encoding="utf-8")
+                except (UnicodeError, OSError):
+                    continue
+                for number, line in enumerate(content.splitlines(), 1):
+                    if query.casefold() in line.casefold():
+                        matches.append({"file": name, "line": number, "text": line[:400]})
+                        if len(matches) >= limit:
+                            break
+                if len(matches) >= limit:
+                    break
+            return {"tier": "T0", "confidence": None, "index_ref": digest(snapshot),
+                    "matches": matches, "truncated": len(matches) >= limit}
+        value, metadata = self._memoized("search_code", {"query": query, "limit": limit}, compute, role)
+        result = {**value, **metadata}
+        self.trace.emit(role, "tool_call", tool="search_code", matches=len(result["matches"]), **metadata)
         return result
 
     def verify(self, commands, phase="final"):

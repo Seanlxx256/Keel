@@ -26,6 +26,29 @@ class ToolGateway:
         self.allowed_files = frozenset(allowed_files)
         self.visible_facts = set()
 
+    def accept_evidence(self, source, fact_ids):
+        """Trusted host-only handoff; deliberately absent from the model tool catalog."""
+        if source.ws is not self.ws or not isinstance(fact_ids, list) or len(fact_ids) > 16 or any(
+                type(fact_id) is not int or fact_id not in source.visible_facts for fact_id in fact_ids):
+            raise PolicyDenied("Handoff requires visible evidence from the same workspace (at most 16 facts)")
+        facts = {row["fact_id"]: row for row in self.ws.ledger.summaries()}
+        selected = []
+        for fact_id in dict.fromkeys(fact_ids):
+            fact = facts[fact_id]
+            if fact["role"] != source.role or fact["kind"] not in {"file", "symbol"}:
+                raise PolicyDenied("Only role-owned file or symbol evidence can be handed off")
+            selected.append((fact_id, fact, self.ws.ledger.recall(fact_id)))
+        references = []
+        for original, fact, payload in selected:
+            copied = self.ws.ledger.add(fact["kind"], self.role, fact["summary"], payload)
+            self.visible_facts.add(copied)
+            self.ws.trace.emit(self.role, "evidence_handoff", source_role=source.role,
+                               source_fact_id=original, fact_id=copied)
+            text = json.dumps(payload, ensure_ascii=False)
+            references.append({"fact_id": copied, "source_fact_id": original,
+                               "preview": text[:4000], "truncated": len(text) > 4000})
+        return references
+
     def catalog(self):
         tools = dict(TOOLS)
         if self.ws.compass_enabled:
@@ -108,12 +131,12 @@ class ToolGateway:
                 raise ValueError("offset must be a nonnegative integer")
             self.ws.budget.charge_tool()
             text = json.dumps(self.ws.ledger.recall(fact_id), ensure_ascii=False)
+            if offset >= len(text):
+                raise ValueError("offset is outside stored evidence; no further page exists")
             self.ws.trace.emit(self.role, "tool_call", tool="recall", fact_id=fact_id, offset=offset)
             return {"text": text[offset:offset + 4000], "next_offset": offset + 4000 if len(text) > offset + 4000 else None}
         if tool == "list_files":
-            self.ws.budget.charge_tool()
-            value = [name for name, _ in self.ws.files()]
-            self.ws.trace.emit(self.role, "tool_call", tool=tool)
+            value = self.ws.list_files(role=self.role)
             kind = "file"
         elif tool == "read_file":
             value = self.ws.read(args["path"], role=self.role)

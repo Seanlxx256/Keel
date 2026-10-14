@@ -603,3 +603,97 @@ The local file has not yet been validated against a live Collector.
 python -m unittest discover -s tests -p test_telemetry.py -v
 python examples/demo.py
 ```
+
+### Live Keel agent and verifier sandbox checks
+
+Run the installed Ollama chat model against a disposable, persistent fixture:
+
+```powershell
+python examples/run_keel_agent.py
+```
+
+The script saves the repository, task config, runtime artifacts and `summary.json`
+under `.keel/agent-smoke/<id>`. A heartbeat reports the last active role/event.
+It checks the exact expected source change, preserved greeting behavior,
+independent acceptance, declared-file audit, actual model calls, and OTLP export.
+Failures return nonzero and keep all evidence. This single synthetic smoke task
+is not an UpgradeBench score or evidence of general upgrade success.
+
+Agent settings now accept optional `require_evidence: true`: Scout and Implementer
+must obtain a successful evidence result before a final answer is accepted.
+Planner receives explicit impact evidence and is exempt. Default remains false.
+When the model supports structured output, role-specific final contracts and
+available tool names constrain the response; the last turn requests a final only
+once the evidence gate is satisfied. Model configuration accepts `num_ctx`;
+this smoke script uses 8192 and caps the plan at one work item with
+`agent.max_work_items` (default 20). The cap is enforced before implementation. Independent verification remains authoritative even
+when the model claims success. Recall rejects offsets beyond stored evidence.
+
+With Docker Desktop running and a local Linux Python image available:
+
+```powershell
+docker pull python:3.11-slim
+python examples/verify_keel_sandbox.py
+python examples/run_keel_agent.py --backend docker --image python:3.11-slim
+```
+
+The sandbox probe does not pull images. It checks real container UID, effective
+capabilities, no-new-privileges, read-only root/workspace mount flags and denied
+writes, writable temporary storage, absence of non-loopback IPv4 routes, and
+unchanged host fixture. Results persist under `.keel/sandbox-probes/<id>`.
+Missing Docker, missing images, daemon errors and failed checks return nonzero;
+there is no local fallback. These checks cover the verifier container only;
+Agent execution and MCP processes still run on the host. Live resource exhaustion,
+IPv6 connectivity and complete escape resistance are outside this probe's scope.
+
+If Ollama reports CUDA out-of-memory, request CPU-only inference explicitly:
+
+```powershell
+python examples/run_keel_agent.py --backend docker --cpu
+```
+
+This sends `options.num_gpu=0` on every model request and records `cpu_requested`
+in the summary and `num_gpu` in the task configuration. CPU inference uses host
+RAM and can be slower; its default wall-clock budget is 900 seconds (GPU/default
+remains 300). Override with `--max-seconds`. The verifier still runs in Docker.
+No automatic device fallback or change to acceptance checks is performed.
+A bounded live CPU model request returned valid JSON on 2026-10-15; the complete
+CPU-plus-Docker smoke run is still pending. The earlier real Docker isolation
+probe passed on the user's machine.
+
+### W8 ledger and local tool memoization
+
+Local `list_files` and literal `search_code` observations now reuse ledger-backed
+results keyed by tool arguments, repository root, and the full visible workspace
+content fingerprint. File reads retain their existing content-addressed cache.
+An add/edit/delete invalidates the affected observation key. The workspace is
+fingerprinted before and after a lookup/scan; detected changes reject the result
+rather than publish mixed-snapshot evidence. This check cannot detect an ABA
+change that is completely reverted between fingerprints.
+
+Every invocation, including a hit, consumes its normal tool budget. Hashing still
+reads workspace bytes; savings are repeated text scanning/serialization work,
+not a proven latency or model-token reduction. Compass retrieval, external MCP,
+verification and writes are not memoized by this new cache. Persisted results
+can be reused only with the same ledger and matching repository identity.
+`result.memory` reports cache entries, hit lookups, and fact count; `tool_cache`
+events expose per-operation hits and repetition count.
+
+Each agent session still gets its own evidence fact IDs even when cached payloads
+are reused. Trusted host orchestration can explicitly call
+`target.gateway.accept_evidence(source.gateway, selected_fact_ids)` to grant up to
+16 selected file/symbol facts from the same Workspace. The copied evidence has a
+new recipient-owned ID and a traced source reference. It is a historical
+observation, not a freshness guarantee. This host API is not a model tool and
+is not automatically applied to the existing Scout/Planner handoff. Decision
+history, failed attempts and verification records cannot be shared through it.
+
+Run the saved, model-free integration demonstration:
+
+```powershell
+python examples/memory_demo.py
+python -m unittest discover -s tests -p test_memory.py -v
+```
+
+Artifacts persist under `.keel/memory-demo/<id>`. W8 still needs task-level
+selection of handoff evidence and larger-workload overhead measurements.

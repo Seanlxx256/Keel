@@ -56,3 +56,10 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(self.budget.tool_calls, 0)
         self.assertTrue(all(event['status'] in {'failed', 'denied'}
                             for event in self.events() if 'status' in event))
+
+    def test_recall_cannot_read_past_end_of_evidence(self):
+        self.budget.limits.max_tool_calls = 10
+        gateway = ToolGateway('scout', self.ws)
+        result = gateway.call('read_file', {'path': 'app.py'})
+        with self.assertRaisesRegex(ValueError, 'outside stored evidence'):
+            gateway.call('recall', {'fact_id': result['fact_id'], 'offset': 4000})

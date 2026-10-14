@@ -22,7 +22,7 @@ class Model(Protocol):
 
 
 class OllamaModel:
-    def __init__(self, model: str, base_url: str = "http://localhost:11434", *, num_ctx=None):
+    def __init__(self, model: str, base_url: str = "http://localhost:11434", *, num_ctx=None, num_gpu=None):
         parsed = urlsplit(base_url)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
             raise ValueError("Model endpoint must be an HTTP(S) URL without embedded credentials")
@@ -31,7 +31,9 @@ class OllamaModel:
         self.model, self.url = model, base_url.rstrip("/") + "/api/chat"
         if num_ctx is not None and (type(num_ctx) is not int or not 1024 <= num_ctx <= 131072):
             raise ValueError("num_ctx must be an integer from 1024 to 131072")
-        self.num_ctx = num_ctx
+        if num_gpu is not None and (type(num_gpu) is not int or num_gpu < 0):
+            raise ValueError("num_gpu must be a nonnegative integer")
+        self.num_ctx, self.num_gpu = num_ctx, num_gpu
 
     def complete(self, messages, *, timeout, max_output):
         return self._complete(messages, timeout=timeout, max_output=max_output, response_format="json")
@@ -43,6 +45,8 @@ class OllamaModel:
         options = {"num_predict": max_output, "temperature": 0}
         if self.num_ctx is not None:
             options.update(num_ctx=self.num_ctx, num_batch=32)
+        if self.num_gpu is not None:
+            options["num_gpu"] = self.num_gpu
         request = urllib.request.Request(self.url, data=json.dumps({
             "model": self.model, "messages": messages, "stream": False, "format": response_format,
             **({"keep_alive": 0} if self.num_ctx is not None else {}),
@@ -70,4 +74,5 @@ class OllamaModel:
 def from_config(config: dict) -> Model:
     if config.get("provider", "ollama") != "ollama":
         raise ValueError("Supported model provider: ollama")
-    return OllamaModel(config.get("name", ""), config.get("base_url", "http://localhost:11434"))
+    return OllamaModel(config.get("name", ""), config.get("base_url", "http://localhost:11434"),
+                       num_ctx=config.get("num_ctx"), num_gpu=config.get("num_gpu"))
