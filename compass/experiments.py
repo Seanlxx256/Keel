@@ -9,6 +9,7 @@ import statistics
 import time
 
 from .benchmarks import evaluate_core, file_digest, load_core
+from .progress import ProgressLog
 
 
 METRICS = ("ndcg_at_10", "recall_at_100")
@@ -55,7 +56,7 @@ def select_queries(queries, count, seed, namespace):
     return {identifier: queries[identifier] for identifier in identifiers[:count]}
 
 
-def run_core_batch(manifest, output_dir, *, repeats=3, max_queries=None, seed=0, max_documents=200000):
+def run_core_batch(manifest, output_dir, *, repeats=3, max_queries=None, seed=0, max_documents=200000, progress=False):
     if type(repeats) is not int or not 1 <= repeats <= 100:
         raise ValueError("repeats must be between 1 and 100")
     if max_queries is not None and (type(max_queries) is not int or max_queries < 1):
@@ -65,14 +66,29 @@ def run_core_batch(manifest, output_dir, *, repeats=3, max_queries=None, seed=0,
     entries, digest = load_manifest(manifest)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=False)
+    with ProgressLog(output_dir / "progress.jsonl", console=progress) as reporter:
+        reporter.emit("batch_started", datasets=len(entries), repeats=repeats)
+        records = _run_datasets(entries, output_dir, repeats, max_queries, seed, max_documents, reporter)
+        reporter.emit("batch_finished", successful_datasets=sum(row["status"] == "passed" for row in records),
+                      failed_datasets=sum(row["status"] == "failed" for row in records))
+    return _write_batch(entries, digest, output_dir, records, repeats, max_queries, seed, max_documents)
+
+
+def _run_datasets(entries, output_dir, repeats, max_queries, seed, max_documents, reporter):
     records = []
     for number, entry in enumerate(entries):
         record = {"name": entry["name"], "status": "failed"}
+        context = {"dataset": entry["name"], "dataset_number": number + 1, "total_datasets": len(entries)}
+        def notify(event, **fields):
+            reporter.emit(event, **context, **fields)
         try:
+            notify("input_hashing_started")
             directory = entry["data_dir"]
             labels = directory / "qrels.jsonl" if (directory / "qrels.jsonl").is_file() else directory / "qrels" / "test.tsv"
             before = {str(path): file_digest(path) for path in (directory / "corpus.jsonl", directory / "queries.jsonl", labels)}
+            notify("dataset_loading_started")
             dataset = load_core(entry["data_dir"], revision=entry["revision"], level=entry["level"], max_documents=max_documents)
+            notify("dataset_loading_finished", documents=len(dataset.corpus), available_queries=len(dataset.queries))
             files = dataset.provenance["files"]
             if files != before:
                 raise ValueError("Dataset inputs changed during loading")
@@ -84,9 +100,13 @@ def run_core_batch(manifest, output_dir, *, repeats=3, max_queries=None, seed=0,
             selected = replace(dataset, queries=queries)
             runs, durations = [], []
             for repeat in range(repeats):
+                context["repeat"] = repeat + 1
+                context["total_repeats"] = repeats
+                notify("repeat_started", selected_queries=len(queries))
                 started = time.perf_counter()
-                evaluated = evaluate_core(selected)
+                evaluated = evaluate_core(selected, progress=notify)
                 durations.append(time.perf_counter() - started)
+                notify("integrity_check_started")
                 if any(file_digest(Path(name)) != value for name, value in files.items()):
                     raise ValueError("Dataset inputs changed during evaluation")
                 ranking = [(row["query_id"], row["ranked_doc_ids"]) for row in evaluated["records"]]
@@ -95,7 +115,9 @@ def run_core_batch(manifest, output_dir, *, repeats=3, max_queries=None, seed=0,
                 artifact = f"dataset-{number:04d}-repeat-{repeat:03d}.json"
                 (output_dir / artifact).write_text(json.dumps(evaluated, indent=2), encoding="utf-8")
                 runs.append(evaluated)
+                notify("repeat_finished", seconds=durations[-1], artifact=artifact)
             record.update(status="passed", level=entry["level"], revision=entry["revision"],
+                          identical_duplicate_qrels=dataset.provenance["identical_duplicate_qrels"],
                           available_queries=len(dataset.queries), evaluated_queries=len(queries),
                           selected_query_ids=list(queries), sha256=actual, hashes_pinned=bool(pins),
                           metrics={metric: runs[0]["summary"][metric] for metric in METRICS},
@@ -103,7 +125,15 @@ def run_core_batch(manifest, output_dir, *, repeats=3, max_queries=None, seed=0,
                           stdev_seconds=statistics.stdev(durations) if repeats > 1 else 0.0)
         except (ValueError, OSError, KeyError) as error:
             record["error"] = f"{type(error).__name__}: {error}"
+            notify("dataset_failed", error=record["error"])
         records.append(record)
+        with (output_dir / "datasets.jsonl").open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(record, ensure_ascii=False) + "\n")
+        notify("dataset_finished", status=record["status"])
+    return records
+
+
+def _write_batch(entries, digest, output_dir, records, repeats, max_queries, seed, max_documents):
     passed = [record for record in records if record["status"] == "passed"]
     count = sum(record["evaluated_queries"] for record in passed)
     summary = {"successful_datasets": len(passed), "failed_datasets": len(records) - len(passed), "queries": count}

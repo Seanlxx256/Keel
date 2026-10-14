@@ -40,6 +40,7 @@ def main(argv=None):
     batch.add_argument("--seed", type=int, default=0)
     batch.add_argument("--max-queries", type=int)
     batch.add_argument("--max-documents", type=int, default=200000)
+    batch.add_argument("--progress", action="store_true", help="Print live progress and heartbeats to stderr; progress.jsonl is always written")
     core = formats.add_parser("core")
     core.add_argument("--data-dir", type=Path, required=True)
     core.add_argument("--revision", required=True)
@@ -139,7 +140,8 @@ def main(argv=None):
             if args.benchmark_format == "core-batch":
                 from .experiments import run_core_batch
                 result = run_core_batch(args.manifest, args.output_dir, repeats=args.repeats,
-                                        max_queries=args.max_queries, seed=args.seed, max_documents=args.max_documents)
+                                        max_queries=args.max_queries, seed=args.seed, max_documents=args.max_documents,
+                                        progress=args.progress)
                 print(json.dumps(result, ensure_ascii=False, indent=2))
                 return 0 if result["all_passed"] else 1
             from .benchmarks import evaluate_core, evaluate_swe, load_core, load_swe_instance

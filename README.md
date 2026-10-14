@@ -154,6 +154,8 @@ No benchmark improvements or production reliability claims are reported yet.
 
 The first public-data BM25 reference run is recorded in [the Flask evaluation note](docs/evaluations/core-flask-baseline.md): one query over 1,000 documents, with zero NDCG@10 and Recall@100. A full-ranking diagnostic placed the positive document at rank 225. This small selected export is not a full-cascade or official benchmark result.
 
+A subsequent [12-repository Verified Level-2 baseline](docs/evaluations/core-verified-baseline.md) completed 173 sampled queries over three repetitions: query-weighted NDCG@10 **10.0514%** and Recall@100 **29.0425%**. All repositories passed; one identical xarray label duplicate was deduplicated with provenance retained. These are local BM25 reference results, not official leaderboard or full-cascade scores.
+
 ## Compass index prototype (W1–2)
 
 Compass is a separate package in this repository. The current milestone indexes Python functions, async functions, classes, and methods. Each chunk includes its original code, signature, docstring, qualified name, parent symbol, and line range. Retrieval text contains the path, qualified name, signature, and docstring; raw code is kept separately for display. Generated responsibility descriptions are not implemented yet.
@@ -343,6 +345,22 @@ The GitHub Actions workflow in `.github/workflows/compass-integrations.yml` inst
 
 
 ## Repeated CORE reference batches
+
+On Windows, prepare all 12 repositories from the pinned Verified Level-2 export and run a batch in one command:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\examples\run_core_verified_batch.ps1
+```
+
+The script pins revision `23da5d97a8a4495d4bd6d5616aa86d5a12a60699`, requires exactly 12 complete repositories, downloads their full corpora/queries/qrels, pins input hashes in a manifest, and invokes `core-batch`. Defaults are at most 20 judged queries per repository, seed 42, and three timing repetitions. Actual query counts may be lower than the limit. This remains a selected sub-dataset BM25 reference rather than a full CORE or cascade result.
+
+Downloaded files are cached under `.keel/datasets/core/<revision>/`; reuse requires matching revision, remote path, byte size, and a local SHA-256 receipt. Receipts check local integrity, not trusted origin. Each run writes a new directory under `.keel/core-verified-batch/`, containing selection metadata, the manifest, API listing, evaluation log, and `results/batch.json` plus `results/datasets.csv`. Downloads retry twice; rerunning retains completed valid files. Unfinished individual files restart. The script stops before evaluation if data preparation fails, and it reports a nonzero exit code for failed or partial evaluation.
+
+The script enables live progress on stderr while keeping final JSON stdout in `evaluation.log`. `results/progress.jsonl` records stages, repository/repetition/query counters, failures, and a heartbeat every 10 seconds during blocking work. `results/datasets.jsonl` checkpoints completed or failed repositories before the final summary is written. A heartbeat reports that the process is alive and its last stage, not an estimate of remaining time. Direct `core-batch` users can enable console messages with `--progress`; the JSONL progress log is always written. Progress logging adds some measurement overhead.
+
+Identical repeated query/document/grade judgments are deduplicated and counted as `identical_duplicate_qrels`; they do not multiply relevance. Conflicting duplicate grades remain errors. This handles the one identical duplicate found in the pinned xarray export without changing corpus inputs or scores.
+
+Use `-MaxQueries 20 -Repeats 1 -Seed 42` for a faster first pass. Once the complete cache exists, `-Offline` reruns preparation and evaluation without contacting Hugging Face. `-PythonCommand` can select an explicit Python executable; otherwise the active environment's `python` is used. `-DownloadTimeoutSeconds` adjusts each download attempt's timeout (default 300 seconds). The script uses `curl.exe`, without requiring the Hugging Face CLI.
 
 Create a manifest outside the dataset checkouts. Paths are relative to the manifest file; names must be unique, and aliases of the same directory are rejected:
 

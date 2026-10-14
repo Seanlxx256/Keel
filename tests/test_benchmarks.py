@@ -39,13 +39,20 @@ class CoreFormatTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "outside"):
             self.load()
 
-    def test_unknown_corpus_id_and_duplicate_labels_are_rejected(self):
+    def test_unknown_corpus_id_and_conflicting_duplicate_labels_are_rejected(self):
         for rows in ([{"query_id": "q", "corpus_id": "unknown", "score": 1}],
-                     [{"query_id": "q", "corpus_id": "current", "score": 1}] * 2):
+                     [{"query_id": "q", "corpus_id": "current", "score": score} for score in (1, 2)]):
             with self.subTest(rows=rows):
                 self.write("qrels.jsonl", rows)
                 with self.assertRaises(ValueError):
                     self.load()
+
+    def test_identical_duplicate_labels_are_counted_without_inflating_relevance(self):
+        self.write("qrels.jsonl", [{"query_id": "q", "corpus_id": "current", "score": 2}] * 2)
+        dataset = self.load()
+        self.assertEqual(dataset.provenance["identical_duplicate_qrels"], 1)
+        self.assertEqual(dataset.qrels, {"q": {"current": 2}})
+        self.assertEqual(evaluate_core(dataset)["summary"]["recall_at_100"], 1)
 
     def test_beir_tsv_and_canonical_ids_are_preserved(self):
         (self.root / "qrels.jsonl").unlink()

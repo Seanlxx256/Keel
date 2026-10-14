@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 import tempfile
+import io
+import contextlib
 import unittest
 from unittest.mock import patch
 
@@ -76,8 +78,8 @@ class BatchTests(unittest.TestCase):
 
     def test_changed_inputs_during_evaluation_fail(self):
         from compass.experiments import evaluate_core
-        def changed(dataset):
-            result = evaluate_core(dataset)
+        def changed(dataset, **kwargs):
+            result = evaluate_core(dataset, **kwargs)
             path = Path(next(iter(dataset.provenance["files"])))
             path.write_text(path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
             return result
@@ -93,3 +95,19 @@ class BatchTests(unittest.TestCase):
         with patch("builtins.print"):
             self.assertEqual(main(["benchmark", "core-batch", "--manifest", str(self.manifest),
                                    "--output-dir", str(self.root / "results"), "--repeats", "1"]), 1)
+
+    def test_cli_progress_preserves_json_stdout_and_durable_checkpoints(self):
+        from compass.cli import main
+        output, errors = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+            code = main(["benchmark", "core-batch", "--manifest", str(self.manifest),
+                         "--output-dir", str(self.root / "results"), "--repeats", "1", "--progress"])
+        self.assertEqual(code, 0)
+        self.assertTrue(json.loads(output.getvalue())["all_passed"])
+        self.assertIn("query_finished", errors.getvalue())
+        progress = [json.loads(line) for line in (self.root / "results/progress.jsonl").read_text().splitlines()]
+        self.assertEqual(progress[0]["event"], "batch_started")
+        self.assertEqual(progress[-1]["event"], "batch_finished")
+        self.assertIn("bm25_build_started", [row["event"] for row in progress])
+        checkpoints = [json.loads(line) for line in (self.root / "results/datasets.jsonl").read_text().splitlines()]
+        self.assertEqual([row["name"] for row in checkpoints], ["a", "b"])

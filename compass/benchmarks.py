@@ -96,6 +96,7 @@ def load_core(directory: Path, *, revision: str, level: int, max_documents=20000
                 for row in reader:
                     yield {"query_id": row["query-id"], "corpus_id": row["corpus-id"], "score": row["score"]}
         entries = tsv_rows()
+    duplicate_qrels = 0
     for entry in entries:
         query, document = _identifier(entry.get("query_id")), _identifier(entry.get("corpus_id"))
         score = entry.get("score")
@@ -106,7 +107,10 @@ def load_core(directory: Path, *, revision: str, level: int, max_documents=20000
         if query not in queries or document not in corpus:
             raise ValueError("CORE qrels reference unknown queries/documents")
         if document in qrels.setdefault(query, {}):
-            raise ValueError("Duplicate CORE query/document relevance label")
+            if qrels[query][document] != score:
+                raise ValueError("Conflicting CORE query/document relevance labels")
+            duplicate_qrels += 1
+            continue
         if score > 0 and query in allowed and document not in allowed[query]:
             raise ValueError("Positive qrel lies outside the query's allowed snapshot corpus")
         qrels[query][document] = score
@@ -118,6 +122,7 @@ def load_core(directory: Path, *, revision: str, level: int, max_documents=20000
     return CoreDataset(corpus, queries, qrels, allowed, {
         "source": CORE_SOURCE, "data_revision": revision, "level": level, "origin": "user-supplied local export",
         "files": {str(path): file_digest(path) for path in inputs}, "excluded_unjudged_queries": excluded,
+        "identical_duplicate_qrels": duplicate_qrels,
         "authenticity_verified": False})
 
 
@@ -131,12 +136,17 @@ def document_metrics(ranked, qrels):
             "recall_at_100": len(set(ranked[:100]) & positive) / len(positive) if positive else 0.0}
 
 
-def evaluate_core(dataset: CoreDataset, *, max_queries=None):
+def evaluate_core(dataset: CoreDataset, *, max_queries=None, progress=None):
     if max_queries is not None and (type(max_queries) is not int or max_queries <= 0):
         raise ValueError("max_queries must be positive")
+    notify = progress or (lambda event, **fields: None)
+    notify("bm25_build_started", documents=len(dataset.corpus))
     scorer = BM25(dataset.corpus.items())
+    notify("bm25_build_finished", documents=len(dataset.corpus))
     records = []
-    for identifier in list(dataset.queries)[:max_queries]:
+    queries = list(dataset.queries)[:max_queries]
+    for number, identifier in enumerate(queries, 1):
+        notify("query_started", query=number, total_queries=len(queries), query_id=identifier)
         started = time.perf_counter()
         # Score against full-corpus statistics, but apply snapshot eligibility before top-K.
         rows = scorer.search(dataset.queries[identifier], 100, allowed=dataset.allowed.get(identifier))
@@ -145,6 +155,8 @@ def evaluate_core(dataset: CoreDataset, *, max_queries=None):
                         **document_metrics(ranked, dataset.qrels[identifier]),
                         "allowed_documents": len(dataset.allowed.get(identifier, dataset.corpus)),
                         "seconds": time.perf_counter() - started})
+        notify("query_finished", query=number, total_queries=len(queries), query_id=identifier,
+               seconds=records[-1]["seconds"])
     return {"benchmark_format": "CORE-Bench", "policy": "compass_bm25_reference", "full_cascade": False,
             "metric_scope": "canonical document IDs; linear graded NDCG@10 and positive-label Recall@100",
             "provenance": dataset.provenance, "available_queries": len(dataset.queries), "evaluated_queries": len(records),

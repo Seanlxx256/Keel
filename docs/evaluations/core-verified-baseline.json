@@ -1,0 +1,577 @@
+{
+  "benchmark": "CORE-Bench local reference batch",
+  "policy": "compass_bm25_reference",
+  "manifest_sha256": "fa7a494fad346e04e868b56d495f2805685c183ebbc88183e8dca582dafe6af7",
+  "implementation_sha256": {
+    "experiments.py": "d4361c2dcdb42c59ce531e51f970e4f5a4dd9c1b42bb16f58eda7350bcd59b75",
+    "benchmarks.py": "041ab0352f99cd95244332d2c1b12bebb266042dc78f941d2ddf8e92b6050ca3",
+    "lexical.py": "89f4ea6b0089b6a86c242ff62e1d28c30cb0fcca7fd4f981db158ac21e3cb706"
+  },
+  "python": "3.11.0",
+  "platform": "Windows-10-10.0.26200-SP0",
+  "repeats": 3,
+  "seed": 42,
+  "max_queries_per_dataset": 20,
+  "max_documents": 200000,
+  "all_passed": true,
+  "public_benchmark_verified": false,
+  "summary": {
+    "successful_datasets": 12,
+    "failed_datasets": 0,
+    "queries": 173,
+    "query_weighted_mean": {
+      "ndcg_at_10": 0.10051350160990659,
+      "recall_at_100": 0.29042537424040316
+    },
+    "repository_mean": {
+      "ndcg_at_10": 0.08165528489928732,
+      "recall_at_100": 0.2795952041785375
+    },
+    "by_level": {
+      "2": {
+        "datasets": 12,
+        "queries": 173,
+        "query_weighted_mean": {
+          "ndcg_at_10": 0.10051350160990659,
+          "recall_at_100": 0.29042537424040316
+        },
+        "repository_mean": {
+          "ndcg_at_10": 0.08165528489928732,
+          "recall_at_100": 0.2795952041785375
+        }
+      }
+    }
+  },
+  "limitations": "Declared revisions; optional hash pins are integrity checks, not authenticity. Repetitions measure timing, not independent quality samples. Each repetition rebuilds BM25; OS caches are uncontrolled. Failed datasets excluded from means; partial batches are not complete results. No official evaluator parity or full cascade.",
+  "data_revision": "23da5d97a8a4495d4bd6d5616aa86d5a12a60699",
+  "source_directory": "data/LEVEL-2/SWE-bench_Verified",
+  "run_id": "20261014-192307-f6890f36",
+  "datasets": [
+    {
+      "name": "astropy__astropy",
+      "status": "passed",
+      "level": 2,
+      "revision": "23da5d97a8a4495d4bd6d5616aa86d5a12a60699",
+      "identical_duplicate_qrels": 0,
+      "available_queries": 22,
+      "evaluated_queries": 20,
+      "selected_query_ids": [
+        "astropy__astropy-12907",
+        "astropy__astropy-13398",
+        "astropy__astropy-13033",
+        "astropy__astropy-13453",
+        "astropy__astropy-14309",
+        "astropy__astropy-7336",
+        "astropy__astropy-14598",
+        "astropy__astropy-13977",
+        "astropy__astropy-8872",
+        "astropy__astropy-7606",
+        "astropy__astropy-13579",
+        "astropy__astropy-14995",
+        "astropy__astropy-13236",
+        "astropy__astropy-14365",
+        "astropy__astropy-7671",
+        "astropy__astropy-14369",
+        "astropy__astropy-14096",
+        "astropy__astropy-8707",
+        "astropy__astropy-7166",
+        "astropy__astropy-14182"
+      ],
+      "sha256": {
+        "corpus.jsonl": "2faad545183954e861b079ef5b52371b41a55080ae91f94ec92d4375fd172415",
+        "queries.jsonl": "3bd53b80615fafab1405ad03ace28bb34c709804007a4d1ff328a62f8456bf37",
+        "qrels.jsonl": "54c3956e015e0cb718ca7a373ca8fbbce10037de34d6996ab6384b2720c95717"
+      },
+      "hashes_pinned": true,
+      "metrics": {
+        "ndcg_at_10": 0.17756420355898525,
+        "recall_at_100": 0.4708333333333333
+      },
+      "repeat_seconds": [
+        26.555191899999045,
+        24.66589850001037,
+        21.313016000029165
+      ],
+      "mean_seconds": 24.17803546667953,
+      "stdev_seconds": 2.6549218060094226,
+      "corpus_documents": 66203
+    },
+    {
+      "name": "django__django",
+      "status": "passed",
+      "level": 2,
+      "revision": "23da5d97a8a4495d4bd6d5616aa86d5a12a60699",
+      "identical_duplicate_qrels": 0,
+      "available_queries": 188,
+      "evaluated_queries": 20,
+      "selected_query_ids": [
+        "django__django-14608",
+        "django__django-15741",
+        "django__django-11119",
+        "django__django-11099",
+        "django__django-13315",
+        "django__django-15128",
+        "django__django-15554",
+        "django__django-15098",
+        "django__django-15503",
+        "django__django-16263",
+        "django__django-12419",
+        "django__django-15278",
+        "django__django-11141",
+        "django__django-14007",
+        "django__django-16502",
+        "django__django-14539",
+        "django__django-15022",
+        "django__django-12708",
+        "django__django-14580",
+        "django__django-11095"
+      ],
+      "sha256": {
+        "corpus.jsonl": "f3b11befc442f08e04a4d1bce1bdaeb6fdcdf2e5eae611060ecc99a5e2583dfa",
+        "queries.jsonl": "e084793f1d00f13a90a307b4d5413265a86b4617376e570cc4d13c5738166212",
+        "qrels.jsonl": "7a4e9e980cd9ae2d571674d76e6cef4e6d55c9b5aa7f11f94538ef4a0b673732"
+      },
+      "hashes_pinned": true,
+      "metrics": {
+        "ndcg_at_10": 0.09087940923236361,
+        "recall_at_100": 0.2825
+      },
+      "repeat_seconds": [
+        28.293732699996326,
+        27.27917160000652,
+        24.848270200018305
+      ],
+      "mean_seconds": 26.807058166673716,
+      "stdev_seconds": 1.770585010706536,
+      "corpus_documents": 85483
+    },
+    {
+      "name": "matplotlib__matplotlib",
+      "status": "passed",
+      "level": 2,
+      "revision": "23da5d97a8a4495d4bd6d5616aa86d5a12a60699",
+      "identical_duplicate_qrels": 0,
+      "available_queries": 32,
+      "evaluated_queries": 20,
+      "selected_query_ids": [
+        "matplotlib__matplotlib-23299",
+        "matplotlib__matplotlib-24177",
+        "matplotlib__matplotlib-20488",
+        "matplotlib__matplotlib-25311",
+        "matplotlib__matplotlib-26291",
+        "matplotlib__matplotlib-26113",
+        "matplotlib__matplotlib-26466",
+        "matplotlib__matplotlib-25332",
+        "matplotlib__matplotlib-25960",
+        "matplotlib__matplotlib-13989",
+        "matplotlib__matplotlib-25479",
+        "matplotlib__matplotlib-22719",
+        "matplotlib__matplotlib-23314",
+        "matplotlib__matplotlib-14623",
+        "matplotlib__matplotlib-20676",
+        "matplotlib__matplotlib-26342",
+        "matplotlib__matplotlib-24870",
+        "matplotlib__matplotlib-23476",
+        "matplotlib__matplotlib-26208",
+        "matplotlib__matplotlib-22871"
+      ],
+      "sha256": {
+        "corpus.jsonl": "daa4e7f9fbc1e327f77ed6da192637e82f5f232ccbc748454fe68baa6ac68697",
+        "queries.jsonl": "afbeac7b5873a7defefad9d32fa6d5e26b4f02911e2c2c012530238386101181",
+        "qrels.jsonl": "0fe4f9fb22683722bfc7e351b164726d71b75b5ae211508dda629b4c9777e2e2"
+      },
+      "hashes_pinned": true,
+      "metrics": {
+        "ndcg_at_10": 0.06445324131589439,
+        "recall_at_100": 0.20166666666666666
+      },
+      "repeat_seconds": [
+        14.30028719996335,
+        13.961908299999777,
+        13.664324699959252
+      ],
+      "mean_seconds": 13.97550673330746,
+      "stdev_seconds": 0.3181992510899156,
+      "corpus_documents": 42522
+    },
+    {
+      "name": "mwaskom__seaborn",
+      "status": "passed",
+      "level": 2,
+      "revision": "23da5d97a8a4495d4bd6d5616aa86d5a12a60699",
+      "identical_duplicate_qrels": 0,
+      "available_queries": 2,
+      "evaluated_queries": 2,
+      "selected_query_ids": [
+        "mwaskom__seaborn-3069",
+        "mwaskom__seaborn-3187"
+      ],
+      "sha256": {
+        "corpus.jsonl": "b6b0bfcb2987c40a2c0ff227e554bab5c70b9c77429202605cfdb8af70ede6b1",
+        "queries.jsonl": "309a5a3e1df10839ea3292ec9f391c5b585e7d9fbe1db7430e722c5b5caae156",
+        "qrels.jsonl": "a71c283373245a8b699aefa2fa5be721c63bdd549463e9aad86fcdd84ad32199"
+      },
+      "hashes_pinned": true,
+      "metrics": {
+        "ndcg_at_10": 0.0,
+        "recall_at_100": 0.41666666666666663
+      },
+      "repeat_seconds": [
+        0.34773420001147315,
+        0.34331120003480464,
+        0.33976619999157265
+      ],
+      "mean_seconds": 0.3436038666792835,
+      "stdev_seconds": 0.0039920541583095374,
+      "corpus_documents": 2515
+    },
+    {
+      "name": "pallets__flask",
+      "status": "passed",
+      "level": 2,
+      "revision": "23da5d97a8a4495d4bd6d5616aa86d5a12a60699",
+      "identical_duplicate_qrels": 0,
+      "available_queries": 1,
+      "evaluated_queries": 1,
+      "selected_query_ids": [
+        "pallets__flask-5014"
+      ],
+      "sha256": {
+        "corpus.jsonl": "35afa088130f5f4c4b6c83a0f91b4e63289c647fb75531c46d97ed56a2ca9014",
+        "queries.jsonl": "0ac296b30c80dee0514941688ba577e9278df0438ec995fe53b19c0d17e4e3da",
+        "qrels.jsonl": "11e2ae817a89691a142e25d8bb2dc2bd38cd4793ae0c50218bfa75a1b093c5e9"
+      },
+      "hashes_pinned": true,
+      "metrics": {
+        "ndcg_at_10": 0.0,
+        "recall_at_100": 0.0
+      },
+      "repeat_seconds": [
+        0.1412148000090383,
+        0.14732490002643317,
+        0.14932590001262724
+      ],
+      "mean_seconds": 0.1459552000160329,
+      "stdev_seconds": 0.004225463809562568,
+      "corpus_documents": 1000
+    },
+    {
+      "name": "psf__requests",
+      "status": "passed",
+      "level": 2,
+      "revision": "23da5d97a8a4495d4bd6d5616aa86d5a12a60699",
+      "identical_duplicate_qrels": 0,
+      "available_queries": 8,
+      "evaluated_queries": 8,
+      "selected_query_ids": [
+        "psf__requests-1766",
+        "psf__requests-5414",
+        "psf__requests-1921",
+        "psf__requests-1142",
+        "psf__requests-6028",
+        "psf__requests-2931",
+        "psf__requests-2317",
+        "psf__requests-1724"
+      ],
+      "sha256": {
+        "corpus.jsonl": "b38c78ef37c779d4ecc4f14af15dfd25ba5d7ef06514534b02b49c6cdc0c9393",
+        "queries.jsonl": "512c7d149557267fb84f5bad7a076ae7d3730af7aeff4e80f4811fa30807e40f",
+        "qrels.jsonl": "5473cc7de4201513ee3524e92f91f8d29dcc06c9f78c794ac1d35e89e3c5886f"
+      },
+      "hashes_pinned": true,
+      "metrics": {
+        "ndcg_at_10": 0.02307196209744602,
+        "recall_at_100": 0.4791666666666667
+      },
+      "repeat_seconds": [
+        0.4250531999859959,
+        0.4267408999730833,
+        0.4145373000064865
+      ],
+      "mean_seconds": 0.42211046665518853,
+      "stdev_seconds": 0.006612618439647321,
+      "corpus_documents": 2356
+    },
+    {
+      "name": "pydata__xarray",
+      "status": "passed",
+      "level": 2,
+      "revision": "23da5d97a8a4495d4bd6d5616aa86d5a12a60699",
+      "identical_duplicate_qrels": 1,
+      "available_queries": 18,
+      "evaluated_queries": 18,
+      "selected_query_ids": [
+        "pydata__xarray-6938",
+        "pydata__xarray-3993",
+        "pydata__xarray-2905",
+        "pydata__xarray-7393",
+        "pydata__xarray-6461",
+        "pydata__xarray-4094",
+        "pydata__xarray-4687",
+        "pydata__xarray-3677",
+        "pydata__xarray-7233",
+        "pydata__xarray-3095",
+        "pydata__xarray-6744",
+        "pydata__xarray-4695",
+        "pydata__xarray-3305",
+        "pydata__xarray-7229",
+        "pydata__xarray-6599",
+        "pydata__xarray-6992",
+        "pydata__xarray-6721",
+        "pydata__xarray-3151"
+      ],
+      "sha256": {
+        "corpus.jsonl": "ba53c2afc3920d969947fd1dadb528c33f1235557dae6f9558fa0557fca7db6f",
+        "queries.jsonl": "6b0eb4fafacaffd1c97100365589ab20384b16f9a232c6b1419bbb29748563e4",
+        "qrels.jsonl": "de54fa1cd51c5e5a147cd3723d069696bf542aee78a491c2c439ae4174dc3db9"
+      },
+      "hashes_pinned": true,
+      "metrics": {
+        "ndcg_at_10": 0.07704737817969676,
+        "recall_at_100": 0.22592592592592592
+      },
+      "repeat_seconds": [
+        5.3510736000025645,
+        5.449963600025512,
+        5.462448799982667
+      ],
+      "mean_seconds": 5.421162000003581,
+      "stdev_seconds": 0.0610185046975049,
+      "corpus_documents": 18007
+    },
+    {
+      "name": "pylint",
+      "status": "passed",
+      "level": 2,
+      "revision": "23da5d97a8a4495d4bd6d5616aa86d5a12a60699",
+      "identical_duplicate_qrels": 0,
+      "available_queries": 9,
+      "evaluated_queries": 9,
+      "selected_query_ids": [
+        "pylint-dev__pylint-4604",
+        "pylint-dev__pylint-4970",
+        "pylint-dev__pylint-6386",
+        "pylint-dev__pylint-4551",
+        "pylint-dev__pylint-6903",
+        "pylint-dev__pylint-7080",
+        "pylint-dev__pylint-4661",
+        "pylint-dev__pylint-8898",
+        "pylint-dev__pylint-6528"
+      ],
+      "sha256": {
+        "corpus.jsonl": "a72eb42fb42f8cbbf08a8d4c9e08e4fd6a056a512ce7818da4e7de432df6fe58",
+        "queries.jsonl": "560082336737d756f6c2142f0f5673815619a70e01422afb6a7bd82827ac3a6f",
+        "qrels.jsonl": "75d388e91fc3288f9bd106fae3200dfd5a3369f53254cafb94bd5c12e776e3dd"
+      },
+      "hashes_pinned": true,
+      "metrics": {
+        "ndcg_at_10": 0.1111111111111111,
+        "recall_at_100": 0.17037037037037037
+      },
+      "repeat_seconds": [
+        3.199367099965457,
+        3.1295080999843776,
+        3.1913631999632344
+      ],
+      "mean_seconds": 3.173412799971023,
+      "stdev_seconds": 0.03823261192358423,
+      "corpus_documents": 19438
+    },
+    {
+      "name": "pytest",
+      "status": "passed",
+      "level": 2,
+      "revision": "23da5d97a8a4495d4bd6d5616aa86d5a12a60699",
+      "identical_duplicate_qrels": 0,
+      "available_queries": 15,
+      "evaluated_queries": 15,
+      "selected_query_ids": [
+        "pytest-dev__pytest-5840",
+        "pytest-dev__pytest-7205",
+        "pytest-dev__pytest-7490",
+        "pytest-dev__pytest-5262",
+        "pytest-dev__pytest-10356",
+        "pytest-dev__pytest-10051",
+        "pytest-dev__pytest-6197",
+        "pytest-dev__pytest-5631",
+        "pytest-dev__pytest-7236",
+        "pytest-dev__pytest-5787",
+        "pytest-dev__pytest-7521",
+        "pytest-dev__pytest-8399",
+        "pytest-dev__pytest-10081",
+        "pytest-dev__pytest-7324",
+        "pytest-dev__pytest-7571"
+      ],
+      "sha256": {
+        "corpus.jsonl": "c707de7c6fda231a822cec0616c3b1d001776fee7dd957236ad1a228089a8cc9",
+        "queries.jsonl": "29e9013d506e2c392a7bbd48064c635a25b8f62dedffa15bbc5cd836bc42a848",
+        "qrels.jsonl": "53a0ed57d1437909143ea500b70edc6beb0ab1e096546d4ca179b04bfb695503"
+      },
+      "hashes_pinned": true,
+      "metrics": {
+        "ndcg_at_10": 0.11105041471282952,
+        "recall_at_100": 0.25666666666666665
+      },
+      "repeat_seconds": [
+        3.860499600006733,
+        3.7531130000134,
+        3.730391299992334
+      ],
+      "mean_seconds": 3.781334633337489,
+      "stdev_seconds": 0.06949379737623149,
+      "corpus_documents": 15455
+    },
+    {
+      "name": "scikit",
+      "status": "passed",
+      "level": 2,
+      "revision": "23da5d97a8a4495d4bd6d5616aa86d5a12a60699",
+      "identical_duplicate_qrels": 0,
+      "available_queries": 26,
+      "evaluated_queries": 20,
+      "selected_query_ids": [
+        "scikit-learn__scikit-learn-15100",
+        "scikit-learn__scikit-learn-13439",
+        "scikit-learn__scikit-learn-14894",
+        "scikit-learn__scikit-learn-26323",
+        "scikit-learn__scikit-learn-12973",
+        "scikit-learn__scikit-learn-13496",
+        "scikit-learn__scikit-learn-10297",
+        "scikit-learn__scikit-learn-14053",
+        "scikit-learn__scikit-learn-11310",
+        "scikit-learn__scikit-learn-13779",
+        "scikit-learn__scikit-learn-26194",
+        "scikit-learn__scikit-learn-25232",
+        "scikit-learn__scikit-learn-25973",
+        "scikit-learn__scikit-learn-13124",
+        "scikit-learn__scikit-learn-25931",
+        "scikit-learn__scikit-learn-14087",
+        "scikit-learn__scikit-learn-14983",
+        "scikit-learn__scikit-learn-9288",
+        "scikit-learn__scikit-learn-25747",
+        "scikit-learn__scikit-learn-14141"
+      ],
+      "sha256": {
+        "corpus.jsonl": "23c3a30c105ac8eefffdcb923a4bf259d4e7b33a8aaa39e77146235784af2337",
+        "queries.jsonl": "b2ab9618072fbe1e5374dbaae9e97e1118690b4fa9b8fce74297db681b54af1b",
+        "qrels.jsonl": "04d616f118dbad0f3f101a333c7b6a6f940761375fd38f2a77fee34271b6b52f"
+      },
+      "hashes_pinned": true,
+      "metrics": {
+        "ndcg_at_10": 0.22073129831775,
+        "recall_at_100": 0.40166666666666667
+      },
+      "repeat_seconds": [
+        12.8872436999809,
+        12.781316399981733,
+        12.824050399998669
+      ],
+      "mean_seconds": 12.830870166653767,
+      "stdev_seconds": 0.05329193310624827,
+      "corpus_documents": 38876
+    },
+    {
+      "name": "sphinx",
+      "status": "passed",
+      "level": 2,
+      "revision": "23da5d97a8a4495d4bd6d5616aa86d5a12a60699",
+      "identical_duplicate_qrels": 0,
+      "available_queries": 42,
+      "evaluated_queries": 20,
+      "selected_query_ids": [
+        "sphinx-doc__sphinx-9258",
+        "sphinx-doc__sphinx-8595",
+        "sphinx-doc__sphinx-7454",
+        "sphinx-doc__sphinx-8638",
+        "sphinx-doc__sphinx-8721",
+        "sphinx-doc__sphinx-7757",
+        "sphinx-doc__sphinx-9698",
+        "sphinx-doc__sphinx-11445",
+        "sphinx-doc__sphinx-8035",
+        "sphinx-doc__sphinx-9673",
+        "sphinx-doc__sphinx-8621",
+        "sphinx-doc__sphinx-7889",
+        "sphinx-doc__sphinx-7748",
+        "sphinx-doc__sphinx-7590",
+        "sphinx-doc__sphinx-7462",
+        "sphinx-doc__sphinx-8475",
+        "sphinx-doc__sphinx-10614",
+        "sphinx-doc__sphinx-8593",
+        "sphinx-doc__sphinx-9658",
+        "sphinx-doc__sphinx-10449"
+      ],
+      "sha256": {
+        "corpus.jsonl": "b928de220acf5eb9c1796aab09b3669a63f2ae648b2027e4a0127102efb945bb",
+        "queries.jsonl": "ea56678ef5d0637daebe5c29c2910c21efd0e969f413a1b748d0223a07d6e467",
+        "qrels.jsonl": "25b2d760883d1d84f21f9a9de58e4a74a133a53d873b1a6cc87865a76b013a31"
+      },
+      "hashes_pinned": true,
+      "metrics": {
+        "ndcg_at_10": 0.01532867981913646,
+        "recall_at_100": 0.07884615384615384
+      },
+      "repeat_seconds": [
+        5.147386399970856,
+        5.535479299956933,
+        4.96007670002291
+      ],
+      "mean_seconds": 5.2143141333169,
+      "stdev_seconds": 0.29348173558304724,
+      "corpus_documents": 19076
+    },
+    {
+      "name": "sympy__sympy",
+      "status": "passed",
+      "level": 2,
+      "revision": "23da5d97a8a4495d4bd6d5616aa86d5a12a60699",
+      "identical_duplicate_qrels": 0,
+      "available_queries": 69,
+      "evaluated_queries": 20,
+      "selected_query_ids": [
+        "sympy__sympy-13798",
+        "sympy__sympy-19495",
+        "sympy__sympy-20916",
+        "sympy__sympy-12481",
+        "sympy__sympy-24213",
+        "sympy__sympy-13551",
+        "sympy__sympy-20428",
+        "sympy__sympy-20154",
+        "sympy__sympy-23950",
+        "sympy__sympy-20801",
+        "sympy__sympy-15976",
+        "sympy__sympy-14711",
+        "sympy__sympy-17139",
+        "sympy__sympy-23413",
+        "sympy__sympy-22714",
+        "sympy__sympy-15345",
+        "sympy__sympy-15809",
+        "sympy__sympy-16792",
+        "sympy__sympy-13647",
+        "sympy__sympy-22080"
+      ],
+      "sha256": {
+        "corpus.jsonl": "547101fa6b56c3e24e6affa14917244a26a3039d2db4a397bafb7a74bc3564b4",
+        "queries.jsonl": "ea9601eb671dfb2b6a630e8df56e8476e3bdc8c988aee94477bbf9b2a592abad",
+        "qrels.jsonl": "899653d03002fc795c20422dbf8603ba2194b405c02093c1007310755010e702"
+      },
+      "hashes_pinned": true,
+      "metrics": {
+        "ndcg_at_10": 0.08862572044623473,
+        "recall_at_100": 0.3708333333333333
+      },
+      "repeat_seconds": [
+        21.73440290003782,
+        20.90486259997124,
+        21.248946300009266
+      ],
+      "mean_seconds": 21.296070600006107,
+      "stdev_seconds": 0.4167730822597393,
+      "corpus_documents": 87466
+    }
+  ],
+  "verification": {
+    "independent_metric_recalculations": 519,
+    "identical_rankings_across_repetitions": true,
+    "unchanged_previous_repository_metrics_and_inputs": 11
+  }
+}
