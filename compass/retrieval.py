@@ -1,7 +1,6 @@
 """Evidence-driven T0/T1/T2 retrieval. Thresholds are heuristics, not calibrated confidence."""
 from __future__ import annotations
 
-from collections import Counter
 from dataclasses import dataclass
 import json
 import math
@@ -9,13 +8,7 @@ import re
 import time
 
 from keel.core import Budget, Limits, ModelError
-
-
-def tokens(text):
-    # Preserve full API/error anchors while also matching snake_case and camelCase parts.
-    originals = re.findall(r"\w+", text.casefold(), flags=re.UNICODE)
-    split = re.sub(r"([a-z])([A-Z])", r"\1 \2", text).replace("_", " ")
-    return originals + re.findall(r"\w+", split.casefold(), flags=re.UNICODE)
+from .lexical import BM25, tokens
 
 
 @dataclass
@@ -88,30 +81,14 @@ class Retriever:
     def _documents(self):
         if self._corpus is None:
             rows = [dict(row) for row in self.index.db.execute("SELECT * FROM symbols ORDER BY id")]
-            documents = [(row, Counter(tokens(row["embed_text"] + "\n" + row["code"]))) for row in rows]
-            frequency = Counter(term for _, counts in documents for term in counts)
-            average = sum(sum(counts.values()) for _, counts in documents) / max(1, len(documents))
-            self._corpus = documents, frequency, average
+            self._corpus = ({row["id"]: row for row in rows}, BM25((row["id"], row["embed_text"] + "\n" + row["code"]) for row in rows))
         return self._corpus
 
     def lexical(self, query, limit):
         self.budget.charge_tool()
-        documents, frequency, average = self._documents()
-        terms = set(tokens(query))
-        found = []
-        for row, counts in documents:
-            self.budget.check()
-            length = sum(counts.values())
-            score = 0.0
-            for term in terms:
-                count = counts.get(term, 0)
-                if count:
-                    idf = math.log(1 + (len(documents) - frequency[term] + 0.5) / (frequency[term] + 0.5))
-                    score += idf * count * 2.2 / (count + 1.2 * (0.25 + 0.75 * length / (average or 1)))
-            if score > 0:
-                found.append({**row, "bm25_score": score})
-        found.sort(key=lambda row: (-row["bm25_score"], row["id"]))
-        return found[:limit]
+        documents, scorer = self._documents()
+        return [{**documents[row["id"]], "bm25_score": row["bm25_score"]} for row in
+                scorer.search(query, limit, check=self.budget.check)]
 
     def exact(self, query, limit):
         self.budget.charge_tool()

@@ -1,0 +1,36 @@
+name: Compass real integrations
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integrations:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install native integrations and the SDK v1 client
+        run: python -m pip install -e ".[compass,compass-vectors,validation]"
+      - name: Require real integration evidence
+        run: python -m compass validate --require-all --output .keel/integration-validation.json
+      - name: Run regression suite
+        run: python -m unittest discover -s tests -v
+      - name: Archive validation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compass-validation-${{ matrix.os }}
+          path: .keel/integration-validation.json
+          if-no-files-found: warn

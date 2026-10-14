@@ -2,6 +2,7 @@ import argparse
 import json
 from pathlib import Path
 import sqlite3
+import subprocess
 
 from .index import RepositoryIndex, build_index, update_index
 from .vectors import HashEmbedder, OllamaEmbedder
@@ -26,6 +27,30 @@ def main(argv=None):
     report = sub.add_parser("report", help="Export measured cost-quality tables and Pareto frontiers")
     report.add_argument("--input", type=Path, required=True)
     report.add_argument("--output-dir", type=Path, required=True)
+    validation = sub.add_parser("validate", help="Run real tree-sitter, LanceDB and official MCP SDK probes")
+    validation.add_argument("--components", nargs="+", choices=["tree_sitter", "lancedb", "mcp_sdk"])
+    validation.add_argument("--require-all", action="store_true", help="Fail if any selected integration is unavailable")
+    validation.add_argument("--output", type=Path)
+    benchmark = sub.add_parser("benchmark", help="Evaluate local canonical CORE or SWE-Explore exports")
+    formats = benchmark.add_subparsers(dest="benchmark_format", required=True)
+    core = formats.add_parser("core")
+    core.add_argument("--data-dir", type=Path, required=True)
+    core.add_argument("--revision", required=True)
+    core.add_argument("--level", type=int, choices=[2, 3], required=True)
+    core.add_argument("--max-documents", type=int, default=200000)
+    core.add_argument("--max-queries", type=int)
+    core.add_argument("--output", type=Path)
+    swe = formats.add_parser("swe")
+    swe.add_argument("--dataset", type=Path, required=True)
+    swe.add_argument("--instance", required=True)
+    swe.add_argument("--repo", type=Path, required=True)
+    swe.add_argument("--issue-map", type=Path)
+    swe.add_argument("--commit-map", type=Path)
+    swe.add_argument("--line-budget", type=int, default=300)
+    swe.add_argument("--mode", choices=["t0", "t1", "t2", "adaptive"], default="adaptive")
+    swe.add_argument("--model")
+    swe.add_argument("--model-url", default="http://localhost:11434")
+    swe.add_argument("--output", type=Path)
     for name in ("symbol", "context", "search", "status"):
         command = sub.add_parser(name)
         command.add_argument("--repo", type=Path, required=True)
@@ -59,7 +84,36 @@ def main(argv=None):
             command.add_argument("--auto-update", action="store_true", help="Refresh stale indexes between MCP calls")
     args = parser.parse_args(argv)
     try:
-        if args.command == "serve":
+        if args.command == "validate":
+            from .validation import validate_components
+            if args.output and args.output.exists():
+                raise ValueError("Validation output already exists; choose a new path")
+            result = validate_components(args.components)
+            if args.output:
+                args.output.parent.mkdir(parents=True, exist_ok=True)
+                with args.output.open("x", encoding="utf-8") as output:
+                    json.dump(result, output, ensure_ascii=False, indent=2)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 1 if any(check["status"] == "failed" for check in result["checks"]) or (args.require_all and not result["all_passed"]) else 0
+        elif args.command == "benchmark":
+            from .benchmarks import evaluate_core, evaluate_swe, load_core, load_swe_instance
+            if args.output and args.output.exists():
+                raise ValueError("Benchmark output already exists; choose a new path")
+            if args.benchmark_format == "core":
+                dataset = load_core(args.data_dir, revision=args.revision, level=args.level, max_documents=args.max_documents)
+                result = evaluate_core(dataset, max_queries=args.max_queries)
+            else:
+                issue_map = json.loads(args.issue_map.read_text(encoding="utf-8")) if args.issue_map else None
+                commit_map = json.loads(args.commit_map.read_text(encoding="utf-8")) if args.commit_map else None
+                instance = load_swe_instance(args.dataset, args.instance, args.repo, issue_map=issue_map, commit_map=commit_map)
+                model = OllamaModel(args.model, args.model_url) if args.model else None
+                with RepositoryIndex(args.repo) as index:
+                    result = evaluate_swe(index, instance, line_budget=args.line_budget, mode=args.mode, model=model)
+            if args.output:
+                args.output.parent.mkdir(parents=True, exist_ok=True)
+                with args.output.open("x", encoding="utf-8") as output:
+                    json.dump(result, output, ensure_ascii=False, indent=2)
+        elif args.command == "serve":
             from .mcp import StdioServer
             from .service import CompassService
             routing = routing_from_dict(json.loads(args.routing.read_text(encoding="utf-8")) if args.routing else None)
@@ -111,7 +165,7 @@ def main(argv=None):
                     result = {**index.metadata, "stale": index.stale}
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
-    except (ValueError, OSError, KeyError, sqlite3.Error, BudgetExceeded, ModelError) as error:
+    except (ValueError, OSError, KeyError, sqlite3.Error, BudgetExceeded, ModelError, subprocess.SubprocessError) as error:
         parser.exit(2, f"compass: {error}\n")
 
 

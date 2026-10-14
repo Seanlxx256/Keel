@@ -191,7 +191,7 @@ Indexes live under `.compass/generations/<id>/`, with a SQLite database and opti
 
 Each generation records the indexed Python-source fingerprint and available Git HEAD. Query sessions check freshness on open; stale indexes refuse code/graph/vector queries until refreshed. Incremental refresh is described below. Sessions do not continuously watch edits after opening. Generated directories such as `.git`, `.keel`, `.compass`, virtual environments, `node_modules`, `tmp`, `build`, and `dist` are excluded. This is a fixed exclusion list, not a `.gitignore` interpreter. Symlinked entries are not followed. Invalid UTF-8, syntax errors, and Python files over 1 MB appear in diagnostics and mark the index incomplete.
 
-All query results include index identity, freshness, completeness, and uncalibrated `confidence: null`. No retrieval-quality or latency improvement is claimed. Multi-language grammars, cross-encoder reranking, and formal CORE-Bench/SWE-Explore adapters remain unimplemented. The following milestones build on this index.
+All query results include index identity, freshness, completeness, and uncalibrated `confidence: null`. No retrieval-quality or latency improvement is claimed. Multi-language grammars and cross-encoder reranking remain unimplemented. Local CORE-Bench/SWE-Explore format adapters are available below; official evaluator parity and public-data runs remain unverified. The following milestones build on this index.
 
 **Validation status:** Python AST + SQLite symbols/graph/hash-vector paths are tested locally. The current environment cannot install tree-sitter/LanceDB because package-network access is unavailable; their real integration tests are present but skipped until dependencies are installed. Ollama embeddings are tested with mocked HTTP responses, not a live embedding model.
 
@@ -242,7 +242,7 @@ python -m compass evaluate --repo . --dataset examples/retrieval-queries.jsonl -
 
 The included dataset is a **three-query synthetic self-repository smoke fixture**, not CORE-Bench or SWE-Explore. The evaluator reports binary file Hit@K, Recall@K, NDCG@K, retrieval latency, chat tokens/calls, tool/vector query counts, failures, deferred upgrades, and recall regret relative to the evaluated modes. Rankings deduplicate files within the top-K returned symbol results; this granularity must be aligned before comparing with any public benchmark. Output paths must be new files.
 
-Use `--modes t0 t1 t2 adaptive --model YOUR_CHAT_MODEL` for a full configured-tier comparison. Limits apply separately to each query/mode; the total experiment is not covered by one shared budget. The reference oracle is limited to the modes actually run. The report explicitly sets `public_benchmark_verified: false`. This is an evaluation scaffold, not a completed Pareto experiment or a claim of benchmark improvement. Canonical public-data loaders, split validation, parameter calibration, representative repetitions, and trained-reranker/live-model quality validation remain future work.
+Use `--modes t0 t1 t2 adaptive --model YOUR_CHAT_MODEL` for a full configured-tier comparison. Limits apply separately to each query/mode; the total experiment is not covered by one shared budget. The reference oracle is limited to the modes actually run. The report explicitly sets `public_benchmark_verified: false`. This is an evaluation scaffold, not a completed Pareto experiment or a claim of benchmark improvement. The separate canonical-format adapters below preserve document and region labels. Official evaluator parity, split validation, parameter calibration, representative repetitions, and trained-reranker/live-model quality validation remain future work.
 
 The synthetic demo (`python examples/retrieval_demo.py`) exercises T0, T1, and a scripted three-step T2 graph exploration without API access. Retrieval references: [LanceDB hybrid search and RRF](https://docs.lancedb.com/search/hybrid-search/) and [Ollama Chat API](https://docs.ollama.com/api/chat).
 
@@ -299,3 +299,42 @@ python -m compass report --input .keel/retrieval-evaluation.json --output-dir .k
 Outputs are `report.md`, `comparison.csv`, and `frontiers.json`. Frontiers maximize recall, NDCG, or file-hit rate while minimizing observed latency, chat tokens, model/tool calls, or vector-query count. Failed, deferred, and step-limited modes are excluded. Equal cost/quality ties remain nondominated. Reports preserve index and dataset labels and explicitly note measurement limits; they do not establish statistical significance, embedding-token costs, public-benchmark validity, or production savings.
 
 Evaluation JSON now includes normalized queries/labels, a dataset fingerprint, routing settings, limits, and the configured chat-model name to support review. Model-weight pinning and repeated-trial uncertainty remain future work. The end-to-end `python examples/compass_closure_demo.py` demonstrates incremental signature invalidation, an actual MCP subprocess exchange, and a synthetic report export without optional packages or API calls. This closes the local W5 prototype; representative Pareto experiments and external client validation remain outstanding.
+
+
+## Canonical benchmark formats
+
+These commands consume local exports. They do not download data, authenticate its origin, or establish official scores. Reports record input SHA-256 hashes and a declared revision, and retain `public_benchmark_verified: false`.
+
+For a repository export from [CORE-Bench](https://github.com/zhangfw123/CORE-Bench-Eval), provide `corpus.jsonl` and `queries.jsonl` with canonical `_id`/`text` fields, plus `qrels.jsonl` (`query_id`, `corpus_id`, `score`) or BEIR `qrels/test.tsv`:
+
+```powershell
+python -m compass benchmark core --data-dir D:/datasets/core/repository --revision DATA_REVISION --level 2 --output .keel/core-reference.json
+```
+
+This is a shared Compass BM25 **document baseline**, not the full T0/T1/T2 cascade. It preserves original document IDs, graded labels, and per-query `filtered_corpus_id` temporal candidates. Filtering occurs before ranking truncation; corpus statistics use the complete supplied corpus. Metrics are linear-gain NDCG@10 and Recall@100. Unjudged queries are listed and excluded; invalid references and positive judgments outside temporal candidates fail. The default 200,000-document limit fails rather than silently truncating. `--max-queries` produces an explicitly labeled sample. Official evaluator parity has not been established.
+
+For [SWE-Explore-Bench](https://github.com/Qiushao-E/SWE-Explore-Bench), select one instance and an explicit clean Git checkout at its base commit:
+
+```powershell
+python -m compass index --repo D:/snapshots/project --parser python-ast --vectors sqlite --embedding hash
+python -m compass benchmark swe --dataset D:/datasets/swe.jsonl --instance INSTANCE_ID --repo D:/snapshots/project --issue-map D:/datasets/issues.json --commit-map D:/datasets/commits.json --line-budget 300 --mode adaptive --output .keel/swe-reference.json
+```
+
+Issue and commit maps are JSON objects keyed by instance ID; omit them when the record supplies `problem_statement` and `base_commit` (or `meta.base_commit`). Dataset-provided repository paths do not select the checkout. Tracked edits and untracked source inputs, including Git-ignored files, are rejected; generated index/cache directories are allowed. Keep dataset exports outside the checkout. Retrieval receives only the issue text, with an 8,000-character query limit; gold labels are used for scoring afterward.
+
+The adapter validates file/region bounds, handles EOF regions, exports ranked regions within the line budget, and computes a reference subset of line precision/recall/F1, core-file hit rate, context efficiency, and first useful hit. Overlapping ranges do not inflate union-based metrics. Non-Python gold files stay in the denominator and are reported as unindexed. Current retrieval is Python-only; hash embeddings are lexical. These limitations prevent treating the result as an official SWE-Explore score or a complete public benchmark run.
+
+## Real integration validation
+
+Install optional integrations in an environment with package access:
+
+```powershell
+python -m pip install -e ".[compass,compass-vectors,validation]"
+python -m compass validate --require-all --output .keel/integration-validation.json
+```
+
+The probes exercise real tree-sitter extraction and incremental updates, LanceDB persistence/search/vector reuse, and an official Python MCP SDK client against the stdio subprocess (discovery, structured results, refresh, tool errors, and ping). SDK validation currently targets the maintained [v1 client API](https://github.com/modelcontextprotocol/python-sdk/tree/v1.x), pinned below v2. It does not validate SDK v2.
+
+Each component reports `passed`, `failed`, or `unavailable`, with installed versions and evidence. Missing libraries never count as passes. `--require-all` exits 1 for either unavailable or failed integrations; without it, unavailable components are reported but only failed probes cause exit 1. Output files must be new. Select probes with `--components tree_sitter lancedb mcp_sdk`.
+
+The GitHub Actions workflow in `.github/workflows/compass-integrations.yml` installs the extras, requires all probes, runs regression tests on Windows and Linux, and archives validation evidence. Adding this workflow does not establish that a hosted run has passed. Native integrations and SDK interoperability remain unverified in the current local environment because the optional packages are unavailable.
