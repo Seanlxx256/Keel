@@ -511,3 +511,16 @@ A native access violation was reproduced while parsing the real Flask `src/flask
 The optional native parser regression runs a generated 180-method class repeatedly under aggressive garbage collection in an isolated subprocess. A native failure then fails the test rather than terminating the entire test runner. The SWE PowerShell entry point also enables Python's fault handler so a future native crash prints diagnostic stacks instead of disappearing behind the last heartbeat.
 
 The first real index retry also encountered a distinct Ollama embedding buffer-allocation failure (HTTP 500). The SWE runner now explicitly sets token compute `num_batch=32`; override it with `-EmbeddingNumBatch` or Python `--embedding-num-batch`. This is separate from the number of documents per HTTP request. The setting is retained in index embedding metadata and restored for subsequent queries/updates. Oversized inputs still fail because truncation remains disabled. Small-batch probes passed, but this setting is not a guarantee that every model/context fits available memory. Embedding HTTP errors include a bounded server error message when available.
+
+### Local agent tool gateway
+
+Agent sessions use `keel.gateway.ToolGateway` for tool discovery and dispatch.
+The gateway checks the role allowlist, exact argument fields and types, declared
+write targets, and session-scoped evidence visibility before executing a tool.
+Workspace operations retain budget charging; the gateway adds no duplicate charge.
+Every attempt emits correlated `gateway_call_started` / `gateway_call_finished`
+events with status, duration, and exception type. Argument values and returned
+source text are omitted from these gateway events.
+
+This is the local gateway foundation for W6?7. External MCP client transport,
+OTel export, and live container isolation validation remain separate work.
