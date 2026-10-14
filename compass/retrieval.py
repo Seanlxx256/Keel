@@ -231,9 +231,34 @@ class Retriever:
                      "Query expansion preserves the original query. No writes or shell execution exist."},
                     {"role": "user", "content": json.dumps({"query": original, "seeds": self._preview(list(visible.values()))}, ensure_ascii=False)}]
         for step in range(self.routing.max_steps):
+            final_turn = step == self.routing.max_steps - 1
+            identifiers = list(visible)
+            id_schema = {"type": "string", "enum": identifiers} if identifiers else {"type": "string"}
+            ids_schema = {"type": "array", "items": id_schema, "maxItems": min(100, len(visible))}
+            variants = [{"type": "object", "properties": {"final": ids_schema},
+                         "required": ["final"], "additionalProperties": False}]
+            if not final_turn:
+                for key, value in (("query", {"type": "string", "minLength": 1, "maxLength": 1000}),
+                                   ("expand", ids_schema), ("read", id_schema)):
+                    if key == "read" and not identifiers:
+                        continue
+                    properties = {key: value}
+                    if key == "read":
+                        properties["offset"] = {"type": "integer", "minimum": 0}
+                    variants.append({"type": "object", "properties": properties,
+                                     "required": [key], "additionalProperties": False})
+            schema = {"oneOf": variants}
+            messages.append({"role": "user", "content": json.dumps({
+                "remaining_turns": self.routing.max_steps - step,
+                "instruction": "Return final now, selecting relevant visible IDs; use [] if none are relevant."
+                if final_turn else "Choose exactly one supported action. Copy IDs exactly from visible evidence.",
+                "action_schema": schema}, ensure_ascii=False)})
             estimate = len(json.dumps(messages, ensure_ascii=False).encode())
             self.budget.allow_model(estimate, self.routing.max_output)
-            reply = self.model.complete(messages, timeout=self.budget.remaining, max_output=self.routing.max_output)
+            structured = getattr(self.model, "complete_json", None)
+            reply = (structured(messages, schema=schema, timeout=self.budget.remaining, max_output=self.routing.max_output)
+                     if callable(structured) else self.model.complete(messages, timeout=self.budget.remaining,
+                                                                      max_output=self.routing.max_output))
             if not isinstance(reply.content, str) or (reply.tokens is not None and (type(reply.tokens) is not int or reply.tokens < 0)):
                 raise ModelError("Invalid Compass exploration reply or token usage")
             self.budget.charge_tokens(reply.tokens if reply.tokens is not None else estimate + len(reply.content.encode()))
@@ -247,6 +272,8 @@ class Retriever:
                     identifiers = self._ids(action["final"], visible)
                     trace.append({"tier": "T2", "step": step, "action": "final", "hits": len(identifiers)})
                     return [visible[identifier] for identifier in identifiers], "completed"
+                if final_turn:
+                    raise ValueError("Last turn requires a final selection of visible IDs")
                 if set(action) == {"query"} and isinstance(action["query"], str) and 0 < len(action["query"]) <= 1000:
                     query = original + "\n" + action["query"]
                     rows, _, _ = self.hybrid(query)
@@ -275,9 +302,11 @@ class Retriever:
                 else:
                     raise ValueError("Unsupported exploration action")
             except (ValueError, KeyError, TypeError) as error:
-                observation = {"error": str(error)[:500]}
+                observation = {"error": str(error)[:500], "supported_actions": schema,
+                               "visible_ids": list(visible)}
                 action_name = "invalid"
-            trace.append({"tier": "T2", "step": step, "action": action_name, "visible": len(visible)})
+            trace.append({"tier": "T2", "step": step, "action": action_name, "visible": len(visible),
+                          **({"error": observation["error"]} if action_name == "invalid" else {})})
             self.record("retrieval_observation", {"step": step, "observation": observation})
             messages.extend([{"role": "assistant", "content": reply.content},
                              {"role": "user", "content": json.dumps(observation, ensure_ascii=False)}])

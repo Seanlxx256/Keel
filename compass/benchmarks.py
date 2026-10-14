@@ -312,13 +312,13 @@ def region_metrics(predictions, core, optional, core_files):
             "first_useful_hit": first, "predicted_unique_lines": predicted, "core_lines": relevant}
 
 
-def evaluate_swe(index, instance, *, line_budget=300, mode="adaptive", model=None, routing=None, budget=None):
+def evaluate_swe(index, instance, *, line_budget=300, mode="adaptive", model=None, routing=None, budget=None, record=None):
     if type(line_budget) is not int or not 1 <= line_budget <= 100000:
         raise ValueError("line_budget must be between 1 and 100000")
     if Path(instance["repo"]).resolve() != index.root or index.metadata["git_ref"] != instance["base_commit"]:
         raise ValueError("SWE snapshot and index identities do not match")
     check_snapshot(index.root, instance["base_commit"])
-    result = Retriever(index, model=model, routing=routing, budget=budget).retrieve(instance["query"], 100, mode)
+    result = Retriever(index, model=model, routing=routing, budget=budget, record=record).retrieve(instance["query"], 100, mode)
     predictions, remaining = [], line_budget
     for row in result["results"]:
         if remaining == 0:

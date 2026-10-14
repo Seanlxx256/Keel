@@ -120,6 +120,10 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(body["format"], "json")
         self.assertEqual(body["options"]["num_predict"], 100)
         self.assertEqual(reply.tokens, 15)
+        schema = {"type": "object", "properties": {"final": {"type": "array"}}, "required": ["final"]}
+        with patch("keel.models.urllib.request.urlopen", return_value=Response()) as request:
+            OllamaModel("local-model").complete_json([], schema=schema, timeout=2, max_output=100)
+        self.assertEqual(json.loads(request.call_args.args[0].data)["format"], schema)
 
     def test_transport_error_is_reported_without_credentials(self):
         from urllib.error import URLError

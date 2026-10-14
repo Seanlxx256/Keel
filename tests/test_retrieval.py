@@ -122,6 +122,23 @@ class RetrievalTests(unittest.TestCase):
         self.assertEqual(result["routing"]["mode_status"], "step_limit")
         self.assertEqual(len(result["results"]), 1)
 
+    def test_structured_actions_recover_and_require_explicit_final(self):
+        schemas = []
+        model = Scripted([{"read": "invented-id"}, {"final": [self.save_id]}])
+        def structured(messages, *, schema, **kwargs):
+            schemas.append(copy.deepcopy(schema))
+            return model.complete(messages, **kwargs)
+        model.complete_json = structured
+        result = Retriever(self.index, model=model, routing=self.relaxed(max_steps=2)).retrieve(
+            "persist purchase", mode="t2")
+        self.assertEqual(result["routing"]["mode_status"], "completed")
+        self.assertEqual(result["usage"]["model_calls"], 2)
+        self.assertIn("visible symbol IDs", result["routing"]["trace"][1]["error"])
+        feedback = json.loads(model.calls[1][-2]["content"])
+        self.assertIn(self.save_id, feedback["visible_ids"])
+        self.assertEqual(len(schemas[-1]["oneOf"]), 1)
+        self.assertIn(self.save_id, schemas[-1]["oneOf"][0]["properties"]["final"]["items"]["enum"])
+
     def test_model_and_tool_budget_exhaustion_stop_retrieval(self):
         model = Scripted([{"read": self.save_id}])
         with self.assertRaises(BudgetExceeded):

@@ -102,6 +102,11 @@ class SweepTests(unittest.TestCase):
         self.assertEqual(t2["cost"]["model_calls"], 1)
         self.assertEqual(t2["cost"]["tokens"], 7)
         self.assertEqual(t2["quality"]["line_recall"], 1)
+        events = [json.loads(line) for line in (self.root / "results/events.jsonl").read_text().splitlines()]
+        replies = [row for row in events if row["event"] == "retrieval_model_reply"]
+        self.assertEqual(len(replies), 2)
+        self.assertEqual({row["repeat"] for row in replies}, {0, 1})
+        self.assertTrue(all(row["mode"] == "t2" and row["data"]["tokens"] == 7 for row in replies))
         from compass.calibration import load_sweeps
         samples, _, _ = load_sweeps([self.root / "results/sweep.json"], 3)
         self.assertEqual(samples[0]["repository"], "org/repo")

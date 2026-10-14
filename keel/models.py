@@ -31,8 +31,14 @@ class OllamaModel:
         self.model, self.url = model, base_url.rstrip("/") + "/api/chat"
 
     def complete(self, messages, *, timeout, max_output):
+        return self._complete(messages, timeout=timeout, max_output=max_output, response_format="json")
+
+    def complete_json(self, messages, *, schema, timeout, max_output):
+        return self._complete(messages, timeout=timeout, max_output=max_output, response_format=schema)
+
+    def _complete(self, messages, *, timeout, max_output, response_format):
         request = urllib.request.Request(self.url, data=json.dumps({
-            "model": self.model, "messages": messages, "stream": False, "format": "json",
+            "model": self.model, "messages": messages, "stream": False, "format": response_format,
             "options": {"num_predict": max_output, "temperature": 0},
         }).encode(), headers={"Content-Type": "application/json"}, method="POST")
         try:

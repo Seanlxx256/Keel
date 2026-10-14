@@ -66,8 +66,13 @@ def run_swe_sweep(index, instance, output_dir, *, modes=("t0", "t1", "adaptive")
         for mode, count in order:
             budget = Budget(limits)
             row = {"mode": mode, "line_budget": count, "repeat": repeat, "status": "failed"}
+            def record(event, data):
+                with (output_dir / "events.jsonl").open("a", encoding="utf-8") as stream:
+                    stream.write(json.dumps({"mode": mode, "line_budget": count, "repeat": repeat,
+                                             "event": event, "data": data}, ensure_ascii=False) + "\n")
             try:
-                result = evaluate_swe(index, instance, line_budget=count, mode=mode, model=model, routing=routing, budget=budget)
+                result = evaluate_swe(index, instance, line_budget=count, mode=mode, model=model, routing=routing,
+                                      budget=budget, record=record)
                 status = result["routing"]["mode_status"]
                 row["result"] = result
                 row["status"] = "passed"
@@ -91,6 +96,7 @@ def run_swe_sweep(index, instance, output_dir, *, modes=("t0", "t1", "adaptive")
               "query_sha256": hashlib.sha256(instance["query"].encode()).hexdigest(),
               "index_metadata": index.metadata, "routing": asdict(routing), "limits_per_run": asdict(limits),
               "implementation_sha256": {name: file_digest(Path(__file__).parent / name) for name in ("sweep.py", "benchmarks.py", "retrieval.py", "lexical.py")},
+              "model_adapter_sha256": file_digest(Path(__file__).resolve().parent.parent / "keel/models.py"),
               "model": {"class": type(model).__name__ if model else None, "name": getattr(model, "model", None)},
               "seed": seed, "repeats": repeats, "all_passed": all(row["eligible"] for row in rows),
               "summary": rows, "frontiers": frontiers, "public_benchmark_verified": False,
