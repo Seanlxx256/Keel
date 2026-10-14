@@ -4,7 +4,7 @@ A reliability runtime for long-horizon coding tasks.
 
 Keel is a governance layer around coding-agent execution. It targets runtime failures such as wasted retries, timeouts, premature completion, and misleading validation. The goal is to measure improvements under a fixed model and budget.
 
-Compass now has a Python-first index prototype with structural chunks, a SQLite symbol/call/import graph, optional vector adapters, and its own CLI. Adaptive retrieval, MCP serving, the early-stopping predictor, and isolated concurrent workspaces remain planned.
+Compass now has a Python-first index, a SQLite symbol/call/import graph, optional vector adapters, adaptive T0/T1/T2 retrieval, and a direct Keel integration. MCP serving, the early-stopping predictor, and isolated concurrent workspaces remain planned.
 
 ## Current implementation
 
@@ -20,6 +20,7 @@ Scout, Planner, and each Implementer receive independent conversation histories.
 | Task execution | DAG validation, sequential scheduling, per-item write scopes |
 | Context ledger | SQLite facts, complete evidence storage, paginated recall |
 | Read cache | Content-addressed file reads and duplicate-call counts |
+| Retrieval | Exact lookup, BM25/vector fusion, heuristic escalation, bounded read-only model exploration |
 | Budgets | Tool calls, model calls, token accounting, wall-clock checks |
 | Static audit | Protected paths, Python AST invariants, selected test configuration checks |
 | Execution audit | Optional pre/post JUnit comparison, test identities, skips, failures |
@@ -36,6 +37,7 @@ From the repository root:
 ```powershell
 python examples/demo.py
 python examples/compass_demo.py
+python examples/retrieval_demo.py
 python -m unittest discover -s tests -v
 python -m keel --help
 ```
@@ -142,7 +144,7 @@ Exit codes: `0` for a passed run, `1` for a recorded failed run, and `2` for inv
 
 - Validate Docker isolation in a real Linux-container environment and strengthen resource/process control.
 - Expand adversarial audit evaluation and mutation operators; measure false positives and misses.
-- Implement Compass AST indexing, hybrid retrieval, evidence-based escalation, and MCP integration.
+- Complete Compass public benchmark adapters, calibrated routing, cross-encoder reranking, incremental updates, and MCP serving.
 - Add isolated concurrent workspaces, bounded Critic retries, and richer context management.
 - Export OpenTelemetry spans, collect labeled trajectories, and train the early-stopping predictor.
 - Run public benchmarks and controlled ablations under fixed models and budgets.
@@ -188,8 +190,57 @@ Indexes live under `.compass/generations/<id>/`, with a SQLite database and opti
 
 Each generation records the indexed Python-source fingerprint and available Git HEAD. Query sessions check freshness on open; stale indexes refuse code/graph/vector queries and must be rebuilt. This is full rebuild plus stale detection, **not incremental indexing**. Sessions do not continuously watch edits after opening. Generated directories such as `.git`, `.keel`, `.compass`, virtual environments, `node_modules`, `tmp`, `build`, and `dist` are excluded. This is a fixed exclusion list, not a `.gitignore` interpreter. Symlinked entries are not followed. Invalid UTF-8, syntax errors, and Python files over 1 MB appear in diagnostics and mark the index incomplete.
 
-All query results include index identity, freshness, completeness, and uncalibrated `confidence: null`. No retrieval-quality or latency improvement is claimed. Multi-language grammars, hybrid/BM25 retrieval, reranking, T2 exploration, escalation gates, CORE-Bench/SWE-Explore evaluation, MCP serving, and automatic Keel integration are not implemented in this milestone.
+All query results include index identity, freshness, completeness, and uncalibrated `confidence: null`. No retrieval-quality or latency improvement is claimed. Multi-language grammars, cross-encoder reranking, formal CORE-Bench/SWE-Explore adapters, and MCP serving remain unimplemented. The following retrieval milestone builds on this index.
 
 **Validation status:** Python AST + SQLite symbols/graph/hash-vector paths are tested locally. The current environment cannot install tree-sitter/LanceDB because package-network access is unavailable; their real integration tests are present but skipped until dependencies are installed. Ollama embeddings are tested with mocked HTTP responses, not a live embedding model.
 
 Implementation references: [py-tree-sitter](https://github.com/tree-sitter/py-tree-sitter), [LanceDB quickstart](https://docs.lancedb.com/quickstart), and [Ollama embeddings](https://docs.ollama.com/api/embed).
+
+## Adaptive retrieval prototype (W3-4)
+
+`retrieve` runs a cascade; `search` remains the raw vector-only query command:
+
+```powershell
+python -m compass retrieve --repo . RepositoryIndex
+python -m compass retrieve --repo . "validate embedding vectors" --mode t1 --limit 5
+python -m compass retrieve --repo . "which callers depend on repository indexing" --model YOUR_CHAT_MODEL
+```
+
+- **T0:** a unique exact symbol match or an exact indexed file path. Ambiguous symbol names fall through to T1 in adaptive mode.
+- **T1:** a local BM25 reference implementation over chunk metadata and code, plus the configured vector backend, merged by reciprocal rank fusion (RRF). Results retain channel/rank provenance. An index without vectors runs a clearly labeled BM25-only path. Cross-encoder reranking is not yet implemented.
+- **Upgrade gate:** evaluate top relevance, top-candidate score entropy, lexical/vector top-10 overlap, file span, and index completeness after T1. Thresholds are configurable heuristics; they have not been calibrated on a held-out benchmark. `confidence` stays null. Hash-vector signals are lexical smoke-test signals, not semantic confidence.
+- **T2:** an explicitly configured chat model may add query terms while preserving the original API/error anchors, read paginated candidate code, traverse resolved caller/callee edges, and select discovered symbol IDs. It cannot write files, run shell commands, or access arbitrary paths. Steps, discovered nodes, graph hops, output size, model calls, tools, tokens, and request time are bounded. A missing model records `model_unconfigured` and returns T1 evidence without pretending T2 ran; a step limit is reported explicitly. Hard budget exhaustion fails the request.
+
+Pass `--mode t0`, `--mode t1`, or `--mode t2` for comparisons. T2 also runs T1 to obtain its seeds. `--model` selects an Ollama chat model and is separate from the embedding model used during indexing. No chat call is made unless T2 is entered. Optional limits include `--max-model-calls`, `--max-tool-calls`, `--max-tokens`, and `--max-wallclock`. These are application limits, not operating-system resource isolation. Local BM25 and exact SQLite vector search scan the corpus and are intended as reference implementations.
+
+Use `--routing path/to/routing.json` to override fields such as `min_relevance`, `min_overlap`, `max_entropy`, `max_files`, `candidates`, `max_steps`, `max_nodes`, and `graph_hops`. Invalid settings fail rather than silently resetting. Responses include the executed tier, gate signals, upgrade reasons, route trace, per-request counters, latency, and index identity. Token counters cover chat-model calls only; embedding tokens are not available from this interface. Vector query counts are reported separately. Routing latency excludes opening the index and its initial freshness scan; evaluation latency also includes retriever setup.
+
+### Keel integration
+
+Build a fresh Compass index before enabling this configuration in a Keel task:
+
+```json
+"retrieval": {
+  "provider": "compass",
+  "allow_t2": false,
+  "routing": {"max_nodes": 40, "max_steps": 4}
+}
+```
+
+`search_code` then uses the cascade; `find_symbol` and `get_context` become available to read-capable roles. Gate decisions, exploration replies, and observations are archived in the existing ledger and trace. All exploration calls share the run's budget. Agent-mode tasks with `allow_t2: true` reuse their configured chat model for T2. Existing tasks default to literal text search.
+
+This is an in-process integration, not an MCP gateway. Each tool call opens a new index session, so edits invalidate subsequent Compass queries. Keel reports stale-index errors and can still use its file-reading tools; automatic rebuilds and incremental updates are not implemented yet. Compass tool results are bounded previews in role contexts, with complete observations retained in the ledger.
+
+### Offline evaluation scaffold
+
+Evaluate normalized JSONL records with `id`, `query`, nonempty repository-relative `relevant_files`, and an optional `source` label:
+
+```powershell
+python -m compass evaluate --repo . --dataset examples/retrieval-queries.jsonl --output .keel/retrieval-evaluation.json
+```
+
+The included dataset is a **three-query synthetic self-repository smoke fixture**, not CORE-Bench or SWE-Explore. The evaluator reports binary file Hit@K, Recall@K, NDCG@K, retrieval latency, chat tokens/calls, tool/vector query counts, failures, deferred upgrades, and recall regret relative to the evaluated modes. Rankings deduplicate files within the top-K returned symbol results; this granularity must be aligned before comparing with any public benchmark. Output paths must be new files.
+
+Use `--modes t0 t1 t2 adaptive --model YOUR_CHAT_MODEL` for a full configured-tier comparison. Limits apply separately to each query/mode; the total experiment is not covered by one shared budget. The reference oracle is limited to the modes actually run. The report explicitly sets `public_benchmark_verified: false`. This is an evaluation scaffold, not a completed Pareto experiment or a claim of benchmark improvement. Canonical public-data loaders, split validation, parameter calibration, representative repetitions, and trained-reranker/live-model quality validation remain future work.
+
+The synthetic demo (`python examples/retrieval_demo.py`) exercises T0, T1, and a scripted three-step T2 graph exploration without API access. Retrieval references: [LanceDB hybrid search and RRF](https://docs.lancedb.com/search/hybrid-search/) and [Ollama Chat API](https://docs.ollama.com/api/chat).

@@ -25,6 +25,9 @@ class AgentSession:
 
     def execute(self, task, final_contract):
         tools = dict(TOOLS)
+        if self.ws.compass_enabled:
+            tools.update(find_symbol='{"name": "symbol name"} -> exact symbol matches',
+                         get_context='{"file": "relative/path.py", "line": 1} -> containing symbol and graph neighbors')
         if self.role == "implementer":
             tools["replace"] = '{"path": "declared file", "old": "unique text", "new": "replacement"}'
         self.messages = [
@@ -100,6 +103,12 @@ class AgentSession:
             if not isinstance(args["query"], str) or not args["query"].strip():
                 raise ValueError("query must be nonempty text")
             value = self.ws.search(args["query"], role=self.role)
+            kind = "symbol"
+        elif tool == "find_symbol":
+            value = self.ws.find_symbol(args["name"], role=self.role)
+            kind = "symbol"
+        elif tool == "get_context":
+            value = self.ws.get_context(args["file"], args["line"], role=self.role)
             kind = "symbol"
         else:
             raise PolicyDenied(f"Unknown tool: {tool}")

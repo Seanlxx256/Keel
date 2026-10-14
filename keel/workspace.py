@@ -14,12 +14,47 @@ IGNORED = {".git", ".keel", ".compass", ".venv", ".venv-deps", "node_modules", "
 
 
 class Workspace:
-    def __init__(self, root: Path, budget: Budget, ledger: Ledger, trace: Trace, runner=None):
+    def __init__(self, root: Path, budget: Budget, ledger: Ledger, trace: Trace, runner=None,
+                 retrieval=None, retrieval_model=None):
         self.root = root.resolve(strict=True)
         if not self.root.is_dir():
             raise ValueError("Repository must be a directory")
         self.budget, self.ledger, self.trace = budget, ledger, trace
         self.runner = runner or CommandRunner()
+        self.retrieval = retrieval or {}
+        from compass.retrieval import validate_retrieval
+        validate_retrieval(self.retrieval)
+        self.retrieval_model = retrieval_model
+
+    @property
+    def compass_enabled(self):
+        return self.retrieval.get("provider") == "compass"
+
+    def _retrieval_record(self, role):
+        def record(event, data):
+            fact_id = self.ledger.add("decision", role, event, data)
+            self.trace.emit(role, event, fact_id=fact_id)
+        return record
+
+    def find_symbol(self, name, role="implementer"):
+        if not self.compass_enabled:
+            raise ValueError("Compass retrieval is not enabled")
+        from compass.index import RepositoryIndex
+        self.budget.charge_tool()
+        with RepositoryIndex(self.root) as index:
+            result = index.find_symbol(name)
+        self.trace.emit(role, "tool_call", tool="find_symbol", name=name)
+        return result
+
+    def get_context(self, file, line, role="implementer"):
+        if not self.compass_enabled:
+            raise ValueError("Compass retrieval is not enabled")
+        from compass.index import RepositoryIndex
+        self.budget.charge_tool()
+        with RepositoryIndex(self.root) as index:
+            result = index.context(file, line)
+        self.trace.emit(role, "tool_call", tool="get_context", file=file, line=line)
+        return result
 
     def path(self, relative: str, write=False) -> Path:
         candidate = Path(relative)
@@ -85,6 +120,17 @@ class Workspace:
         self.trace.emit("implementer", "tool_call", tool="replace", path=relative)
 
     def search(self, query: str, limit=30, role="scout"):
+        if self.compass_enabled:
+            from compass.index import RepositoryIndex
+            from compass.retrieval import Retriever, routing_from_dict
+            with RepositoryIndex(self.root) as index:
+                result = Retriever(index, routing=routing_from_dict(self.retrieval.get("routing")),
+                                   model=self.retrieval_model if self.retrieval.get("allow_t2") else None,
+                                   budget=self.budget, record=self._retrieval_record(role)).retrieve(query, limit)
+            result["matches"] = [{"file": row["path"], "line": row["start_line"], "text": row["signature"][:400]}
+                                 for row in result["results"]]
+            self.trace.emit(role, "tool_call", tool="search_code", query=query, matches=len(result["matches"]), tier=result["tier"])
+            return result
         self.budget.charge_tool()
         matches = []
         for name, path in self.files():

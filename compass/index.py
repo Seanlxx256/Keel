@@ -232,7 +232,7 @@ class RepositoryIndex:
                                         for identifier in sorted(neighbors)],
                              truncated=len(outgoing) > limit or len(incoming) > limit)
 
-    def search_vector(self, query, limit=10):
+    def search_vector(self, query, limit=10, *, timeout=None):
         self.require_fresh()
         self._limit(limit)
         if not isinstance(query, str) or not query.strip():
@@ -241,7 +241,10 @@ class RepositoryIndex:
             raise ValueError("Index has no vectors; rebuild with an explicit vector store and embedding provider")
         if not self.metadata["symbols"]:
             return self.envelope([], tier="vector", embedding=self.metadata["embedding"])
-        vector = embedder_from_spec(self.metadata["embedding"]).embed([query])[0]
+        embedder = embedder_from_spec(self.metadata["embedding"])
+        if timeout is not None and hasattr(embedder, "timeout"):
+            embedder.timeout = min(embedder.timeout, timeout)
+        vector = embedder.embed([query])[0]
         checked_vectors([vector], 1, self.metadata["dimensions"])
         if self.metadata["vector_store"] == "lancedb":
             hits = LanceVectors(self.directory / "lance").search(vector, limit)

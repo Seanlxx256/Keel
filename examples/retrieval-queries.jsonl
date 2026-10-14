@@ -1,0 +1,3 @@
+{"id":"index-symbol","query":"RepositoryIndex","relevant_files":["compass/index.py"],"source":"synthetic-self-repo-smoke"}
+{"id":"vector-validation","query":"validate embedding vectors finite dimensions","relevant_files":["compass/vectors.py"],"source":"synthetic-self-repo-smoke"}
+{"id":"static-calls","query":"resolve lexical imported aliases dynamic targets","relevant_files":["compass/graph.py"],"source":"synthetic-self-repo-smoke"}

@@ -16,6 +16,8 @@ def validate(config: dict):
         raise ValueError("goal must be a nonempty string")
     normalize_acceptance(config.get("acceptance", []))
     validate_execution(config.get("execution", {}))
+    from compass.retrieval import validate_retrieval
+    validate_retrieval(config.get("retrieval", {}))
     items = config.get("work_items", [])
     if not isinstance(items, list) or any(not isinstance(item, dict) or "id" not in item for item in items):
         raise ValueError("work_items must be an array of objects with IDs")
@@ -63,7 +65,8 @@ def run(config: dict, repo: Path, output: Path, *, model=None) -> dict:
     output.mkdir(parents=True, exist_ok=False)
     ledger = Ledger(output / "ledger.sqlite")
     trace = Trace(output / "trace.jsonl")
-    workspace = Workspace(repo, budget, ledger, trace, runner=CommandRunner(config.get("execution")))
+    workspace = Workspace(repo, budget, ledger, trace, runner=CommandRunner(config.get("execution")),
+                          retrieval=config.get("retrieval"), retrieval_model=model)
     result = {"run_id": output.name, "goal": config["goal"], "status": "running",
               "work_items": [], "baseline_verification": [], "verification": [], "failure": None}
     originals = {}
@@ -92,6 +95,7 @@ def run(config: dict, repo: Path, output: Path, *, model=None) -> dict:
             from .agents import generate_plan
             from .models import from_config
             model = model if model is not None else from_config(config.get("model", {}))
+            workspace.retrieval_model = model
             def enter_role(role):
                 nonlocal stage
                 stage = role
