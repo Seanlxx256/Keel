@@ -18,6 +18,22 @@ $runName = "$(Get-Date -Format 'yyyyMMdd-HHmmss')-$([guid]::NewGuid().ToString('
 $runDirectory = Join-Path $projectRoot ".keel/core-verified-batch/$runName"
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 
+function Get-CoreSHA256 {
+    param([string]$LiteralPath)
+    # Windows PowerShell spawned through Python can inherit incompatible PS7 modules.
+    # Hash through .NET so Get-FileHash module resolution cannot invalidate good cache files.
+    $hasher = [System.Security.Cryptography.SHA256]::Create()
+    $stream = $null
+    try {
+        $stream = [IO.File]::OpenRead($LiteralPath)
+        return [BitConverter]::ToString($hasher.ComputeHash($stream)).Replace("-", "").ToLowerInvariant()
+    }
+    finally {
+        if ($null -ne $stream) { $stream.Dispose() }
+        $hasher.Dispose()
+    }
+}
+
 function Write-JsonFile {
     param([string]$Destination, $Value)
     [IO.File]::WriteAllText($Destination, ($Value | ConvertTo-Json -Depth 20), $utf8)
@@ -86,11 +102,14 @@ try {
             if ((Test-Path -LiteralPath $destination) -and (Test-Path -LiteralPath $receiptPath)) {
                 try {
                     $receipt = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($receiptPath, $utf8))
-                    $actual = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant()
+                    $actual = Get-CoreSHA256 -LiteralPath $destination
                     $cached = $receipt.revision -eq $revision -and $receipt.path -eq $path -and `
                         $receipt.sha256 -eq $actual -and (Get-Item -LiteralPath $destination).Length -eq $metadata[0].size
                 }
-                catch { $cached = $false }
+                catch {
+                    Write-Host ("  Cache verification error for {0}: {1}" -f $name, $_.Exception.Message)
+                    $cached = $false
+                }
             }
             if ($cached) {
                 Write-Host "  Cached: $name"
@@ -99,7 +118,7 @@ try {
                 Write-Host "  Downloading: $name"
                 Receive-CoreFile -Url "https://huggingface.co/datasets/zhangfw123/CORE-Bench/resolve/$revision/$path" -Destination $destination
                 if ((Get-Item -LiteralPath $destination).Length -ne $metadata[0].size) { throw "Downloaded size mismatch: $path" }
-                $actual = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant()
+                $actual = Get-CoreSHA256 -LiteralPath $destination
                 Write-JsonFile -Destination $receiptPath -Value @{ revision = $revision; path = $path; sha256 = $actual }
             }
             $hashes[$name] = $actual
@@ -113,7 +132,7 @@ try {
         revision = $revision; source_directory = $remoteDirectory; repositories = @($datasets | ForEach-Object { $_.name })
         selection = "All 12 repositories in the pinned Verified Level-2 export; corpus is not sampled"
         max_queries_per_repository = $MaxQueries; seed = $Seed; repeats = $Repeats; offline = [bool]$Offline
-        script_sha256 = (Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        script_sha256 = Get-CoreSHA256 -LiteralPath $PSCommandPath
         public_benchmark_verified = $false
     }
     Write-Host "[3/3] Evaluating 12 repositories, at most $MaxQueries queries each, $Repeats repetitions..."

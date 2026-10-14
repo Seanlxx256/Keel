@@ -16,6 +16,20 @@ $runName = "$(Get-Date -Format 'yyyyMMdd-HHmmss')-$([guid]::NewGuid().ToString('
 $runDirectory = Join-Path $projectRoot ".keel/core-public/$runName"
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 
+function Get-CoreSHA256 {
+    param([string]$LiteralPath)
+    $hasher = [System.Security.Cryptography.SHA256]::Create()
+    $stream = $null
+    try {
+        $stream = [IO.File]::OpenRead($LiteralPath)
+        return [BitConverter]::ToString($hasher.ComputeHash($stream)).Replace("-", "").ToLowerInvariant()
+    }
+    finally {
+        if ($null -ne $stream) { $stream.Dispose() }
+        $hasher.Dispose()
+    }
+}
+
 function Receive-CoreFile {
     param([string]$Url, [string]$Destination)
     $partial = "$Destination.partial"
@@ -79,7 +93,7 @@ try {
         if ($metadata.Count -ne 1 -or (Get-Item -LiteralPath $destination).Length -ne $metadata[0].size) {
             throw "Downloaded size differs from the pinned API listing: $name"
         }
-        $hashes[$name] = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant()
+        $hashes[$name] = Get-CoreSHA256 -LiteralPath $destination
     }
     $selection = @{
         source = "https://huggingface.co/datasets/zhangfw123/CORE-Bench"
