@@ -13,11 +13,11 @@ import time
 import uuid
 
 from .graph import link_files
-from .parsing import PythonParser
+from .parsing import ParsedFile, PythonParser, Symbol
 from .vectors import LanceVectors, checked_vectors, embedder_from_spec
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 IGNORED = {".git", ".keel", ".compass", ".venv", ".venv-deps", "venv", "node_modules",
            "__pycache__", ".pytest_cache", "tmp", "build", "dist"}
 
@@ -74,10 +74,11 @@ def _schema(db):
             alias TEXT NOT NULL, target TEXT NOT NULL, imported_module TEXT NOT NULL,
             line INTEGER NOT NULL, resolved_module TEXT);
         CREATE TABLE vectors(id TEXT PRIMARY KEY, vector TEXT NOT NULL);
+        CREATE TABLE parsed_files(path TEXT PRIMARY KEY, payload TEXT NOT NULL);
     """)
 
 
-def build_index(repo: Path, *, parser="tree-sitter", vector_store="none", embedder=None):
+def build_index(repo: Path, *, parser="tree-sitter", vector_store="none", embedder=None, _previous=None):
     root = repo.resolve(strict=True)
     if not root.is_dir():
         raise ValueError("Repository must be a directory")
@@ -99,7 +100,15 @@ def build_index(repo: Path, *, parser="tree-sitter", vector_store="none", embedd
     directory.mkdir(parents=True, exist_ok=False)
     vector_backend = LanceVectors(directory / "lance") if vector_store == "lancedb" else None
     parsed, file_rows, diagnostics = [], [], []
+    previous_files = {row["path"]: dict(row) for row in _previous.db.execute("SELECT * FROM files")} if _previous else {}
+    previous_diagnostics = {entry["path"]: entry for entry in _previous.metadata["diagnostics"]} if _previous else {}
+    update = {"mode": "incremental" if _previous else "full", "parent_generation": _previous.metadata["generation"] if _previous else None,
+              "parsed_files": 0, "reused_files": 0, "changed_files": [], "deleted_files": [],
+              "embedded_symbols": 0, "reused_vectors": 0, "invalidated_symbols": []}
     for name, path in source_files(root):
+        # Parse caches contain raw extraction, not previously resolved edges or dependency text.
+        # Relink all references after applying additions/deletions/signature changes.
+        old = previous_files.get(name)
         if path.stat().st_size > 1_000_000:
             diagnostics.append({"path": name, "error": "File exceeds 1 MB indexing limit"})
             hashed = hashlib.sha256()
@@ -107,9 +116,29 @@ def build_index(repo: Path, *, parser="tree-sitter", vector_store="none", embedd
                 for block in iter(lambda: stream.read(65536), b""):
                     hashed.update(block)
             file_rows.append((name, "", hashed.hexdigest(), "skipped"))
+            if old and old["content_hash"] == hashed.hexdigest():
+                update["reused_files"] += 1
+            else:
+                update["changed_files"].append(name)
             continue
         raw = path.read_bytes()
         hashed = hashlib.sha256(raw).hexdigest()
+        if old and old["content_hash"] == hashed:
+            cached = _previous.db.execute("SELECT payload FROM parsed_files WHERE path=?", (name,)).fetchone()
+            if cached is not None:
+                payload = json.loads(cached[0])
+                payload["symbols"] = [Symbol(**symbol) for symbol in payload["symbols"]]
+                parsed.append(ParsedFile(**payload))
+                file_rows.append((name, old["module"], hashed, old["status"]))
+                update["reused_files"] += 1
+                continue
+            if old["status"] == "parse_error":
+                diagnostics.append(previous_diagnostics[name])
+                file_rows.append((name, old["module"], hashed, "parse_error"))
+                update["reused_files"] += 1
+                continue
+        update["changed_files"].append(name)
+        update["parsed_files"] += 1
         try:
             file = parser_impl.parse(name, raw)
             parsed.append(file)
@@ -117,17 +146,21 @@ def build_index(repo: Path, *, parser="tree-sitter", vector_store="none", embedd
         except (SyntaxError, UnicodeError, ValueError, RecursionError) as error:
             diagnostics.append({"path": name, "error": str(error)[:1000]})
             file_rows.append((name, "", hashed, "parse_error"))
+    update["deleted_files"] = sorted(set(previous_files) - {row[0] for row in file_rows})
+    raw_cache = [(file.path, json.dumps(asdict(file), ensure_ascii=False)) for file in parsed]
     symbols = [symbol for file in parsed for symbol in file.symbols]
     edges, imports = link_files(parsed)
+    _dependency_text(symbols, edges)
     metadata = {"schema_version": SCHEMA_VERSION, "generation": generation, "repo": str(root),
                 "parser": parser, "vector_store": vector_store, "embedding": embedder.spec if vector_store != "none" else None,
                 "index_ref": snapshot, "git_ref": initial_git_ref, "diagnostics": diagnostics,
                 "complete": not diagnostics, "files": len(file_rows), "symbols": len(symbols),
                 "calls": len(edges), "resolved_calls": sum(edge["target_id"] is not None for edge in edges),
-                "imports": len(imports), "dimensions": None, "created_at": time.time()}
+                "imports": len(imports), "dimensions": None, "created_at": time.time(), "update": update}
     db = sqlite3.connect(directory / "symbols.sqlite")
     try:
         _schema(db)
+        db.executemany("INSERT INTO parsed_files VALUES(?,?)", raw_cache)
         db.executemany("INSERT INTO files VALUES(?,?,?,?)", file_rows)
         db.executemany("INSERT INTO symbols VALUES(" + ",".join("?" for _ in range(13)) + ")",
                        [tuple(asdict(symbol).values()) for symbol in symbols])
@@ -136,18 +169,33 @@ def build_index(repo: Path, *, parser="tree-sitter", vector_store="none", embedd
         db.executemany("INSERT INTO imports(path,scope,alias,target,imported_module,line,resolved_module) VALUES(?,?,?,?,?,?,?)",
                        [tuple(entry.values()) for entry in imports])
         if vector_store != "none":
-            records = []
-            for offset in range(0, len(symbols), 32):
-                batch = symbols[offset:offset + 32]
+            cached_vectors = {}
+            if _previous and _previous.metadata["embedding"] == embedder.spec:
+                cached_vectors = {row["embed_text"]: json.loads(row["vector"]) for row in _previous.db.execute(
+                    "SELECT s.embed_text,v.vector FROM symbols s JOIN vectors v ON s.id=v.id")}
+            vectors_by_id = {}
+            missing = []
+            for symbol in symbols:
+                if symbol.embed_text in cached_vectors:
+                    vector = cached_vectors[symbol.embed_text]
+                    metadata["dimensions"] = checked_vectors([vector], 1, metadata["dimensions"])
+                    vectors_by_id[symbol.id] = vector
+                    update["reused_vectors"] += 1
+                else:
+                    missing.append(symbol)
+                    update["invalidated_symbols"].append(symbol.module + "." + symbol.qualname)
+            for offset in range(0, len(missing), 32):
+                batch = missing[offset:offset + 32]
                 vectors = embedder.embed([symbol.embed_text for symbol in batch])
                 metadata["dimensions"] = checked_vectors(vectors, len(batch), metadata["dimensions"])
                 for symbol, vector in zip(batch, vectors):
-                    if vector_store == "sqlite":
-                        db.execute("INSERT INTO vectors VALUES(?,?)", (symbol.id, json.dumps(vector)))
-                    else:
-                        records.append({"id": symbol.id, "vector": vector})
+                    vectors_by_id[symbol.id] = vector
+                    update["embedded_symbols"] += 1
+            # Keep a portable cache even with LanceDB: new immutable generations can
+            # reuse embeddings without mutating or exporting the selected Lance table.
+            db.executemany("INSERT INTO vectors VALUES(?,?)", [(identifier, json.dumps(vector)) for identifier, vector in vectors_by_id.items()])
             if vector_backend is not None:
-                vector_backend.write(records)
+                vector_backend.write([{"id": identifier, "vector": vector} for identifier, vector in vectors_by_id.items()])
         # Reject mixed snapshots rather than publishing stale or internally inconsistent data.
         parsed_snapshot = _fingerprint_entries([(row[0], row[2]) for row in file_rows])
         if parsed_snapshot != snapshot or fingerprint(root) != snapshot or git_ref(root) != initial_git_ref:
@@ -163,6 +211,45 @@ def build_index(repo: Path, *, parser="tree-sitter", vector_store="none", embedd
     return metadata
 
 
+def _dependency_text(symbols, edges):
+    by_id = {symbol.id: symbol for symbol in symbols}
+    dependencies = {}
+    for edge in edges:
+        if edge["source_id"] and edge["target_id"]:
+            dependencies.setdefault(edge["source_id"], set()).add(edge["target_id"])
+    for symbol in symbols:
+        neighbors = [by_id[identifier] for identifier in dependencies.get(symbol.id, set())]
+        neighbors.sort(key=lambda item: (item.module, item.qualname, item.id))
+        signatures = "\n".join(f"{target.module}.{target.qualname}: {target.signature}" for target in neighbors[:32])
+        symbol.embed_text = symbol.embed_text[:8000] + ("\nCalls:\n" + signatures[:4000] if signatures else "")
+
+
+def update_index(repo: Path, *, embedder=None):
+    """Reuse extraction and embeddings; atomically replace the derived graph snapshot."""
+    with RepositoryIndex(repo) as previous:
+        if not previous.stale:
+            return {**previous.metadata, "update": {"mode": "noop", "parsed_files": 0,
+                    "reused_files": previous.metadata["files"], "changed_files": [], "deleted_files": [],
+                    "embedded_symbols": 0, "reused_vectors": previous.metadata["symbols"] if previous.metadata["vector_store"] != "none" else 0}}
+        if previous.metadata["vector_store"] != "none":
+            embedder = embedder or embedder_from_spec(previous.metadata["embedding"])
+            if embedder.spec != previous.metadata["embedding"]:
+                raise ValueError("Incremental update cannot change embedding settings; run a full index build")
+        return build_index(repo, parser=previous.metadata["parser"], vector_store=previous.metadata["vector_store"],
+                           embedder=embedder, _previous=previous)
+
+
+def open_index(repo: Path, *, auto_update=False, record=None):
+    index = RepositoryIndex(repo)
+    if index.stale and auto_update:
+        index.close()
+        metadata = update_index(repo)
+        if record:
+            record("index_updated", {"generation": metadata["generation"], "update": metadata["update"]})
+        index = RepositoryIndex(repo)
+    return index
+
+
 class RepositoryIndex:
     def __init__(self, repo: Path):
         self.root = repo.resolve(strict=True)
@@ -175,7 +262,7 @@ class RepositoryIndex:
             raise ValueError("Invalid index generation")
         self.directory = (manifest.parent / "generations" / generation).resolve(strict=True)
         if not self.directory.is_relative_to(self.root) or manifest_data.get("schema_version") != SCHEMA_VERSION:
-            raise ValueError("Unsupported or invalid Compass index")
+            raise ValueError("Unsupported or invalid Compass index; run a full compass index build")
         self.db = sqlite3.connect((self.directory / "symbols.sqlite").as_uri() + "?mode=ro", uri=True)
         self.db.row_factory = sqlite3.Row
         self.metadata = {row[0]: json.loads(row[1]) for row in self.db.execute("SELECT key,value FROM metadata")}

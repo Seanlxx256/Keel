@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "repo-intel": {
+      "command": "python",
+      "args": ["-m", "compass", "serve", "--repo", "D:/path/to/working-copy", "--auto-update"]
+    }
+  }
+}

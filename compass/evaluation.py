@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import json
 import math
+import hashlib
+from dataclasses import asdict
 from pathlib import Path, PurePosixPath
 import time
 
-from .retrieval import Retriever
+from .retrieval import Retriever, Routing
 from keel.core import Budget, BudgetExceeded, Limits, ModelError
 
 
@@ -60,7 +62,8 @@ def evaluate(index, queries, *, modes=("t0", "t1", "adaptive"), k=10, model=None
         for mode in modes:
             budget = Budget(limits or Limits(max_wallclock=120, max_model_calls=8))
             started = time.perf_counter()
-            record = {"id": query["id"], "mode": mode, "source": query.get("source", "unspecified")}
+            record = {"id": query["id"], "query": query["query"], "relevant_files": query["relevant_files"],
+                      "mode": mode, "source": query.get("source", "unspecified")}
             try:
                 result = Retriever(index, routing=routing, model=model, budget=budget).retrieve(query["query"], limit=k, mode=mode)
                 record.update(file_metrics(result["results"], query["relevant_files"], k), tier=result["tier"],
@@ -76,6 +79,7 @@ def evaluate(index, queries, *, modes=("t0", "t1", "adaptive"), k=10, model=None
         group = [record for record in records if record["mode"] == mode]
         summary[mode] = {"queries": len(group), "failures": sum(row["status"] != "ok" for row in group),
                          "deferred_escalations": sum(row["routing_status"] == "model_unconfigured" for row in group),
+                         "incomplete_explorations": sum(row["routing_status"] == "step_limit" for row in group),
                          **{f"mean_{metric}": sum(row[metric] for row in group) / len(group)
                             for metric in ("hit_file", "recall", "ndcg", "seconds")},
                          **{f"mean_{metric}": sum(row["usage"][metric] for row in group) / len(group)
@@ -89,6 +93,9 @@ def evaluate(index, queries, *, modes=("t0", "t1", "adaptive"), k=10, model=None
             best = max(row["recall"] for row in group)
             oracle.append(best - adaptive["recall"])
     return {"dataset_sources": sorted({query.get("source", "unspecified") for query in queries}),
+            "dataset_ref": hashlib.sha256(json.dumps(queries, ensure_ascii=False, sort_keys=True).encode()).hexdigest(),
+            "routing": asdict(routing or Routing()), "limits": asdict(limits or Limits(max_wallclock=120, max_model_calls=8)),
+            "modes": modes, "chat_model": {"configured": model is not None, "name": getattr(model, "model", type(model).__name__) if model else None},
             "metric_scope": f"binary file relevance at k={k}; unique files within the top-k symbol results",
             "k": k, "index_ref": index.metadata["index_ref"], "embedding": index.metadata["embedding"],
             "summary": summary, "mean_recall_regret_to_evaluated_modes": sum(oracle) / len(oracle) if oracle else None,

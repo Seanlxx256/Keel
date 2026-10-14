@@ -49,14 +49,16 @@ def routing_from_dict(settings=None):
 
 
 def validate_retrieval(settings):
-    if not isinstance(settings, dict) or set(settings) - {"provider", "allow_t2", "routing"}:
-        raise ValueError("retrieval accepts provider, allow_t2 and routing")
+    if not isinstance(settings, dict) or set(settings) - {"provider", "allow_t2", "auto_update", "routing"}:
+        raise ValueError("retrieval accepts provider, allow_t2, auto_update and routing")
     if settings.get("provider", "text") not in {"text", "compass"}:
         raise ValueError("retrieval.provider must be text or compass")
     if type(settings.get("allow_t2", False)) is not bool:
         raise ValueError("retrieval.allow_t2 must be boolean")
+    if type(settings.get("auto_update", False)) is not bool:
+        raise ValueError("retrieval.auto_update must be boolean")
     routing_from_dict(settings.get("routing"))
-    if settings.get("provider", "text") == "text" and (settings.get("allow_t2") or settings.get("routing")):
+    if settings.get("provider", "text") == "text" and (settings.get("allow_t2") or settings.get("auto_update") or settings.get("routing")):
         raise ValueError("Routing and T2 require the Compass provider")
 
 

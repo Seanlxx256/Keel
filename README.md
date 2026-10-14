@@ -4,7 +4,7 @@ A reliability runtime for long-horizon coding tasks.
 
 Keel is a governance layer around coding-agent execution. It targets runtime failures such as wasted retries, timeouts, premature completion, and misleading validation. The goal is to measure improvements under a fixed model and budget.
 
-Compass now has a Python-first index, a SQLite symbol/call/import graph, optional vector adapters, adaptive T0/T1/T2 retrieval, and a direct Keel integration. MCP serving, the early-stopping predictor, and isolated concurrent workspaces remain planned.
+Compass now has a Python-first index, a SQLite symbol/call/import graph, incremental extraction/embedding reuse, adaptive T0/T1/T2 retrieval, a stdio MCP server, and direct Keel integration. The early-stopping predictor and isolated concurrent workspaces remain planned.
 
 ## Current implementation
 
@@ -38,6 +38,7 @@ From the repository root:
 python examples/demo.py
 python examples/compass_demo.py
 python examples/retrieval_demo.py
+python examples/compass_closure_demo.py
 python -m unittest discover -s tests -v
 python -m keel --help
 ```
@@ -144,7 +145,7 @@ Exit codes: `0` for a passed run, `1` for a recorded failed run, and `2` for inv
 
 - Validate Docker isolation in a real Linux-container environment and strengthen resource/process control.
 - Expand adversarial audit evaluation and mutation operators; measure false positives and misses.
-- Complete Compass public benchmark adapters, calibrated routing, cross-encoder reranking, incremental updates, and MCP serving.
+- Complete Compass public benchmark adapters, calibrated routing, cross-encoder reranking, and broader MCP client validation.
 - Add isolated concurrent workspaces, bounded Critic retries, and richer context management.
 - Export OpenTelemetry spans, collect labeled trajectories, and train the early-stopping predictor.
 - Run public benchmarks and controlled ablations under fixed models and budgets.
@@ -188,9 +189,9 @@ The graph links statically identifiable lexical calls, imported aliases, relativ
 
 Indexes live under `.compass/generations/<id>/`, with a SQLite database and optional LanceDB files. Builds publish a generation through an atomic manifest replacement only after parsing, embeddings, and source consistency checks complete. Failed builds leave the previous generation selected. Old and failed generations remain on disk; automatic garbage collection is not implemented.
 
-Each generation records the indexed Python-source fingerprint and available Git HEAD. Query sessions check freshness on open; stale indexes refuse code/graph/vector queries and must be rebuilt. This is full rebuild plus stale detection, **not incremental indexing**. Sessions do not continuously watch edits after opening. Generated directories such as `.git`, `.keel`, `.compass`, virtual environments, `node_modules`, `tmp`, `build`, and `dist` are excluded. This is a fixed exclusion list, not a `.gitignore` interpreter. Symlinked entries are not followed. Invalid UTF-8, syntax errors, and Python files over 1 MB appear in diagnostics and mark the index incomplete.
+Each generation records the indexed Python-source fingerprint and available Git HEAD. Query sessions check freshness on open; stale indexes refuse code/graph/vector queries until refreshed. Incremental refresh is described below. Sessions do not continuously watch edits after opening. Generated directories such as `.git`, `.keel`, `.compass`, virtual environments, `node_modules`, `tmp`, `build`, and `dist` are excluded. This is a fixed exclusion list, not a `.gitignore` interpreter. Symlinked entries are not followed. Invalid UTF-8, syntax errors, and Python files over 1 MB appear in diagnostics and mark the index incomplete.
 
-All query results include index identity, freshness, completeness, and uncalibrated `confidence: null`. No retrieval-quality or latency improvement is claimed. Multi-language grammars, cross-encoder reranking, formal CORE-Bench/SWE-Explore adapters, and MCP serving remain unimplemented. The following retrieval milestone builds on this index.
+All query results include index identity, freshness, completeness, and uncalibrated `confidence: null`. No retrieval-quality or latency improvement is claimed. Multi-language grammars, cross-encoder reranking, and formal CORE-Bench/SWE-Explore adapters remain unimplemented. The following milestones build on this index.
 
 **Validation status:** Python AST + SQLite symbols/graph/hash-vector paths are tested locally. The current environment cannot install tree-sitter/LanceDB because package-network access is unavailable; their real integration tests are present but skipped until dependencies are installed. Ollama embeddings are tested with mocked HTTP responses, not a live embedding model.
 
@@ -229,7 +230,7 @@ Build a fresh Compass index before enabling this configuration in a Keel task:
 
 `search_code` then uses the cascade; `find_symbol` and `get_context` become available to read-capable roles. Gate decisions, exploration replies, and observations are archived in the existing ledger and trace. All exploration calls share the run's budget. Agent-mode tasks with `allow_t2: true` reuse their configured chat model for T2. Existing tasks default to literal text search.
 
-This is an in-process integration, not an MCP gateway. Each tool call opens a new index session, so edits invalidate subsequent Compass queries. Keel reports stale-index errors and can still use its file-reading tools; automatic rebuilds and incremental updates are not implemented yet. Compass tool results are bounded previews in role contexts, with complete observations retained in the ledger.
+Keel currently uses an in-process integration rather than an MCP gateway. Each tool call opens a new index session, so edits invalidate subsequent Compass queries. By default, Keel reports stale-index errors; set `retrieval.auto_update: true` to enable incremental refresh between calls. Index refresh events are archived in the run ledger and trace. Compass tool results are bounded previews in role contexts, with complete observations retained in the ledger.
 
 ### Offline evaluation scaffold
 
@@ -244,3 +245,57 @@ The included dataset is a **three-query synthetic self-repository smoke fixture*
 Use `--modes t0 t1 t2 adaptive --model YOUR_CHAT_MODEL` for a full configured-tier comparison. Limits apply separately to each query/mode; the total experiment is not covered by one shared budget. The reference oracle is limited to the modes actually run. The report explicitly sets `public_benchmark_verified: false`. This is an evaluation scaffold, not a completed Pareto experiment or a claim of benchmark improvement. Canonical public-data loaders, split validation, parameter calibration, representative repetitions, and trained-reranker/live-model quality validation remain future work.
 
 The synthetic demo (`python examples/retrieval_demo.py`) exercises T0, T1, and a scripted three-step T2 graph exploration without API access. Retrieval references: [LanceDB hybrid search and RRF](https://docs.lancedb.com/search/hybrid-search/) and [Ollama Chat API](https://docs.ollama.com/api/chat).
+
+## Compass integration milestone (W5)
+
+### Incremental refresh
+
+**Index schema is now version 2. Rebuild older indexes once** before using updates or the server:
+
+```powershell
+python -m compass index --repo . --parser python-ast --vectors sqlite --embedding hash
+python -m compass update --repo .
+```
+
+`update` retains the selected parser, embedding provider, and vector backend. It scans Python content hashes, reuses unchanged extraction caches, parses added/modified files, removes deleted symbols, and relinks the complete graph. It is content-hash driven, not a Git-diff-only fast path, so it also detects unstaged and untracked Python changes. A no-op preserves the selected generation.
+
+Embedding text includes up to 32 statically resolved callees' qualified signatures. A signature change therefore invalidates relevant caller embeddings even when the caller's source is unchanged. Embeddings are reused by exact retrieval-text equality; a body-only change can reuse its vector because raw code is a separate display representation. This is signature dependency tracking, not transitive semantic-impact inference or generated responsibility-description invalidation.
+
+All refreshes publish a new immutable generation after consistency checks. Unchanged files are not reparsed and unchanged retrieval text is not re-embedded, but the graph, SQLite snapshot, and LanceDB table are rewritten. Portable embedding caches are also stored in SQLite, including for the LanceDB backend. This favors atomic publication over in-place storage updates. Full source hashing, graph relinking, disk copying, old-generation retention, and duplicate vector storage remain scalability costs.
+
+Update reports include parsed/reused files, additions/modifications/deletions, reused/new vectors, invalidated symbols, and the parent generation. Failed refreshes retain the previous manifest; stale data is not silently served. Run a full build after changing parser packages, extraction logic, or embedding weights/settings. There is no cross-process update lock or automatic model-weight digest detection yet.
+
+### MCP stdio server
+
+```powershell
+python -m compass serve --repo D:/path/to/working-copy --auto-update
+```
+
+The repository-bound server is named `repo-intel` and exposes:
+
+| Tool | Purpose |
+| --- | --- |
+| `find_symbol(name, limit)` | Exact symbol lookup |
+| `search_code(query, limit)` | Adaptive retrieval |
+| `impact_analysis(change, limit)` | Candidate change-impact exploration through T2; requires `--model` |
+| `get_context(file, line, limit)` | Containing symbol and graph neighbors |
+
+Omit `--auto-update` to fail on stale indexes. Missing indexes and incompatible schemas require an explicit initial full build. Add `--model YOUR_CHAT_MODEL` to enable T2; this can send retrieved code to the configured model endpoint. All tool arguments are validated, and requests cannot switch the server's repository. No source-edit or command-execution tool is exposed. Auto-update writes only derived index artifacts. Budgets apply per tool request; there is no process-lifetime spending limit.
+
+This is a dependency-free, synchronous JSON-RPC stdio implementation supporting MCP protocol versions `2025-11-25`, `2025-06-18`, and `2024-11-05`. It handles initialization, initialized notifications, pings, tool listing/calls, structured/text results, input limits, errors, UTF-8 framing, and EOF shutdown. Standard output is reserved for newline-delimited protocol messages. It does not provide HTTP transport, tasks, sampling, progress streams, concurrent execution, or preemptive cancellation. Running model/index calls complete or hit their own timeouts before another message is processed.
+
+For a client that accepts `mcpServers`, an illustrative entry is provided in `examples/mcp-config.json`. Install this package in the chosen Python interpreter first; the example is not automatically registered in any application. Protocol and real-subprocess tests pass locally, but official SDK/client interoperability and live LanceDB/model deployment have not been validated.
+
+Protocol references: [MCP lifecycle](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle), [tools](https://modelcontextprotocol.io/specification/2025-11-25/server/tools), and [stdio transport](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports).
+
+### Cost-quality reports
+
+Export an existing normalized evaluation report into a new directory:
+
+```powershell
+python -m compass report --input .keel/retrieval-evaluation.json --output-dir .keel/compass-comparison
+```
+
+Outputs are `report.md`, `comparison.csv`, and `frontiers.json`. Frontiers maximize recall, NDCG, or file-hit rate while minimizing observed latency, chat tokens, model/tool calls, or vector-query count. Failed, deferred, and step-limited modes are excluded. Equal cost/quality ties remain nondominated. Reports preserve index and dataset labels and explicitly note measurement limits; they do not establish statistical significance, embedding-token costs, public-benchmark validity, or production savings.
+
+Evaluation JSON now includes normalized queries/labels, a dataset fingerprint, routing settings, limits, and the configured chat-model name to support review. Model-weight pinning and repeated-trial uncertainty remain future work. The end-to-end `python examples/compass_closure_demo.py` demonstrates incremental signature invalidation, an actual MCP subprocess exchange, and a synthetic report export without optional packages or API calls. This closes the local W5 prototype; representative Pareto experiments and external client validation remain outstanding.

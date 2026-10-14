@@ -36,12 +36,23 @@ class Workspace:
             self.trace.emit(role, event, fact_id=fact_id)
         return record
 
+    def _compass_index(self, role):
+        from compass.index import open_index
+        self.budget.check()
+        index = open_index(self.root, auto_update=self.retrieval.get("auto_update", False),
+                           record=self._retrieval_record(role))
+        try:
+            self.budget.check()
+        except Exception:
+            index.close()
+            raise
+        return index
+
     def find_symbol(self, name, role="implementer"):
         if not self.compass_enabled:
             raise ValueError("Compass retrieval is not enabled")
-        from compass.index import RepositoryIndex
         self.budget.charge_tool()
-        with RepositoryIndex(self.root) as index:
+        with self._compass_index(role) as index:
             result = index.find_symbol(name)
         self.trace.emit(role, "tool_call", tool="find_symbol", name=name)
         return result
@@ -49,9 +60,8 @@ class Workspace:
     def get_context(self, file, line, role="implementer"):
         if not self.compass_enabled:
             raise ValueError("Compass retrieval is not enabled")
-        from compass.index import RepositoryIndex
         self.budget.charge_tool()
-        with RepositoryIndex(self.root) as index:
+        with self._compass_index(role) as index:
             result = index.context(file, line)
         self.trace.emit(role, "tool_call", tool="get_context", file=file, line=line)
         return result
@@ -121,9 +131,8 @@ class Workspace:
 
     def search(self, query: str, limit=30, role="scout"):
         if self.compass_enabled:
-            from compass.index import RepositoryIndex
             from compass.retrieval import Retriever, routing_from_dict
-            with RepositoryIndex(self.root) as index:
+            with self._compass_index(role) as index:
                 result = Retriever(index, routing=routing_from_dict(self.retrieval.get("routing")),
                                    model=self.retrieval_model if self.retrieval.get("allow_t2") else None,
                                    budget=self.budget, record=self._retrieval_record(role)).retrieve(query, limit)
