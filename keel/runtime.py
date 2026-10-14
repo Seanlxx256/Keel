@@ -5,17 +5,17 @@ import json
 import uuid
 from pathlib import Path
 
-from .core import Budget, BudgetExceeded, Ledger, Limits, ModelError, PolicyDenied, Trace
+from .audit import audit_metadata, audit_text
+from .core import AuditFailed, Budget, BudgetExceeded, Ledger, Limits, ModelError, PolicyDenied, Trace
+from .execution import CommandRunner, normalize_acceptance, validate_execution
 from .workspace import Workspace
 
 
 def validate(config: dict):
     if not isinstance(config.get("goal"), str) or not config["goal"].strip():
         raise ValueError("goal must be a nonempty string")
-    commands = config.get("acceptance", [])
-    if not isinstance(commands, list) or not commands or any(not isinstance(c, list) or not c or
-                           any(not isinstance(a, str) or not a for a in c) for c in commands):
-        raise ValueError("acceptance must contain nonempty command argument lists")
+    normalize_acceptance(config.get("acceptance", []))
+    validate_execution(config.get("execution", {}))
     items = config.get("work_items", [])
     if not isinstance(items, list) or any(not isinstance(item, dict) or "id" not in item for item in items):
         raise ValueError("work_items must be an array of objects with IDs")
@@ -46,6 +46,9 @@ def validate(config: dict):
 
 def run(config: dict, repo: Path, output: Path, *, model=None) -> dict:
     ordered = validate(config)
+    mutation_samples = config.get("mutation_samples", 0)
+    if type(mutation_samples) is not int or not 0 <= mutation_samples <= 20:
+        raise ValueError("mutation_samples must be an integer from 0 to 20")
     agent_mode = config.get("mode", "explicit") == "agent"
     if config.get("mode", "explicit") not in {"explicit", "agent"}:
         raise ValueError("mode must be explicit or agent")
@@ -60,14 +63,31 @@ def run(config: dict, repo: Path, output: Path, *, model=None) -> dict:
     output.mkdir(parents=True, exist_ok=False)
     ledger = Ledger(output / "ledger.sqlite")
     trace = Trace(output / "trace.jsonl")
-    workspace = Workspace(repo, budget, ledger, trace)
+    workspace = Workspace(repo, budget, ledger, trace, runner=CommandRunner(config.get("execution")))
     result = {"run_id": output.name, "goal": config["goal"], "status": "running",
-              "work_items": [], "verification": [], "failure": None}
+              "work_items": [], "baseline_verification": [], "verification": [], "failure": None}
     originals = {}
     stage = "scout"
     try:
         trace.emit("runtime", "run_started", goal=config["goal"])
         initial = workspace.snapshot()
+        workspace.runner.check_available()
+        specs = normalize_acceptance(config["acceptance"])
+        if any(spec["junit"] for spec in specs):
+            stage = "baseline_verifier"
+            # Keep command indices aligned while avoiding unnecessary baseline build/lint runs.
+            baseline = []
+            for index, spec in enumerate(specs):
+                if spec["junit"]:
+                    baseline.append(workspace.verify([spec], phase=f"baseline-{index}")[0])
+                else:
+                    baseline.append({"junit_required": False})
+            result["baseline_verification"] = baseline
+            invalid = [index for index, entry in enumerate(baseline) if entry.get("junit_required") and
+                       (entry.get("timeout") or entry.get("metadata", {}).get("collected", 0) == 0)]
+            if invalid:
+                raise AuditFailed([{"rule": "invalid_baseline_test_metadata", "command_index": i} for i in invalid])
+        stage = "scout"
         if agent_mode:
             from .agents import generate_plan
             from .models import from_config
@@ -124,20 +144,39 @@ def run(config: dict, repo: Path, output: Path, *, model=None) -> dict:
         changed = sorted(name for name in initial.keys() | final.keys() if initial.get(name) != final.get(name))
         unexpected = [name for name in changed if name not in originals]
         result["audit"] = {"changed_files": changed, "unexpected_changes": unexpected,
-                           "scope": "workspace diff allowlist; no semantic or test-metadata audit yet"}
+                           "findings": [], "scope": "declared files, Python AST invariants, optional JUnit baseline comparison"}
         if unexpected:
             raise PolicyDenied(f"Changes outside declared edit targets: {unexpected}")
+        findings = []
+        for name, before in originals.items():
+            path = workspace.path(name)
+            findings.extend(audit_text(name, before, path.read_bytes() if path.exists() else b""))
+        findings.extend(audit_metadata(result["baseline_verification"], result["verification"]))
+        result["audit"]["metadata_checked"] = any(spec["junit"] for spec in specs)
+        if findings:
+            raise AuditFailed(findings)
         if len(result["verification"]) != len(config["acceptance"]) or any(
                 v["returncode"] != 0 for v in result["verification"]):
             result["status"] = "failed"
             result["failure"] = {"category": "verification_failed", "stage": "verifier",
                                  "message": "Acceptance commands did not all pass"}
         else:
+            if mutation_samples:
+                from .mutation import run_probes
+                result["mutation"] = {}
+                run_probes(workspace, originals, config["acceptance"], result["verification"],
+                           mutation_samples, result["mutation"])
+                # Acceptance commands must not alter the workspace during probes either.
+                if workspace.snapshot() != final:
+                    raise AuditFailed([{"rule": "workspace_changed_during_mutation"}])
             budget.check()
             result["status"] = "passed"
     except (BudgetExceeded, PolicyDenied, ModelError, ValueError, OSError, SyntaxError) as error:
         result["status"] = "failed"
+        if isinstance(error, AuditFailed):
+            result.setdefault("audit", {})["findings"] = error.findings
         category = "budget_exhausted" if isinstance(error, BudgetExceeded) else (
+            "audit_failed" if isinstance(error, AuditFailed) else
             "policy_denied" if isinstance(error, PolicyDenied) else
             "model_error" if isinstance(error, ModelError) else "execution_error")
         result["failure"] = {"category": category, "stage": stage, "message": str(error)}

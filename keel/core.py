@@ -17,6 +17,12 @@ class PolicyDenied(RuntimeError):
     pass
 
 
+class AuditFailed(PolicyDenied):
+    def __init__(self, findings):
+        self.findings = findings
+        super().__init__("Audit rejected changes: " + ", ".join(f["rule"] for f in findings))
+
+
 class ModelError(RuntimeError):
     pass
 

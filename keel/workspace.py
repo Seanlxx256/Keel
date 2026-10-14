@@ -3,22 +3,23 @@ from __future__ import annotations
 import ast
 import hashlib
 import os
-import subprocess
 from pathlib import Path
 
-from .core import Budget, Ledger, PolicyDenied, Trace, digest
+from .audit import audit_text, protected_path, read_junit
+from .core import AuditFailed, Budget, Ledger, PolicyDenied, Trace, digest
+from .execution import CommandRunner, normalize_acceptance
 
 
 IGNORED = {".git", ".keel", ".venv", "node_modules", "__pycache__"}
-PROTECTED = {"tests", "test", "__tests__", ".github", ".git", ".keel"}
 
 
 class Workspace:
-    def __init__(self, root: Path, budget: Budget, ledger: Ledger, trace: Trace):
+    def __init__(self, root: Path, budget: Budget, ledger: Ledger, trace: Trace, runner=None):
         self.root = root.resolve(strict=True)
         if not self.root.is_dir():
             raise ValueError("Repository must be a directory")
         self.budget, self.ledger, self.trace = budget, ledger, trace
+        self.runner = runner or CommandRunner()
 
     def path(self, relative: str, write=False) -> Path:
         candidate = Path(relative)
@@ -31,10 +32,10 @@ class Workspace:
         if resolved_parts & {".git", ".keel"}:
             raise PolicyDenied("Internal repository and run metadata are not tool-readable")
         if write:
-            parts = {p.lower() for p in candidate.parts} | resolved_parts
-            name = path.name.lower()
-            if parts & PROTECTED or name.startswith("test_") or name.endswith(("_test.py", ".test.js", ".spec.ts", ".spec.js")):
+            if protected_path(relative) or protected_path(path.relative_to(self.root).as_posix()):
                 raise PolicyDenied(f"Implementer cannot modify protected path: {relative}")
+            if path.exists() and path.stat().st_nlink > 1:
+                raise PolicyDenied(f"Implementer cannot modify hard-linked files: {relative}")
         return path
 
     def files(self):
@@ -74,6 +75,11 @@ class Workspace:
         updated = text.replace(old, new, 1)
         if path.suffix == ".py":
             ast.parse(updated, filename=relative)
+        findings = audit_text(relative, text.encode("utf-8"), updated.encode("utf-8"))
+        if findings:
+            fact_id = self.ledger.add("decision", "auditor", "Static audit rejected edit", findings)
+            self.trace.emit("auditor", "edit_rejected", fact_id=fact_id)
+            raise AuditFailed(findings)
         self.budget.charge_tool()
         path.write_bytes(updated.encode("utf-8"))
         self.trace.emit("implementer", "tool_call", tool="replace", path=relative)
@@ -101,26 +107,32 @@ class Workspace:
         self.trace.emit(role, "tool_call", tool="search_code", query=query, matches=len(matches))
         return result
 
-    def verify(self, commands: list[list[str]]):
+    def verify(self, commands, phase="final"):
         results = []
-        for command in commands:
+        for index, spec in enumerate(normalize_acceptance(commands)):
             self.budget.charge_tool()
-            self.trace.emit("verifier", "command_started", command=command)
-            try:
-                # Commands are supplied by the operator, never by work items. No shell expansion.
-                completed = subprocess.run(command, cwd=self.root, shell=False,
-                                           stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                           timeout=self.budget.remaining)
-                result = {"command": command, "returncode": completed.returncode,
-                          "stdout": completed.stdout.decode("utf-8", errors="replace"),
-                          "stderr": completed.stderr.decode("utf-8", errors="replace"), "timeout": False}
-            except subprocess.TimeoutExpired as error:
-                result = {"command": command, "returncode": None, "timeout": True,
-                          "stdout": (error.stdout or b"").decode("utf-8", errors="replace"),
-                          "stderr": (error.stderr or b"").decode("utf-8", errors="replace")}
-            fact = self.ledger.add("test", "verifier", f"{command[0]}: {result['returncode']}", result)
+            reports = self.trace.path.parent / "reports" / phase / str(index)
+            report_path = reports / "report.xml"
+            command = list(spec["command"])
+            if spec["junit"]:
+                # Each invocation gets a new directory; old reports are never reused.
+                reports.mkdir(parents=True, exist_ok=False)
+                reports.chmod(0o777)
+                target = "/keel-reports/report.xml" if self.runner.backend == "docker" else str(report_path.resolve())
+                command = [part.replace("{junit}", target) for part in command]
+            self.trace.emit("verifier", "command_started", command=command, phase=phase)
+            result = self.runner.run(command, self.root, self.budget.remaining,
+                                     reports=reports.resolve() if spec["junit"] else None)
+            result.update(command=spec["command"], junit_required=spec["junit"])
+            if spec["junit"]:
+                result["report_path"] = str(report_path)
+                try:
+                    result["metadata"] = read_junit(report_path)
+                except ValueError as error:
+                    result["metadata_error"] = str(error)
+            fact = self.ledger.add("test", "verifier", f"{phase}: {command[0]}: {result['returncode']}", result)
             self.trace.emit("verifier", "command_finished", fact_id=fact,
-                            returncode=result["returncode"], timeout=result["timeout"])
+                            returncode=result["returncode"], timeout=result["timeout"], phase=phase)
             results.append(result)
             if result["timeout"]:
                 break
