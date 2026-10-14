@@ -2,6 +2,7 @@ import json
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from keel.core import Budget, Ledger, Limits, PolicyDenied, Trace
@@ -26,6 +27,9 @@ class RuntimeTests(unittest.TestCase):
         output = self.root / ".keel" / "runs" / "success"
         result = run(self.config(), self.root, output)
         self.assertEqual(result["status"], "passed")
+        self.assertEqual(result["state_machine"]["state"], "finished")
+        self.assertEqual([row["role"] for row in result["state_machine"]["history"]],
+                         ["scout", "planner", "implementer", "verifier", "auditor"])
         self.assertIn("+VERSION = 2", (output / "changes.patch").read_text())
         events = [json.loads(line) for line in (output / "trace.jsonl").read_text().splitlines()]
         self.assertEqual(events[-1]["event"], "run_finished")
@@ -38,6 +42,9 @@ class RuntimeTests(unittest.TestCase):
         config["acceptance"] = [[sys.executable, "-c", "raise SystemExit(3)"]]
         result = run(config, self.root, self.root / ".keel" / "failed")
         self.assertEqual(result["failure"]["category"], "verification_failed")
+        history = result["state_machine"]["history"]
+        self.assertEqual(next(row["status"] for row in history if row["role"] == "verifier"), "failed")
+        self.assertEqual(history[-1]["role"], "critic")
         self.assertEqual(result["facts"][-1]["kind"], "failed_attempt")
 
     def test_budget_exhaustion_returns_report(self):
@@ -63,6 +70,16 @@ class RuntimeTests(unittest.TestCase):
                                 "from pathlib import Path; Path('extra.txt').write_text('oops')"]]
         result = run(config, self.root, self.root / ".keel" / "audit")
         self.assertEqual(result["failure"]["category"], "policy_denied")
+
+    def test_unexpected_error_keeps_original_exception_and_failed_state_artifact(self):
+        output = self.root / ".keel" / "unexpected"
+        with patch("keel.workspace.Workspace.verify", side_effect=RuntimeError("verifier interrupted")):
+            with self.assertRaisesRegex(RuntimeError, "verifier interrupted"):
+                run(self.config(), self.root, output)
+        saved = json.loads((output / "result.json").read_text())
+        self.assertEqual(saved["status"], "failed")
+        self.assertEqual(saved["failure"]["category"], "unexpected_termination")
+        self.assertEqual(saved["state_machine"]["history"][-1]["role"], "critic")
 
     def test_dependency_cycles_and_unknown_dependencies_rejected(self):
         for dependency in ("a", "missing"):

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import difflib
 import json
+import sys
 import uuid
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from .audit import audit_metadata, audit_text
 from .core import AuditFailed, Budget, BudgetExceeded, Ledger, Limits, ModelError, PolicyDenied, Trace
 from .execution import CommandRunner, normalize_acceptance, validate_execution
 from .workspace import Workspace
+from .state import RoleStateMachine
 
 
 def validate(config: dict):
@@ -65,19 +67,26 @@ def run(config: dict, repo: Path, output: Path, *, model=None) -> dict:
     output.mkdir(parents=True, exist_ok=False)
     ledger = Ledger(output / "ledger.sqlite")
     trace = Trace(output / "trace.jsonl")
+    lifecycle = RoleStateMachine(trace)
     workspace = Workspace(repo, budget, ledger, trace, runner=CommandRunner(config.get("execution")),
                           retrieval=config.get("retrieval"), retrieval_model=model)
     result = {"run_id": output.name, "goal": config["goal"], "status": "running",
               "work_items": [], "baseline_verification": [], "verification": [], "failure": None}
     originals = {}
     stage = "scout"
+    def enter_role(role, *, previous_status="completed"):
+        nonlocal stage
+        lifecycle.enter("verifier" if role == "baseline_verifier" else role,
+                        phase="baseline" if role == "baseline_verifier" else "main", previous_status=previous_status)
+        stage = role
     try:
         trace.emit("runtime", "run_started", goal=config["goal"])
+        enter_role("scout")
         initial = workspace.snapshot()
         workspace.runner.check_available()
         specs = normalize_acceptance(config["acceptance"])
         if any(spec["junit"] for spec in specs):
-            stage = "baseline_verifier"
+            enter_role("baseline_verifier")
             # Keep command indices aligned while avoiding unnecessary baseline build/lint runs.
             baseline = []
             for index, spec in enumerate(specs):
@@ -90,22 +99,20 @@ def run(config: dict, repo: Path, output: Path, *, model=None) -> dict:
                        (entry.get("timeout") or entry.get("metadata", {}).get("collected", 0) == 0)]
             if invalid:
                 raise AuditFailed([{"rule": "invalid_baseline_test_metadata", "command_index": i} for i in invalid])
-        stage = "scout"
+        enter_role("scout")
         if agent_mode:
             from .agents import generate_plan
             from .models import from_config
             model = model if model is not None else from_config(config.get("model", {}))
             workspace.retrieval_model = model
-            def enter_role(role):
-                nonlocal stage
-                stage = role
             generated = generate_plan(config, model, workspace, on_role=enter_role)
             ordered = validate({**config, "work_items": generated})
         for query in config.get("queries", []):
+            enter_role("scout")
             evidence = workspace.search(query)
             fact = ledger.add("symbol", "scout", f"Search: {query}", evidence)
             trace.emit("scout", "evidence", fact_id=fact)
-        stage = "planner"
+        enter_role("planner")
         plan_id = ledger.add("decision", "planner", "Validated task DAG", ordered)
         trace.emit("planner", "plan_ready", fact_id=plan_id, items=len(ordered))
         # Validate every target before making the first mutation.
@@ -120,7 +127,7 @@ def run(config: dict, repo: Path, output: Path, *, model=None) -> dict:
                 raw = path.read_bytes()
                 raw.decode("utf-8")  # Only UTF-8 text edits are supported.
                 originals.setdefault(edit["path"], raw)
-        stage = "implementer"
+        enter_role("implementer")
         for item in ordered:
             budget.check()
             report = {"id": item["id"], "status": "running"}
@@ -141,9 +148,9 @@ def run(config: dict, repo: Path, output: Path, *, model=None) -> dict:
                 workspace.replace(edit["path"], edit["old"], edit["new"])
             report["status"] = "completed"
             trace.emit(stage, "item_completed", item_id=item["id"])
-        stage = "verifier"
+        enter_role("verifier")
         result["verification"] = workspace.verify(config["acceptance"])
-        stage = "auditor"
+        enter_role("auditor", previous_status="failed" if any(v["returncode"] != 0 for v in result["verification"]) else "completed")
         final = workspace.snapshot()
         changed = sorted(name for name in initial.keys() | final.keys() if initial.get(name) != final.get(name))
         unexpected = [name for name in changed if name not in originals]
@@ -188,12 +195,22 @@ def run(config: dict, repo: Path, output: Path, *, model=None) -> dict:
             if item["status"] == "running":
                 item["status"] = "failed"
     finally:
+        if result["status"] == "running":
+            interrupted = sys.exc_info()[0]
+            result["status"] = "failed"
+            result["failure"] = {"category": "unexpected_termination", "stage": stage,
+                                 "message": "Execution interrupted: " + (interrupted.__name__ if interrupted else "unknown")}
         recorded = {item["id"] for item in result["work_items"]}
         result["work_items"].extend({"id": item["id"], "status": "not_started"}
                                     for item in ordered if item["id"] not in recorded)
         if result["failure"]:
+            failed_role = result["failure"]["stage"]
+            failed_role = "verifier" if failed_role == "baseline_verifier" else failed_role
+            enter_role("critic", previous_status="failed" if lifecycle.state == failed_role else "completed")
             fact = ledger.add("failed_attempt", "critic", result["failure"]["message"], result["failure"])
             trace.emit("critic", "failure_recorded", fact_id=fact, decision="return_to_operator")
+        lifecycle.finish(result["status"])
+        result["state_machine"] = lifecycle.report()
         patch = []
         for name, before in originals.items():
             path = workspace.path(name)

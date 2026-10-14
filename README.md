@@ -15,6 +15,8 @@ The runtime supports two modes:
 
 Scout, Planner, and each Implementer receive independent conversation histories. Work items execute sequentially. Verifier and Auditor are deterministic Python components. Critic currently records failure evidence and returns control to the operator; it does not retry automatically.
 
+Execution now has an explicit sequential role state machine. Successful runs pass through Scout, Planner, Implementer, Verifier and Auditor; failures close through Critic. Optional baseline verification is a distinct Verifier phase that returns to Scout and cannot substitute for final verification. Invalid transitions are rejected. `result.json` includes `state_machine` with terminal outcome and per-role phase/status/duration; JSONL records `role_entered`, `role_exited` and `state_machine_finished`. Supplemental operator queries may return an agent-generated plan to Scout before plan validation. Unexpected exceptions retain a failed lifecycle artifact and propagate their original exception; this is not automatic recovery. These lifecycle events are local records, not an OTel exporter.
+
 | Component | Available behavior |
 | --- | --- |
 | Task execution | DAG validation, sequential scheduling, per-item write scopes |
