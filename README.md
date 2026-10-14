@@ -420,3 +420,6 @@ Each sample averages repeated runs within one instance. T0 exact-hit bypasses ar
 Outputs are `calibration.json` (input and implementation hashes, grid candidates, split identities, selected settings, simulated decisions, costs, and development/holdout metrics) and `routing.json` (accepted by `retrieve` and `swe-sweep --routing`). Existing output directories are rejected. A custom `--grid` JSON must supply lists for exactly `min_relevance`, `min_overlap`, `max_entropy`, and `max_files`.
 
 This is offline outcome replay, not a new adaptive run, a calibrated probability, or completed real-model validation. Hash embeddings and scripted-model fixtures are suitable only for testing the workflow. Use a real semantic embedding index and chat model for the intended experiment; then run fresh adaptive sweeps using the exported routing settings to measure actual behavior. `public_benchmark_verified` and `online_adaptive_verified` remain false in calibration reports. CORE's document-only BM25 baseline is not used as if it contained T1/T2 traces or region-level supervision.
+
+
+Local GGUF imports named `keel-embed` and `keel-chat` have passed a real semantic-index/T2 integration smoke check; see [the local model integration note](docs/evaluations/local-model-integration.md). This synthetic check does not establish public-data cascade quality or calibrated routing.
