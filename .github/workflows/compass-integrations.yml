@@ -22,7 +22,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install native integrations and the SDK v1 client
-        run: python -m pip install -e ".[compass,compass-vectors,validation]"
+        run: python -m pip install -e ".[compass,compass-vectors,validation,langgraph]"
       - name: Require real integration evidence
         run: python -m compass validate --require-all --output .keel/integration-validation.json
       - name: Run regression suite

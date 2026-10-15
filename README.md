@@ -772,3 +772,44 @@ A separate 256-file fixture measured 3.256s -> 2.955s (9.2% faster), with
 identical outputs and request counts. Neither result establishes token savings,
 fewer model requests, or general speedup.
 See [the W8 measurement note](docs/evaluations/keel-memory-measurement.md).
+
+### Optional LangGraph orchestrator (initial adapter)
+
+The default remains `"orchestrator": "native"`. Install the optional framework:
+
+```powershell
+python -m pip install -e ".[langgraph]"
+python -m unittest discover -s tests -p test_orchestration.py -v
+```
+
+Select `"orchestrator": "langgraph"` in a task, or use
+`examples/run_keel_agent.py --orchestrator langgraph`. The adapter resides in
+`keel/adapters/langgraph/`; both drivers execute the same Scout, Planner,
+Implementer, Verifier, Auditor and Critic phase functions. Scout inspection and
+Planner generation are separate graph nodes. Baseline verification remains a
+Scout-stage prerequisite with its existing distinct role phase. Work items remain
+sequential. Expected failures route to Critic once, preserving shared permissions,
+ledger, evidence handoff, audit, mutation, budget, trace and patch generation.
+
+StateGraph uses SqliteSaver to save node progress, ledger path and budget snapshots
+under `checkpoints.sqlite`, keyed by the run directory name. It does not store full
+conversation histories, source bytes, model objects or Workspace handles in graph
+state. `result.orchestration` records the chosen engine, visited/completed node
+callbacks and checkpoint information. The ledger connection permits sequential
+node callbacks from framework worker threads; concurrent node execution is not
+supported. Each run has independent ledger and checkpoint databases.
+
+**Checkpoint inspection is not durable task recovery.** Runtime resources and
+budget clock still live in-process, and external edits/verification have side
+effects. This adapter intentionally offers no resume, time-travel, interrupt
+approval, automatic retries or cross-process recovery. Reopening a checkpoint
+alone cannot safely resume Keel. Missing dependencies fail before output directory
+creation or repository edits; no silent native fallback is performed.
+
+The initial adapter was written against the official
+[StateGraph compile](https://reference.langchain.com/python/langgraph/graph/state/StateGraph/compile)
+and [SqliteSaver](https://reference.langchain.com/python/langgraph.checkpoint.sqlite/SqliteSaver)
+contracts. Current restricted-environment package installation failed, so real
+framework parity/checkpoint/agent tests remain explicitly dependency-gated,
+not counted as passes. Native regression validation and the framework-independent
+failure-routing tests are separate evidence.

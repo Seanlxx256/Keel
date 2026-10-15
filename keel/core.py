@@ -99,8 +99,8 @@ class Trace:
 class Ledger:
     KINDS = {"file", "test", "symbol", "decision", "failed_attempt"}
 
-    def __init__(self, path: Path):
-        self.db = sqlite3.connect(path)
+    def __init__(self, path: Path, *, check_same_thread=True):
+        self.db = sqlite3.connect(path, check_same_thread=check_same_thread)
         self.db.execute("CREATE TABLE IF NOT EXISTS facts "
                         "(id INTEGER PRIMARY KEY, kind TEXT, role TEXT, summary TEXT, payload TEXT)")
         self.db.execute("CREATE TABLE IF NOT EXISTS cache "

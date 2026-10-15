@@ -100,9 +100,8 @@ class AgentSession:
         return self.gateway.call(tool, args)
 
 
-def generate_plan(config, model, workspace, on_role=lambda role: None):
+def inspect_repository(config, model, workspace):
     settings = config.get("agent", {})
-    on_role("scout")
     scout = AgentSession("scout", model, workspace, **settings)
     impact = scout.execute({"goal": config["goal"]},
                            'object with "summary" string and "files" array of affected relative paths')
@@ -113,7 +112,11 @@ def generate_plan(config, model, workspace, on_role=lambda role: None):
             raise ModelError("Scout file names must be strings")
         workspace.path(path)
     workspace.ledger.add("decision", "scout", "Impact analysis", impact)
-    on_role("planner")
+    return impact, scout
+
+
+def plan_repository(config, model, workspace, impact, scout):
+    settings = config.get("agent", {})
     planner = AgentSession("planner", model, workspace, **settings)
     planner_task = {"goal": config["goal"], "impact": impact}
     if config.get("context_handoff", False):
@@ -137,3 +140,11 @@ def generate_plan(config, model, workspace, on_role=lambda role: None):
     if config.get("context_handoff", False):
         workspace.context_sources = [scout.gateway, planner.gateway]
     return plan
+
+
+def generate_plan(config, model, workspace, on_role=lambda role: None):
+    """Compatibility entry point; orchestrators can execute the two stages separately."""
+    on_role("scout")
+    impact, scout = inspect_repository(config, model, workspace)
+    on_role("planner")
+    return plan_repository(config, model, workspace, impact, scout)

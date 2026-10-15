@@ -14,6 +14,7 @@ from keel.runtime import run
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--orchestrator', choices=['native', 'langgraph'], default='native')
     parser.add_argument('--context-handoff', action='store_true', help='Transfer bounded fresh file-read evidence between roles')
     parser.add_argument('--num-ctx', type=int, default=8192, help='Ollama context window (1024 to 131072)')
     parser.add_argument('--cpu', action='store_true', help='Disable GPU model offload (slower)')
@@ -37,6 +38,7 @@ def main(argv=None):
     verifier = 'python' if args.backend == 'docker' else sys.executable
     config = {
         'mode': 'agent',
+        'orchestrator': args.orchestrator,
         'context_handoff': args.context_handoff,
         'goal': 'Inspect app.py. Change only API_VERSION from 1 to 2 and preserve greeting(name) behavior. '
                 'Use read_file to inspect source before replace; declare app.py as the work item file.',

@@ -69,10 +69,16 @@ def run(config: dict, repo: Path, output: Path, *, model=None) -> dict:
             type(v) is not int or v <= 0 for key, v in settings.items() if key != "require_evidence") or (
             "require_evidence" in settings and type(settings["require_evidence"]) is not bool):
         raise ValueError("agent accepts positive integer max_steps/max_output/max_work_items and boolean require_evidence")
+    engine = config.get("orchestrator", "native")
+    if engine not in {"native", "langgraph"}:
+        raise ValueError("orchestrator must be native or langgraph")
+    if engine == "langgraph":
+        from .adapters.langgraph import require_dependencies
+        require_dependencies()
     budget = Budget(Limits(**config.get("budget", {})))
     output = output.resolve()
     output.mkdir(parents=True, exist_ok=False)
-    ledger = Ledger(output / "ledger.sqlite")
+    ledger = Ledger(output / "ledger.sqlite", check_same_thread=engine != "langgraph")
     from .telemetry import LocalTelemetry
     telemetry = LocalTelemetry(output / "spans.otlp.json")
     trace = Trace(output / "trace.jsonl", telemetry=telemetry)
@@ -90,8 +96,9 @@ def run(config: dict, repo: Path, output: Path, *, model=None) -> dict:
         lifecycle.enter("verifier" if role == "baseline_verifier" else role,
                         phase="baseline" if role == "baseline_verifier" else "main", previous_status=previous_status)
         stage = role
-    try:
-        trace.emit("runtime", "run_started", goal=config["goal"])
+    initial, specs, impact, scout_session = {}, [], None, None
+    def scout_phase():
+        nonlocal initial, specs, model, impact, scout_session
         enter_role("scout")
         initial = workspace.snapshot()
         workspace.runner.check_available()
@@ -112,18 +119,23 @@ def run(config: dict, repo: Path, output: Path, *, model=None) -> dict:
                 raise AuditFailed([{"rule": "invalid_baseline_test_metadata", "command_index": i} for i in invalid])
         enter_role("scout")
         if agent_mode:
-            from .agents import generate_plan
+            from .agents import inspect_repository
             from .models import from_config
             model = model if model is not None else from_config(config.get("model", {}))
             workspace.retrieval_model = model
-            generated = generate_plan(config, model, workspace, on_role=enter_role)
-            ordered = validate({**config, "work_items": generated})
+            impact, scout_session = inspect_repository(config, model, workspace)
         for query in config.get("queries", []):
             enter_role("scout")
             evidence = workspace.search(query)
             fact = ledger.add("symbol", "scout", f"Search: {query}", evidence)
             trace.emit("scout", "evidence", fact_id=fact)
+    def planner_phase():
+        nonlocal ordered
         enter_role("planner")
+        if agent_mode:
+            from .agents import plan_repository
+            generated = plan_repository(config, model, workspace, impact, scout_session)
+            ordered = validate({**config, "work_items": generated})
         plan_id = ledger.add("decision", "planner", "Validated task DAG", ordered)
         trace.emit("planner", "plan_ready", fact_id=plan_id, items=len(ordered))
         # Validate every target before making the first mutation.
@@ -138,6 +150,7 @@ def run(config: dict, repo: Path, output: Path, *, model=None) -> dict:
                 raw = path.read_bytes()
                 raw.decode("utf-8")  # Only UTF-8 text edits are supported.
                 originals.setdefault(edit["path"], raw)
+    def implementer_phase():
         enter_role("implementer")
         for item in ordered:
             budget.check()
@@ -162,8 +175,10 @@ def run(config: dict, repo: Path, output: Path, *, model=None) -> dict:
                 workspace.replace(edit["path"], edit["old"], edit["new"])
             report["status"] = "completed"
             trace.emit(stage, "item_completed", item_id=item["id"])
+    def verifier_phase():
         enter_role("verifier")
         result["verification"] = workspace.verify(config["acceptance"])
+    def auditor_phase():
         enter_role("auditor", previous_status="failed" if any(v["returncode"] != 0 for v in result["verification"]) else "completed")
         final = workspace.snapshot()
         changed = sorted(name for name in initial.keys() | final.keys() if initial.get(name) != final.get(name))
@@ -196,7 +211,13 @@ def run(config: dict, repo: Path, output: Path, *, model=None) -> dict:
                     raise AuditFailed([{"rule": "workspace_changed_during_mutation"}])
             budget.check()
             result["status"] = "passed"
-    except (BudgetExceeded, PolicyDenied, ModelError, ValueError, OSError, SyntaxError) as error:
+    def record_failure():
+        failed_role = result["failure"]["stage"]
+        failed_role = "verifier" if failed_role == "baseline_verifier" else failed_role
+        enter_role("critic", previous_status="failed" if lifecycle.state == failed_role else "completed")
+        fact = ledger.add("failed_attempt", "critic", result["failure"]["message"], result["failure"])
+        trace.emit("critic", "failure_recorded", fact_id=fact, decision="return_to_operator")
+    def handle_error(error):
         result["status"] = "failed"
         if isinstance(error, AuditFailed):
             result.setdefault("audit", {})["findings"] = error.findings
@@ -208,6 +229,15 @@ def run(config: dict, repo: Path, output: Path, *, model=None) -> dict:
         for item in result["work_items"]:
             if item["status"] == "running":
                 item["status"] = "failed"
+    stages = {"scout": scout_phase, "planner": planner_phase, "implementer": implementer_phase,
+              "verifier": verifier_phase, "auditor": auditor_phase, "critic": record_failure}
+    result["orchestration"] = {"engine": engine, "resumable": False}
+    try:
+        trace.emit("runtime", "run_started", goal=config["goal"])
+        from .orchestration import execute
+        result["orchestration"].update(execute(engine, stages, result, handle_error, output, budget))
+    except (BudgetExceeded, PolicyDenied, ModelError, ValueError, OSError, SyntaxError) as error:
+        handle_error(error)
     finally:
         if result["status"] == "running":
             interrupted = sys.exc_info()[0]
@@ -217,12 +247,8 @@ def run(config: dict, repo: Path, output: Path, *, model=None) -> dict:
         recorded = {item["id"] for item in result["work_items"]}
         result["work_items"].extend({"id": item["id"], "status": "not_started"}
                                     for item in ordered if item["id"] not in recorded)
-        if result["failure"]:
-            failed_role = result["failure"]["stage"]
-            failed_role = "verifier" if failed_role == "baseline_verifier" else failed_role
-            enter_role("critic", previous_status="failed" if lifecycle.state == failed_role else "completed")
-            fact = ledger.add("failed_attempt", "critic", result["failure"]["message"], result["failure"])
-            trace.emit("critic", "failure_recorded", fact_id=fact, decision="return_to_operator")
+        if result["failure"] and lifecycle.state != "critic":
+            record_failure()
         lifecycle.finish(result["status"])
         result["state_machine"] = lifecycle.report()
         patch = []
@@ -242,6 +268,8 @@ def run(config: dict, repo: Path, output: Path, *, model=None) -> dict:
                             "snapshot_calls": workspace.snapshot_calls, "snapshot_bytes": workspace.snapshot_bytes}
         result["artifacts"] = {name: str(output / name) for name in
                                ("changes.patch", "trace.jsonl", "ledger.sqlite")}
+        if engine == "langgraph" and (output / "checkpoints.sqlite").is_file():
+            result["artifacts"]["checkpoints.sqlite"] = str(output / "checkpoints.sqlite")
         trace.emit("runtime", "run_finished", status=result["status"])
         result["telemetry"] = telemetry.report()
         if telemetry.exported:
