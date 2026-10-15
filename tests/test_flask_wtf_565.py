@@ -40,6 +40,8 @@ class FlaskWtfReproductionTests(unittest.TestCase):
                 spec, image, _ = real_task(root, reproduction, 'flask-wtf-565')
             manifest = prepare(root/'export', [spec], image, 'model', strategy='proposal')
             task = manifest['tasks'][0]
+            self.assertEqual(manifest['evaluation_split'], 'development')
+            self.assertFalse(task['evaluation']['heldout_eligible'])
             self.assertEqual(task['config']['proposal']['files'], names)
             self.assertNotIn(gold_revision, json.dumps(task))
             self.assertLess(task['context_preflight']['source_input_bytes'], 12000)

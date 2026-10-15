@@ -109,6 +109,11 @@ def changed_scope_passes(task, changed):
 
 
 def prepare(output, specs, image, model, *, context_bytes=12000, strategy='tool-loop', dependency_evidence=False, model_config=None):
+    from keel.evaluation_protocol import development_status
+    project = Path(__file__).resolve().parents[1]
+    split = {spec['id']: development_status(project, spec['id']) if spec['group'] == 'real_compatibility'
+             else {'split': 'development', 'heldout_eligible': False, 'reason': 'Synthetic diagnostic control'}
+             for spec in specs}
     if dependency_evidence and strategy != 'proposal':
         raise ValueError('Dependency evidence is currently available only for proposal strategy')
     if dependency_evidence and any(spec['group'] == 'real_compatibility' and spec['id'] != 'starlette-1936' for spec in specs):
@@ -157,6 +162,7 @@ def prepare(output, specs, image, model, *, context_bytes=12000, strategy='tool-
         task = {'id': spec['id'], 'group': spec['group'], 'config': config, 'source_sha256': files,
             'comparison_key': digest({'source': files, 'config_except_model_name': comparison}),
             'targets': target_paths(spec)}
+        task['evaluation'] = split[spec['id']]
         if 'target' in spec:
             task['target'] = spec['target']
         if preflight is not None:
@@ -169,9 +175,10 @@ def prepare(output, specs, image, model, *, context_bytes=12000, strategy='tool-
                      'keel/audit.py', 'keel/core.py', 'keel/dependency_evidence.py', 'examples/run_agent_baseline.py',
                      'examples/run_starlette_upgrade_task.py', 'examples/reproduce_starlette_1936.py',
                      'examples/reproduce_starlette_2526.py', 'examples/reproduce_flask_wtf_565.py',
-                     'examples/repair_feedback.py']}
+                     'examples/repair_feedback.py', 'keel/evaluation_protocol.py',
+                     'examples/evaluation_development_registry.json']}
     manifest = {'schema_version': 1, 'suite': 'agent-diagnostic-v1', 'model': model, 'strategy': strategy,
-        'dependency_evidence_requested': dependency_evidence, 'tasks': tasks,
+        'dependency_evidence_requested': dependency_evidence, 'tasks': tasks, 'evaluation_split': 'development',
         'implementation_sha256': implementation, 'benchmark_ready': False,
         'limitations': 'Synthetic controls and real tasks are separate groups. One real task, no benchmark resolve-rate claim.'}
     (output/'manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
@@ -266,6 +273,7 @@ def main():
     records = [{'id': task['id'], 'group': task['group'], 'status': 'prepared',
                 'executed': False, 'passed': False} for task in manifest['tasks']]
     report = {'prepared_only': not args.execute, 'strategy': args.strategy,
+              'evaluation_split': 'development', 'heldout_eligible': False,
               'dependency_evidence_requested': args.dependency_evidence, 'records': records, 'reproduction_sha256': provenance,
               'benchmark_ready': False}
     if feedback:

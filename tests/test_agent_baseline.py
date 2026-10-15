@@ -10,6 +10,14 @@ from examples.run_agent_baseline import controls, prepare, summarize, trace_metr
 
 
 class AgentBaselineTests(unittest.TestCase):
+    def test_unregistered_real_task_cannot_silently_enter_diagnostic_suite(self):
+        spec = {**controls()[0], 'id': 'unknown-real-task', 'group': 'real_compatibility'}
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)/'unknown'
+            with self.assertRaisesRegex(ValueError, 'registered'):
+                prepare(output, [spec], 'image', 'model', strategy='proposal')
+            self.assertFalse(output.exists())
+
     def test_preparation_rejects_oversized_source_and_records_narrowed_preflight(self):
         from keel.core import BudgetExceeded
         source = ('# httpx type annotation padding\n' * 500 +

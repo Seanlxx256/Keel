@@ -1,5 +1,9 @@
 # Fixed agent diagnostic baseline
 
+All current tasks are **development diagnostics**, including previously
+successful repairs. They cannot enter independent quality claims. See the
+[evaluation boundary and freeze protocol](evaluation-protocol.md).
+
 `--feedback-from PREVIOUS_RUN_DIRECTORY` supports one explicit proposal follow-up
 for a matching completed verification failure. It requires `--model-config`,
 `--group real_compatibility` and no dependency evidence. The follow-up starts
