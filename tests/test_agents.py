@@ -28,6 +28,23 @@ def plan(files=None):
 
 
 class AgentTests(unittest.TestCase):
+    def test_bare_scout_output_is_rejected_then_recovers_through_real_evidence(self):
+        result, model = self.execute([
+            {'summary': 'Uninspected guess', 'files': ['app.py']},
+            {'tool': 'read_lines', 'arguments': {'path': 'app.py', 'start_line': 1, 'end_line': 1}},
+            self.impact(), plan(),
+            {'tool': 'read_file', 'arguments': {'path': 'app.py'}},
+            {'tool': 'replace', 'arguments': {'path': 'app.py', 'old': 'VERSION = 1', 'new': 'VERSION = 2'}},
+            {'final': 'Changed version'}], config={**self.config,
+                'agent': {'require_evidence': True, 'max_steps': 5}})
+        self.assertEqual(result['status'], 'passed')
+        self.assertIn('Always wrap it as', model.calls[0][0]['content'])
+        feedback = json.loads(model.calls[1][-1]['content'])
+        self.assertFalse(feedback['ok'])
+        self.assertIn('Repository evidence must be inspected', feedback['error'])
+        self.assertIn('{"final": VALUE}', feedback['error'])
+        self.assertEqual((self.repo/'app.py').read_text(), 'VERSION = 2\n')
+
     def test_last_turn_allows_tool_and_exhaustion_does_not_claim_completion(self):
         schemas = []
         class StructuredModel(ScriptedModel):

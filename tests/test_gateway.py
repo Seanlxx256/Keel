@@ -9,6 +9,17 @@ from keel.workspace import Workspace
 
 
 class GatewayTests(unittest.TestCase):
+    def test_inclusive_window_error_supplies_legal_range_before_read(self):
+        gateway = ToolGateway('scout', self.ws)
+        (self.root/'app.py').write_text('x = 1\n' * 200)
+        with self.assertRaisesRegex(ValueError, 'end_line between 80 and 159'):
+            gateway.call('read_lines', {'path': 'app.py', 'start_line': 80, 'end_line': 160})
+        self.assertEqual(self.budget.tool_calls, 0)
+        self.assertFalse(gateway.observed_facts)
+        result = gateway.call('read_lines', {'path': 'app.py', 'start_line': 80, 'end_line': 159})
+        self.assertEqual(len(result['text'].splitlines()), 80)
+        self.assertEqual(result['next_line'], 160)
+
     def test_late_file_window_and_unchanged_read_do_not_repeat_prefix(self):
         self.budget.limits.max_tool_calls = 20
         text = ''.join(f'line_{i} = {i}\n' for i in range(1, 801))

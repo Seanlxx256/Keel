@@ -12,7 +12,7 @@ TOOLS = {
     "list_files": "{} -> repository file names",
     "search_code": '{"query": "literal text"} -> matches and ledger reference',
     "read_file": '{"path": "relative/path"} -> ledger reference and text preview',
-    "read_lines": '{"path": "relative/path", "start_line": 1, "end_line": 40} -> bounded source window, up to 80 lines',
+    "read_lines": '{"path": "relative/path", "start_line": 1, "end_line": 40} -> bounded source window; inclusive bounds, end_line <= start_line + 79; follow returned next_line',
     "recall": '{"fact_id": 1, "offset": 0} -> next 4000 characters of stored evidence',
 }
 
@@ -86,6 +86,10 @@ class ToolGateway:
                 arguments.update(properties={key: {'type': 'string' if kind is str else 'integer'}
                     for key, kind in {**required, **optional}.items()}, required=list(required),
                     additionalProperties=False)
+                if tool == 'read_lines':
+                    for name in ('start_line', 'end_line'):
+                        arguments['properties'][name]['minimum'] = 1
+                    arguments['properties']['end_line']['description'] = 'Inclusive end; at most start_line + 79. Prefer search_code to locate target lines.'
             branches.append({'type': 'object', 'properties': {
                 'tool': {'type': 'string', 'enum': [tool]}, 'arguments': arguments},
                 'required': ['tool', 'arguments'], 'additionalProperties': False})
@@ -131,7 +135,10 @@ class ToolGateway:
         if tool == "get_context" and args["line"] < 1:
             raise ValueError("line must be positive")
         if tool == 'read_lines' and not (1 <= args['start_line'] <= args['end_line'] < args['start_line'] + 80):
-            raise ValueError('read_lines requires positive ordered bounds of at most 80 lines')
+            start = max(1, args['start_line'])
+            raise ValueError(f'read_lines uses inclusive bounds: end_line - start_line + 1 must be 1..80. '
+                f'For start_line={start}, use end_line between {start} and {start + 79}. '
+                'Use search_code to locate relevant lines; follow returned next_line for pagination.')
 
     def _dispatch(self, tool, args):
         if tool == 'read_lines':

@@ -38,7 +38,12 @@ class AgentSession:
              ". Finish as soon as the role's deliverable is ready. Scout only identifies affected files; "
              "Planner only produces work items; Implementer makes declared edits and then finishes. "
              "A complete preview needs no recall. For truncated files, use search_code and read_lines to inspect relevant line windows instead of repeating read_file. To recall a visible fact or history index, start at offset 0; subsequent pages must use the returned next_offset and stop when it is null. "
-             + self.role_instruction + ". Final value contract: " + final_contract},
+             + self.role_instruction + ". The final contract describes ONLY the value inside the final key, "
+             "not the top-level response. Always wrap it as {\"final\": VALUE}. "
+             "Tool calls are JSON messages interpreted and executed by the host, not native API function calls. "
+             "For example, inspect a known file with {\"tool\":\"read_lines\",\"arguments\":{\"path\":\"relative/path.py\",\"start_line\":1,\"end_line\":40}}. "
+             "read_lines accepts at most 80 lines per call; use search_code to locate relevant lines first. "
+             "Final VALUE contract: " + final_contract},
             {"role": "user", "content": json.dumps(task, ensure_ascii=False)},
         ]
         def archive(payload):
@@ -106,7 +111,9 @@ class AgentSession:
                         raise ValueError("Inspect repository evidence with a tool in this session before returning a final answer; inherited evidence is not an executed action")
                     return action["final"]
                 if set(action) != {"tool", "arguments"} or not isinstance(action["arguments"], dict):
-                    raise ValueError("Expected tool/arguments or final")
+                    raise ValueError('Invalid action envelope. Return {"tool":"read_file","arguments":{"path":"relative/path.py"}} '
+                        'to inspect source, or {"final": VALUE} to finish. Bare summary/files objects are not actions. '
+                        + ('Repository evidence must be inspected before final.' if not ready else ''))
                 if action['tool'] in self.paused_tools:
                     raise ValueError('Repeated unchanged file reads are paused. Use search_code or read_lines to inspect new evidence.')
                 evidence = self.dispatch(action["tool"], action["arguments"])
@@ -124,7 +131,8 @@ class AgentSession:
             except (ValueError, TypeError, KeyError, OSError, SyntaxError) as error:
                 observation = {"ok": False, "error": str(error)[:1000]}
                 failed = self.ws.ledger.add("failed_attempt", self.role, observation["error"], observation)
-                self.ws.trace.emit(self.role, "tool_or_protocol_error", fact_id=failed)
+                self.ws.trace.emit(self.role, "tool_or_protocol_error", fact_id=failed,
+                    error_type=type(error).__name__)
             if history is not None:
                 receipt = archive({'action': reply.content, 'observation': observation})
                 note = {'ok': observation['ok']}

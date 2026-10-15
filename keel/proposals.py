@@ -21,33 +21,38 @@ def validate_scope(config):
         raise ValueError('proposal queries are limited to 128 characters')
 
 
+def source_evidence(name, text, queries):
+    """Pure source-window construction shared by preparation and live execution."""
+    lines = text.splitlines(keepends=True)
+    spans = [(0, min(40, len(lines)))]
+    for number, line in enumerate(lines):
+        if any(query.casefold() in line.casefold() for query in queries):
+            spans.append((max(0, number-8), min(len(lines), number+9)))
+    merged = []
+    for start, end in sorted(spans):
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    return {'path': name, 'sha256': hashlib.sha256(text.encode()).hexdigest(),
+        'total_lines': len(lines), 'windows': [
+            {'start_line': start+1, 'end_line': end, 'text': ''.join(lines[start:end])}
+            for start, end in merged]}
+
+
 def collect_evidence(workspace, scope):
     evidence = []
     for name in scope['files']:
         workspace.path(name, write=True)
         text = workspace.read(name, role='scout')['value']
-        lines = text.splitlines(keepends=True)
-        spans = [(0, min(40, len(lines)))]
-        for number, line in enumerate(lines):
-            if any(query.casefold() in line.casefold() for query in scope['queries']):
-                spans.append((max(0, number-8), min(len(lines), number+9)))
-        merged = []
-        for start, end in sorted(spans):
-            if merged and start <= merged[-1][1]:
-                merged[-1][1] = max(merged[-1][1], end)
-            else:
-                merged.append([start, end])
-        windows = [{'start_line': start+1, 'end_line': end, 'text': ''.join(lines[start:end])}
-                   for start, end in merged]
-        payload = {'path': name, 'sha256': hashlib.sha256(text.encode()).hexdigest(),
-                   'total_lines': len(lines), 'windows': windows}
+        payload = source_evidence(name, text, scope['queries'])
         fact = workspace.ledger.add('file', 'scout', 'Localized source evidence', payload)
-        workspace.trace.emit('scout', 'proposal_evidence', fact_id=fact, windows=len(windows))
+        workspace.trace.emit('scout', 'proposal_evidence', fact_id=fact, windows=len(payload['windows']))
         evidence.append(payload)
     return evidence
 
 
-def propose(model, workspace, goal, files, evidence, settings, *, dependencies=None):
+def proposal_request(goal, files, evidence, settings, *, structured=True, dependencies=None):
     schema = {'type': 'object', 'properties': {
         'edits': {'type': 'array', 'minItems': 1, 'maxItems': 8, 'items': {
             'type': 'object', 'properties': {key: {'type': 'string'} for key in ('path', 'old', 'new')},
@@ -63,12 +68,18 @@ def propose(model, workspace, goal, files, evidence, settings, *, dependencies=N
         payload = json.loads(messages[1]['content'])
         payload['installed_dependency_evidence'] = dependencies
         messages[1]['content'] = json.dumps(payload, ensure_ascii=False)
-    structured = callable(getattr(model, 'complete_json', None))
     if not structured:
         messages[0]['content'] += ' Required output schema: ' + json.dumps(schema)
     size = len(json.dumps(messages, ensure_ascii=False).encode()) + (len(json.dumps(schema).encode()) if structured else 0)
     if settings.get('max_context_bytes') is not None and size > settings['max_context_bytes']:
-        raise BudgetExceeded('Localized evidence exceeds context byte limit; narrow files or query anchors')
+        raise BudgetExceeded(f'Localized evidence requires {size} input bytes; limit is {settings["max_context_bytes"]}. Narrow files or query anchors')
+    return messages, schema, size
+
+
+def propose(model, workspace, goal, files, evidence, settings, *, dependencies=None):
+    structured = callable(getattr(model, 'complete_json', None))
+    messages, schema, size = proposal_request(goal, files, evidence, settings,
+        structured=structured, dependencies=dependencies)
     output = settings.get('max_output', 1024)
     workspace.budget.allow_model(size, output)
     workspace.trace.emit('implementer', 'llm_call_started', step=0, input_bytes=size, strategy='proposal')

@@ -1,7 +1,20 @@
 # Fixed agent diagnostic baseline
 
+For a controlled comparison of the existing one-call proposal and six-role
+tool loop, use the [paired orchestration diagnostic](strategy-comparison.md).
+The offline comparison preserves failed tasks and rejects mismatched inputs.
+
 The suite diagnoses action execution before additional runtime tuning. It is
 not UpgradeBench v1, a public benchmark or a three-real-task evaluation.
+
+The default real case remains #1936. A second curated candidate can be selected
+with `--case 2526`, requiring its own matching successful reproduction; see
+[the HTTPX compatibility reproduction](evaluations/upgradebench-starlette-2526-review.md).
+Each invocation selects one real case; synthetic controls remain a separate group.
+Proposal preparation checks source-window messages plus output schema against
+the context byte cap and records `context_preflight`. This is not a token count
+or an exact serialized HTTP-body size. Optional dependency evidence is collected
+only during execution; runtime rechecks the complete input before inference.
 
 ## Tasks and controls
 

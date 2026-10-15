@@ -10,6 +10,36 @@ from examples.run_agent_baseline import controls, prepare, summarize, trace_metr
 
 
 class AgentBaselineTests(unittest.TestCase):
+    def test_preparation_rejects_oversized_source_and_records_narrowed_preflight(self):
+        from keel.core import BudgetExceeded
+        source = ('# httpx type annotation padding\n' * 500 +
+                  'class TestClient(object):\n    def __init__(self):\n        super().__init__()\n')
+        spec = {**controls()[0], 'files': {'app.py': source.encode()},
+                'queries': ['httpx']}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with self.assertRaisesRegex(BudgetExceeded, 'input bytes; limit is 12000'):
+                prepare(root/'wide', [spec], 'image', 'model', strategy='proposal')
+            self.assertFalse((root/'wide/tasks').exists())
+            spec['queries'] = ['class TestClient(', 'super().__init__(']
+            manifest = prepare(root/'narrow', [spec], 'image', 'model', strategy='proposal')
+            check = manifest['tasks'][0]['context_preflight']
+            self.assertLess(check['source_input_bytes'], check['limit_bytes'])
+            self.assertFalse(check['dependency_evidence_included'])
+
+    def test_trace_exposes_errors_hidden_by_terminal_turn_budget(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/'trace.jsonl'
+            events = [{'event': 'tool_or_protocol_error'},
+                {'event': 'gateway_call_started', 'tool': 'read_lines'},
+                {'event': 'gateway_call_finished', 'status': 'failed'},
+                {'event': 'tool_or_protocol_error'}]
+            path.write_text('\n'.join(json.dumps(event) for event in events), encoding='utf-8')
+            metrics = trace_metrics(path)
+            self.assertEqual(metrics['tool_or_protocol_errors'], 2)
+            self.assertEqual(metrics['failed_gateway_calls'], 1)
+            self.assertEqual(metrics['tool_calls_by_name'], {'read_lines': 1})
+
     def test_remote_config_preparation_needs_no_key_and_never_exports_inline_credentials(self):
         remote = {'provider': 'openai-compatible', 'name': 'strong-model', 'base_url': 'https://provider.example/v1',
                   'api_key_env': 'KEEL_TEST_REMOTE_KEY'}
@@ -59,7 +89,7 @@ class AgentBaselineTests(unittest.TestCase):
             self.assertEqual(proposals['tasks'][0]['config']['mode'], 'proposal')
             self.assertEqual(proposals['tasks'][0]['config']['proposal']['files'], ['app.py'])
             self.assertNotEqual(proposals['tasks'][0]['comparison_key'], left['tasks'][0]['comparison_key'])
-            fake_real = {**specs[0], 'id': 'real-fixture', 'group': 'real_compatibility', 'target': 'app.py'}
+            fake_real = {**specs[0], 'id': 'starlette-1936', 'group': 'real_compatibility', 'target': 'app.py'}
             with_evidence = prepare(root/'dependency', [fake_real], 'sha256:'+'a'*64, 'first',
                 strategy='proposal', dependency_evidence=True)
             request = with_evidence['tasks'][0]['config']['proposal']['dependencies'][0]

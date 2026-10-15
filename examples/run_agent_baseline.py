@@ -29,7 +29,27 @@ def controls():
         for identity, prefix in [('short-version', ''), ('long-version', '# unchanged padding\n'*400)]]
 
 
-def real_task(root, reproduction):
+def real_task(root, reproduction, case='1936'):
+    if case == '2526':
+        from examples import reproduce_starlette_2526 as candidate
+        raw = (reproduction/'summary.json').read_bytes()
+        evidence = json.loads(raw)
+        if evidence.get('candidate') != 'kludex__starlette-2526' or not candidate.assess(evidence['executions']):
+            raise ValueError('Matching successful 2526 reproduction required')
+        if evidence.get('probe_sha256') != hashlib.sha256(candidate.PROBE.encode()).hexdigest():
+            raise ValueError('Reproduction probe mismatch')
+        image = evidence['image_id']
+        if len(image) != 71 or not image.startswith('sha256:'):
+            raise ValueError('Resolved Docker image ID required')
+        snapshots = root/'.keel/upgradebench-snapshots/kludex--starlette'
+        base, gold = snapshots/candidate.BASE, snapshots/candidate.GOLD
+        files = candidate.verify_range(base, gold)
+        return {'id': 'starlette-2526', 'group': 'real_compatibility', 'goal': candidate.GOAL,
+            'target': 'starlette/testclient.py', 'files': {name: (base/name).read_bytes() for name in files},
+            'acceptance': candidate.PROBE, 'reference_execution': evidence['executions']['gold'],
+            'assessor': candidate.assess, 'queries': ['class TestClient(', 'super().__init__(']}, image, hashlib.sha256(raw).hexdigest()
+    if case != '1936':
+        raise ValueError('Unknown real compatibility case')
     raw = (reproduction/'summary.json').read_bytes()
     evidence = json.loads(raw)
     if evidence.get('candidate') != 'kludex__starlette-1936' or not assess(evidence['executions']):
@@ -56,6 +76,8 @@ def validate_remote_config(config):
 def prepare(output, specs, image, model, *, context_bytes=12000, strategy='tool-loop', dependency_evidence=False, model_config=None):
     if dependency_evidence and strategy != 'proposal':
         raise ValueError('Dependency evidence is currently available only for proposal strategy')
+    if dependency_evidence and any(spec['group'] == 'real_compatibility' and spec['id'] != 'starlette-1936' for spec in specs):
+        raise ValueError('Dependency evidence currently supports only starlette-1936')
     if model_config is not None:
         validate_remote_config(model_config)
         model = model_config['name']
@@ -74,10 +96,19 @@ def prepare(output, specs, image, model, *, context_bytes=12000, strategy='tool-
         if strategy == 'proposal':
             config['mode'] = 'proposal'
             config['proposal'] = {'files': [spec['target']],
-                'queries': ['start_blocking_portal'] if spec['group'] == 'real_compatibility' else ['API_VERSION']}
+                'queries': spec.get('queries', ['start_blocking_portal'] if spec['group'] == 'real_compatibility' else ['API_VERSION'])}
             if dependency_evidence and spec['group'] == 'real_compatibility':
                 config['proposal']['dependencies'] = [{'distribution': 'anyio', 'version': '4.0.0',
                                                        'symbols': ['start_blocking_portal']}]
+        preflight = None
+        if strategy == 'proposal':
+            from keel.proposals import source_evidence, proposal_request
+            scope = config['proposal']
+            evidence = [source_evidence(name, spec['files'][name].decode('utf-8'), scope['queries'])
+                        for name in scope['files']]
+            _, _, size = proposal_request(config['goal'], scope['files'], evidence, config['agent'])
+            preflight = {'source_input_bytes': size, 'limit_bytes': config['agent'].get('max_context_bytes'),
+                'dependency_evidence_included': False, 'scope': 'Source messages plus output schema; runtime rechecks including optional dependency evidence'}
         directory = output/'tasks'/spec['id']
         repo = directory/'template'
         repo.mkdir(parents=True)
@@ -91,12 +122,16 @@ def prepare(output, specs, image, model, *, context_bytes=12000, strategy='tool-
         task = {'id': spec['id'], 'group': spec['group'], 'config': config, 'source_sha256': files,
             'comparison_key': digest({'source': files, 'config_except_model_name': comparison}),
             'target': spec['target']}
+        if preflight is not None:
+            task['context_preflight'] = preflight
         (directory/'task.json').write_text(json.dumps(task, indent=2), encoding='utf-8')
         tasks.append(task)
     implementation = {path: hashlib.sha256((Path(__file__).resolve().parents[1]/path).read_bytes()).hexdigest()
         for path in ['keel/agents.py', 'keel/gateway.py', 'keel/conversation.py', 'keel/runtime.py',
                      'keel/models.py', 'keel/proposals.py', 'keel/workspace.py', 'keel/execution.py',
-                     'keel/audit.py', 'keel/core.py', 'keel/dependency_evidence.py', 'examples/run_agent_baseline.py']}
+                     'keel/audit.py', 'keel/core.py', 'keel/dependency_evidence.py', 'examples/run_agent_baseline.py',
+                     'examples/run_starlette_upgrade_task.py', 'examples/reproduce_starlette_1936.py',
+                     'examples/reproduce_starlette_2526.py']}
     manifest = {'schema_version': 1, 'suite': 'agent-diagnostic-v1', 'model': model, 'strategy': strategy,
         'dependency_evidence_requested': dependency_evidence, 'tasks': tasks,
         'implementation_sha256': implementation, 'benchmark_ready': False,
@@ -130,6 +165,8 @@ def trace_metrics(path):
         'dependency_symbol_matches': sum(event['matches'] for event in events if event['event'] == 'dependency_scan_finished'),
         'response_metadata': [event['response_metadata'] for event in events
             if event['event'] == 'llm_call_finished' and event.get('response_metadata')],
+        'tool_or_protocol_errors': sum(event['event'] == 'tool_or_protocol_error' for event in events),
+        'failed_gateway_calls': sum(event['event'] == 'gateway_call_finished' and event.get('status') == 'failed' for event in events),
         'tool_calls_by_name': calls}
 
 
@@ -148,6 +185,7 @@ def model_identity(name):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--reproduction', required=True, type=Path)
+    parser.add_argument('--case', choices=['1936', '2526'], default='1936', help='Curated real task; requires its matching reproduction')
     parser.add_argument('--model', default='keel-chat')
     parser.add_argument('--model-config', type=Path, help='Credential-free compatible model JSON; keys are environment references')
     parser.add_argument('--execute', action='store_true')
@@ -158,6 +196,8 @@ def main():
     args = parser.parse_args()
     if args.dependency_evidence and args.strategy != 'proposal':
         parser.error('--dependency-evidence requires --strategy proposal')
+    if args.dependency_evidence and args.case != '1936':
+        parser.error('--dependency-evidence currently supports only --case 1936')
     remote = None
     if args.model_config:
         raw = args.model_config.read_bytes()
@@ -168,7 +208,7 @@ def main():
     root = Path(__file__).resolve().parents[1]
     output = root/'.keel/agent-baseline'/uuid.uuid4().hex
     print(f'Artifacts: {output}', flush=True)
-    real, image, provenance = real_task(root, args.reproduction)
+    real, image, provenance = real_task(root, args.reproduction, args.case)
     specs = controls() + [real]
     if args.group:
         specs = [spec for spec in specs if spec['group'] == args.group]
@@ -219,7 +259,8 @@ def main():
                     raise ValueError('Source differs from frozen manifest')
                 baseline = CommandRunner(task['config']['execution']).run(task['config']['acceptance'][0], repo, 90)
                 (directory/'baseline.json').write_text(json.dumps(baseline, indent=2), encoding='utf-8')
-                valid_base = (assess({'base': baseline, 'gold': spec['reference_execution']})
+                assessor = spec.get('assessor', assess)
+                valid_base = (assessor({'base': baseline, 'gold': spec['reference_execution']})
                     if task['group'] == 'real_compatibility' else
                     baseline['returncode'] == 1 and not baseline['timeout'] and 'AssertionError' in baseline['stderr'])
                 if not valid_base:
@@ -233,7 +274,7 @@ def main():
                 verification = result.get('verification', [])
                 accepted = len(verification) == 1 and verification[0]['backend'] == 'docker' and not verification[0]['timeout'] and verification[0]['returncode'] == 0
                 if task['group'] == 'real_compatibility':
-                    accepted = accepted and assess({'base': baseline, 'gold': verification[0]})
+                    accepted = accepted and assessor({'base': baseline, 'gold': verification[0]})
                 record.update(status='completed', passed=result['status'] == 'passed' and accepted
                     and changed == [task['target']] and result['budget']['model_calls'] > 0,
                     changed_files=changed, failure=result['failure'], budget=result['budget'])
