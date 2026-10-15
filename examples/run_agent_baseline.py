@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from keel.core import digest
 from keel.runtime import run
 from keel.execution import CommandRunner
+from keel.models import from_config
 from examples.run_starlette_upgrade_task import inventory, verify_range, task_config
 from examples.reproduce_starlette_1936 import BASE, GOLD, PROBE, assess
 
@@ -45,13 +46,25 @@ def real_task(root, reproduction):
     return spec, evidence['image_id'], hashlib.sha256(raw).hexdigest()
 
 
-def prepare(output, specs, image, model, *, context_bytes=12000, strategy='tool-loop', dependency_evidence=False):
+def validate_remote_config(config):
+    if not isinstance(config, dict) or config.get('provider') != 'openai-compatible':
+        raise ValueError('--model-config requires an openai-compatible model object')
+    from_config(config)  # Validates fields without reading keys or making requests.
+    return config
+
+
+def prepare(output, specs, image, model, *, context_bytes=12000, strategy='tool-loop', dependency_evidence=False, model_config=None):
     if dependency_evidence and strategy != 'proposal':
         raise ValueError('Dependency evidence is currently available only for proposal strategy')
+    if model_config is not None:
+        validate_remote_config(model_config)
+        model = model_config['name']
     output.mkdir(parents=True, exist_ok=False)
     tasks = []
     for spec in specs:
         config = task_config(image, model=model, max_seconds=450)
+        if model_config is not None:
+            config['model'] = dict(model_config)
         config['agent']['max_steps'] = 5
         if context_bytes is None:
             config['agent'].pop('max_context_bytes')
@@ -115,6 +128,8 @@ def trace_metrics(path):
         'archived_turns': sum(event['archived_turns'] for event in events if event['event'] == 'context_window'),
         'dependency_scans': sum(event['event'] == 'dependency_scan_finished' for event in events),
         'dependency_symbol_matches': sum(event['matches'] for event in events if event['event'] == 'dependency_scan_finished'),
+        'response_metadata': [event['response_metadata'] for event in events
+            if event['event'] == 'llm_call_finished' and event.get('response_metadata')],
         'tool_calls_by_name': calls}
 
 
@@ -134,6 +149,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--reproduction', required=True, type=Path)
     parser.add_argument('--model', default='keel-chat')
+    parser.add_argument('--model-config', type=Path, help='Credential-free compatible model JSON; keys are environment references')
     parser.add_argument('--execute', action='store_true')
     parser.add_argument('--unbounded-context', action='store_true')
     parser.add_argument('--strategy', choices=['tool-loop', 'proposal'], default='tool-loop')
@@ -142,6 +158,13 @@ def main():
     args = parser.parse_args()
     if args.dependency_evidence and args.strategy != 'proposal':
         parser.error('--dependency-evidence requires --strategy proposal')
+    remote = None
+    if args.model_config:
+        raw = args.model_config.read_bytes()
+        if len(raw) > 64000:
+            parser.error('Model config exceeds 64 KB')
+        remote = validate_remote_config(json.loads(raw))
+        args.model = remote['name']
     root = Path(__file__).resolve().parents[1]
     output = root/'.keel/agent-baseline'/uuid.uuid4().hex
     print(f'Artifacts: {output}', flush=True)
@@ -151,7 +174,7 @@ def main():
         specs = [spec for spec in specs if spec['group'] == args.group]
     manifest = prepare(output, specs, image, args.model,
                        context_bytes=None if args.unbounded_context else 12000, strategy=args.strategy,
-                       dependency_evidence=args.dependency_evidence)
+                       dependency_evidence=args.dependency_evidence, model_config=remote)
     records = [{'id': task['id'], 'group': task['group'], 'status': 'prepared',
                 'executed': False, 'passed': False} for task in manifest['tasks']]
     report = {'prepared_only': not args.execute, 'strategy': args.strategy,
@@ -166,7 +189,13 @@ def main():
         if not shutil.which('docker') and (docker_dir/'docker.exe').is_file():
             os.environ['PATH'] = str(docker_dir) + os.pathsep + os.environ.get('PATH', '')
         try:
-            report['model_identity'] = model_identity(args.model)
+            if remote:
+                from_config(remote).check_credentials()
+                report['model_identity'] = {'provider': 'openai-compatible', 'requested_model': remote['name'],
+                    'base_url': remote['base_url'], 'identity_verified': False,
+                    'scope': 'Configured endpoint/name only; response model/fingerprint recorded in trace, no weight digest claim.'}
+            else:
+                report['model_identity'] = model_identity(args.model)
         except (OSError, ValueError, KeyError) as error:
             for record in records:
                 record.update(status='environment_error', error=str(error))
@@ -209,7 +238,7 @@ def main():
                     and changed == [task['target']] and result['budget']['model_calls'] > 0,
                     changed_files=changed, failure=result['failure'], budget=result['budget'])
                 record['trace_metrics'] = trace_metrics(directory/'run/trace.jsonl')
-                if model_identity(args.model) != report['model_identity']:
+                if not remote and model_identity(args.model) != report['model_identity']:
                     record.update(status='environment_error', passed=False, error='Model identity changed during suite')
             except Exception as error:
                 record.update(status='runtime_error' if record['executed'] else 'environment_error',

@@ -24,7 +24,9 @@ class AuditFailed(PolicyDenied):
 
 
 class ModelError(RuntimeError):
-    pass
+    def __init__(self, message, *, tokens=None):
+        super().__init__(message)
+        self.tokens = tokens
 
 
 @dataclass

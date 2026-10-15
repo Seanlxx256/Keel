@@ -72,14 +72,20 @@ def propose(model, workspace, goal, files, evidence, settings, *, dependencies=N
     output = settings.get('max_output', 1024)
     workspace.budget.allow_model(size, output)
     workspace.trace.emit('implementer', 'llm_call_started', step=0, input_bytes=size, strategy='proposal')
-    reply = (model.complete_json(messages, schema=schema, timeout=workspace.budget.remaining, max_output=output)
-        if structured else model.complete(messages, timeout=workspace.budget.remaining, max_output=output))
+    try:
+        reply = (model.complete_json(messages, schema=schema, timeout=workspace.budget.remaining, max_output=output)
+            if structured else model.complete(messages, timeout=workspace.budget.remaining, max_output=output))
+    except ModelError as error:
+        if error.tokens is not None:
+            workspace.budget.charge_tokens(error.tokens)
+        raise
     if not isinstance(reply.content, str) or (reply.tokens is not None and (type(reply.tokens) is not int or reply.tokens < 0)):
         raise ModelError('Invalid proposal reply or token usage')
     workspace.budget.charge_tokens(reply.tokens if reply.tokens is not None else size + len(reply.content.encode()))
     workspace.budget.check()
     fact = workspace.ledger.add('decision', 'implementer', 'Untrusted patch proposal', reply.content)
-    workspace.trace.emit('implementer', 'llm_call_finished', fact_id=fact, tokens=reply.tokens)
+    workspace.trace.emit('implementer', 'llm_call_finished', fact_id=fact, tokens=reply.tokens,
+                         response_metadata=getattr(reply, 'metadata', None))
     try:
         proposal = json.loads(reply.content)
         if not isinstance(proposal, dict) or set(proposal) != {'edits', 'summary'} or not isinstance(proposal['summary'], str):

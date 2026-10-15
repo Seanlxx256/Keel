@@ -1,0 +1,8 @@
+{
+  "provider": "openai-compatible",
+  "name": "REPLACE_WITH_MODEL_ID",
+  "base_url": "https://provider.example/v1",
+  "api_key_env": "KEEL_MODEL_API_KEY",
+  "response_mode": "json_object",
+  "token_limit_field": "max_completion_tokens"
+}

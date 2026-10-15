@@ -4,11 +4,25 @@ import tempfile
 import subprocess
 import sys
 import unittest
+from unittest.mock import patch
 
 from examples.run_agent_baseline import controls, prepare, summarize, trace_metrics
 
 
 class AgentBaselineTests(unittest.TestCase):
+    def test_remote_config_preparation_needs_no_key_and_never_exports_inline_credentials(self):
+        remote = {'provider': 'openai-compatible', 'name': 'strong-model', 'base_url': 'https://provider.example/v1',
+                  'api_key_env': 'KEEL_TEST_REMOTE_KEY'}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch('keel.models.CompatibleChatModel.check_credentials', side_effect=AssertionError('No key access during preparation')):
+                result = prepare(root/'remote', controls(), 'sha256:'+'a'*64, 'ignored', strategy='proposal', model_config=remote)
+            self.assertEqual(result['model'], 'strong-model')
+            self.assertEqual(result['tasks'][0]['config']['model'], remote)
+            with self.assertRaises(ValueError):
+                prepare(root/'bad', controls(), 'image', 'model', model_config={**remote, 'api_key': 'never-write-this'})
+            self.assertFalse((root/'bad').exists())
+
     def test_control_acceptance_fails_base_and_passes_minimal_reference(self):
         for spec in controls():
             with self.subTest(task=spec['id']), tempfile.TemporaryDirectory() as directory:

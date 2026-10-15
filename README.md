@@ -937,3 +937,9 @@ For real API migrations, optional [dependency evidence](docs/dependency-evidence
 retrieves static definitions from exact installed versions in the verifier image.
 Use `--strategy proposal --group real_compatibility --dependency-evidence` on the
 diagnostic suite; no target package imports, downloads or gold patches are used.
+
+For a stronger-provider comparison, the suite accepts `--model-config` pointing
+to a [credential-free compatible model configuration](docs/compatible-models.md).
+Start from `examples/model-compatible.example.json`; secrets are environment
+references only. Ollama stays default. External API access is not exercised by
+preparation or offline adapter tests.

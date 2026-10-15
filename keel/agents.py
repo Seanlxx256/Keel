@@ -78,11 +78,16 @@ class AgentSession:
             estimate = len(encoded.encode("utf-8")) + schema_bytes
             self.ws.budget.allow_model(estimate, self.max_output)
             self.ws.trace.emit(self.role, "llm_call_started", step=step, input_bytes=estimate)
-            if structured:
-                reply = self.model.complete_json(self.messages, schema=schema,
-                                                 timeout=self.ws.budget.remaining, max_output=self.max_output)
-            else:
-                reply = self.model.complete(self.messages, timeout=self.ws.budget.remaining, max_output=self.max_output)
+            try:
+                if structured:
+                    reply = self.model.complete_json(self.messages, schema=schema,
+                                                     timeout=self.ws.budget.remaining, max_output=self.max_output)
+                else:
+                    reply = self.model.complete(self.messages, timeout=self.ws.budget.remaining, max_output=self.max_output)
+            except ModelError as error:
+                if error.tokens is not None:
+                    self.ws.budget.charge_tokens(error.tokens)
+                raise
             if not isinstance(reply.content, str) or (reply.tokens is not None and
                     (type(reply.tokens) is not int or reply.tokens < 0)):
                 raise ModelError("Invalid model reply or token usage")
@@ -90,7 +95,8 @@ class AgentSession:
                                          estimate + len(reply.content.encode("utf-8")))
             self.ws.budget.check()
             fact_id = self.ws.ledger.add("decision", self.role, f"Model turn {step}", reply.content)
-            self.ws.trace.emit(self.role, "llm_call_finished", fact_id=fact_id, tokens=reply.tokens)
+            self.ws.trace.emit(self.role, "llm_call_finished", fact_id=fact_id, tokens=reply.tokens,
+                               response_metadata=getattr(reply, 'metadata', None))
             try:
                 action = json.loads(reply.content)
                 if not isinstance(action, dict):
