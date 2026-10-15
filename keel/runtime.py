@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 
 from .audit import audit_metadata, audit_text
-from .core import AuditFailed, Budget, BudgetExceeded, Ledger, Limits, ModelError, PolicyDenied, Trace
+from .core import AuditFailed, Budget, BudgetExceeded, Ledger, Limits, ModelError, PolicyDenied, Trace, digest
 from .execution import CommandRunner, normalize_acceptance, validate_execution
 from .workspace import Workspace
 from .state import RoleStateMachine
@@ -48,7 +48,7 @@ def validate(config: dict):
     return ordered
 
 
-def run(config: dict, repo: Path, output: Path, *, model=None) -> dict:
+def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) -> dict:
     from .mcp_client import validate_servers
     validate_servers(config.get("mcp_servers", {}))
     if type(config.get("context_handoff", False)) is not bool:
@@ -72,6 +72,11 @@ def run(config: dict, repo: Path, output: Path, *, model=None) -> dict:
     engine = config.get("orchestrator", "native")
     if engine not in {"native", "langgraph"}:
         raise ValueError("orchestrator must be native or langgraph")
+    approval_required = config.get("approval_before_write", False)
+    if type(approval_required) is not bool:
+        raise ValueError("approval_before_write must be boolean")
+    if approval_required and (engine != "langgraph" or not callable(approval)):
+        raise ValueError("Write approval requires LangGraph and an explicit host approval callback")
     if engine == "langgraph":
         from .adapters.langgraph import require_dependencies
         require_dependencies()
@@ -218,6 +223,8 @@ def run(config: dict, repo: Path, output: Path, *, model=None) -> dict:
         fact = ledger.add("failed_attempt", "critic", result["failure"]["message"], result["failure"])
         trace.emit("critic", "failure_recorded", fact_id=fact, decision="return_to_operator")
     def handle_error(error):
+        if result.get("approval", {}).get("status") == "pending":
+            result["approval"]["status"] = "error"
         result["status"] = "failed"
         if isinstance(error, AuditFailed):
             result.setdefault("audit", {})["findings"] = error.findings
@@ -229,13 +236,52 @@ def run(config: dict, repo: Path, output: Path, *, model=None) -> dict:
         for item in result["work_items"]:
             if item["status"] == "running":
                 item["status"] = "failed"
+    approval_binding = {}
+    def request_approval():
+        budget.check()
+        snapshot = workspace.snapshot()
+        if snapshot != initial:
+            raise PolicyDenied("Workspace changed before write approval")
+        approval_binding.update(snapshot=snapshot, plan=digest(ordered), config=digest(config))
+        request = {"run_id": output.name, "files": sorted(originals), "items": len(ordered),
+                   "plan_sha256": digest(ordered), "workspace_sha256": digest(snapshot),
+                   "ledger_path": str(output / "ledger.sqlite"), "budget": budget.report(),
+                   "scope": "Approve the validated plan's declared writes; no permission expansion"}
+        result["approval"] = {"status": "pending", "request": request}
+        trace.emit("planner", "approval_requested", plan_sha256=request["plan_sha256"],
+                   workspace_sha256=request["workspace_sha256"])
+        return request
+    def decide_approval(request):
+        answer = approval(request)
+        if type(answer) is not bool:
+            raise ValueError("Approval callback must return boolean")
+        result["approval"]["status"] = "approved" if answer else "denied"
+        trace.emit("planner", "approval_decided", approved=answer)
+        return answer
+    def guard_approval():
+        try:
+            budget.check()
+            if digest(ordered) != approval_binding["plan"] or digest(config) != approval_binding["config"]:
+                raise PolicyDenied("Plan or configuration changed while awaiting approval")
+            if workspace.snapshot() != approval_binding["snapshot"]:
+                raise PolicyDenied("Workspace changed while awaiting approval")
+            # Recheck write policies after waiting, including hard links and protected paths.
+            for name in originals:
+                workspace.path(name, write=True)
+            trace.emit("planner", "approval_resumed", budget=budget.report())
+        except (BudgetExceeded, PolicyDenied, ValueError, OSError) as error:
+            result["approval"]["status"] = "invalidated"
+            trace.emit("planner", "approval_invalidated", error_type=type(error).__name__)
+            raise
     stages = {"scout": scout_phase, "planner": planner_phase, "implementer": implementer_phase,
               "verifier": verifier_phase, "auditor": auditor_phase, "critic": record_failure}
     result["orchestration"] = {"engine": engine, "resumable": False}
     try:
         trace.emit("runtime", "run_started", goal=config["goal"])
         from .orchestration import execute
-        result["orchestration"].update(execute(engine, stages, result, handle_error, output, budget))
+        result["orchestration"].update(execute(engine, stages, result, handle_error, output, budget,
+            approval=decide_approval if approval_required else None,
+            approval_request=request_approval, approval_guard=guard_approval))
     except (BudgetExceeded, PolicyDenied, ModelError, ValueError, OSError, SyntaxError) as error:
         handle_error(error)
     finally:

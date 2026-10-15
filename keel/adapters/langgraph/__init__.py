@@ -1,9 +1,10 @@
-"""Sequential StateGraph adapter; checkpoints are inspection records, not recovery."""
+"""Sequential StateGraph with guarded in-process approval; no crash recovery."""
 import sqlite3
 from contextlib import closing
 from typing import TypedDict
 
 from ...orchestration import EXPECTED_ERRORS, PHASES
+from ...core import PolicyDenied
 
 
 class GraphState(TypedDict):
@@ -22,7 +23,9 @@ def require_dependencies():
         raise ValueError('LangGraph adapter requires pip install -e ".[langgraph]"') from None
 
 
-def execute_graph(stages, result, on_error, output, budget):
+def execute_graph(stages, result, on_error, output, budget, *,
+                  approval=None, approval_request=None, approval_guard=None):
+    from langgraph.types import Command, interrupt
     from langgraph.graph import StateGraph, START, END
     from langgraph.checkpoint.sqlite import SqliteSaver
     builder = StateGraph(GraphState)
@@ -37,9 +40,27 @@ def execute_graph(stages, result, on_error, output, budget):
         return invoke
     for phase in (*PHASES, "critic"):
         builder.add_node(phase, node(phase))
+    if approval is not None:
+        def approval_node(state):
+            # No side effects before interrupt: this node restarts on resume.
+            approved = interrupt({"run_id": state["run_id"], "kind": "before_declared_writes"})
+            if not result["failure"]:
+                try:
+                    if approved is not True:
+                        raise PolicyDenied("Operator denied planned writes")
+                    approval_guard()
+                except EXPECTED_ERRORS as error:
+                    on_error(error)
+            return {"completed": state["completed"] + ["approval"],
+                    "failed": bool(result["failure"]), "budget": budget.report()}
+        builder.add_node("approval", approval_node)
+        builder.add_conditional_edges("approval", lambda state: "failed" if state["failed"] else "next",
+                                      {"failed": "critic", "next": "implementer"})
     builder.add_edge(START, "scout")
     for index, phase in enumerate(PHASES):
         following = PHASES[index + 1] if index + 1 < len(PHASES) else END
+        if phase == "planner" and approval is not None:
+            following = "approval"
         builder.add_conditional_edges(phase, lambda state: "failed" if state["failed"] else "next",
                                       {"failed": "critic", "next": following})
     builder.add_edge("critic", END)
@@ -50,6 +71,19 @@ def execute_graph(stages, result, on_error, output, budget):
         config = {"configurable": {"thread_id": output.name}, "recursion_limit": 16}
         final = graph.invoke({"run_id": output.name, "completed": [], "failed": False,
                               "ledger_path": str(output / "ledger.sqlite"), "budget": budget.report()}, config)
+        interruptions = 0
+        if final.get("__interrupt__"):
+            interruptions = 1
+            try:
+                request = approval_request()
+                decision = approval(request)
+            except EXPECTED_ERRORS as error:
+                on_error(error)
+                decision = False
+            final = graph.invoke(Command(resume=decision), config)
+            if final.get("__interrupt__"):
+                raise ValueError("Unexpected repeated write-approval interrupt")
         count = sum(1 for _ in saver.list(config))
     return {"completed_nodes": final["completed"], "checkpoint_path": str(checkpoint_path),
-            "checkpoints": count, "thread_id": output.name, "resumable": False}
+            "checkpoints": count, "thread_id": output.name, "resumable": False,
+            "approval_interruptions": interruptions, "resume_scope": "same-process approval only"}

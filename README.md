@@ -801,15 +801,57 @@ supported. Each run has independent ledger and checkpoint databases.
 
 **Checkpoint inspection is not durable task recovery.** Runtime resources and
 budget clock still live in-process, and external edits/verification have side
-effects. This adapter intentionally offers no resume, time-travel, interrupt
-approval, automatic retries or cross-process recovery. Reopening a checkpoint
+effects. This adapter supports only guarded same-process approval interruption/resume,
+described below. It offers no time-travel, automatic retries or cross-process recovery. Reopening a checkpoint
 alone cannot safely resume Keel. Missing dependencies fail before output directory
 creation or repository edits; no silent native fallback is performed.
 
 The initial adapter was written against the official
 [StateGraph compile](https://reference.langchain.com/python/langgraph/graph/state/StateGraph/compile)
 and [SqliteSaver](https://reference.langchain.com/python/langgraph.checkpoint.sqlite/SqliteSaver)
-contracts. Current restricted-environment package installation failed, so real
-framework parity/checkpoint/agent tests remain explicitly dependency-gated,
-not counted as passes. Native regression validation and the framework-independent
+contracts. Initial package installation failed in the restricted environment. The user
+subsequently installed the extra and reported all five initial adapter tests passing;
+the installed virtual environment has now also passed the expanded approval suite. Native regression validation and the framework-independent
 failure-routing tests are separate evidence.
+
+### Guarded LangGraph write approval
+
+For LangGraph task configs, enable `"approval_before_write": true` and supply an
+explicit trusted-host callback via `run(..., approval=callback)`. The callback
+receives the validated plan hash, workspace hash, declared file list, ledger path
+and current budget, and must return exactly a boolean. CLI users may select:
+
+```powershell
+python -m keel run your-langgraph-task.json --repo D:/path/to/disposable-repo --interactive-approval
+```
+
+The task must select `"orchestrator": "langgraph"`. CLI request/prompt text goes
+to stderr and EOF denies. No callback is supplied implicitly to approve writes.
+The model cannot supply an approval callback or expand permissions through it.
+
+A separate side-effect-free graph node interrupts between Planner and Implementer.
+The same process retains runtime state and resumes with `Command(resume=...)`.
+Only the approval node restarts; earlier role calls, budget charges and plan
+validation are not replayed. Before continuing, the runtime rechecks budget,
+configuration/plan hashes, full workspace bytes, write paths and hard links.
+Denied, malformed or invalidated decisions route to Critic without planned edits.
+The original wall-clock budget includes approval wait; an expired budget refuses
+continuation. A blocking host callback/input is not forcibly timed out.
+
+Trace records `approval_requested`, `approval_decided`, `approval_resumed` or
+`approval_invalidated`. `result.approval` distinguishes decision and invalidation.
+`orchestration.resumable` remains false to indicate no cross-process recovery;
+`resume_scope` explicitly describes the same-process-only behavior. Killing this
+process and reopening its checkpoint is still unsupported. This is write approval,
+not temporary privilege escalation or a generic shell permission system.
+
+Try a disposable, model-free demonstration:
+
+```powershell
+python examples/langgraph_approval_demo.py
+python -m unittest discover -s tests -p test_orchestration.py -v
+```
+
+The demo supports `--decision approve` / `--decision deny` for scripted host tests
+and saves fixtures, checkpoints, ledger, trace, patch and summary under
+`.keel/approval-demo/<id>`. Denial returns nonzero.

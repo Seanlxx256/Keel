@@ -5,10 +5,10 @@ PHASES = ("scout", "planner", "implementer", "verifier", "auditor")
 EXPECTED_ERRORS = (BudgetExceeded, PolicyDenied, ModelError, ValueError, OSError, SyntaxError)
 
 
-def execute(engine, stages, result, on_error, output, budget):
+def execute(engine, stages, result, on_error, output, budget, **approval_options):
     if engine == "langgraph":
         from .adapters.langgraph import execute_graph
-        return execute_graph(stages, result, on_error, output, budget)
+        return execute_graph(stages, result, on_error, output, budget, **approval_options)
     completed = []
     for phase in PHASES:
         try:
