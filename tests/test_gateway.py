@@ -9,14 +9,36 @@ from keel.workspace import Workspace
 
 
 class GatewayTests(unittest.TestCase):
-    def test_inclusive_window_error_supplies_legal_range_before_read(self):
+    def test_host_pagination_covers_source_without_gaps_and_keeps_bounds(self):
+        self.budget.limits.max_tool_calls = 20
+        text = ''.join(f'line_{i} = "' + 'x'*60 + '"\n' for i in range(200))
+        (self.root/'app.py').write_bytes(text.encode('utf-8'))
+        gateway = ToolGateway('scout', self.ws)
+        start, chunks = 1, []
+        while start is not None:
+            page = gateway.call('read_page', {'path': 'app.py', 'start_line': start})
+            self.assertEqual(page['start_line'], start)
+            self.assertLessEqual(page['end_line'] - start + 1, 80)
+            self.assertLessEqual(len(page['text']), 3000)
+            chunks.append(page['text'])
+            start = page['next_line']
+        self.assertEqual(''.join(chunks), text)
+        self.assertEqual(self.budget.tool_calls, len(chunks))
+        for args in ({'path': 'app.py', 'start_line': 0},
+                     {'path': 'app.py', 'start_line': True},
+                     {'path': '../outside.py', 'start_line': 1}):
+            with self.assertRaises((ValueError, PolicyDenied)):
+                gateway.call('read_page', args)
+
+    def test_oversized_window_returns_explicitly_truncated_bounded_evidence(self):
         gateway = ToolGateway('scout', self.ws)
         (self.root/'app.py').write_text('x = 1\n' * 200)
-        with self.assertRaisesRegex(ValueError, 'end_line between 80 and 159'):
-            gateway.call('read_lines', {'path': 'app.py', 'start_line': 80, 'end_line': 160})
-        self.assertEqual(self.budget.tool_calls, 0)
-        self.assertFalse(gateway.observed_facts)
-        result = gateway.call('read_lines', {'path': 'app.py', 'start_line': 80, 'end_line': 159})
+        result = gateway.call('read_lines', {'path': 'app.py', 'start_line': 80, 'end_line': 160})
+        self.assertEqual(self.budget.tool_calls, 1)
+        self.assertTrue(gateway.observed_facts)
+        self.assertTrue(result['truncated'])
+        self.assertEqual(result['requested_end_line'], 160)
+        self.assertEqual(result['end_line'], 159)
         self.assertEqual(len(result['text'].splitlines()), 80)
         self.assertEqual(result['next_line'], 160)
 
@@ -38,7 +60,7 @@ class GatewayTests(unittest.TestCase):
         (self.root/'app.py').write_text(text + '# changed\n')
         changed = gateway.call('read_file', {'path': 'app.py'})
         self.assertNotEqual(changed['fact_id'], first['fact_id'])
-        for bounds in [(0, 10), (5, 4), (1, 81), (900, 901)]:
+        for bounds in [(0, 10), (5, 4), (900, 901)]:
             with self.subTest(bounds=bounds), self.assertRaises(ValueError):
                 gateway.call('read_lines', {'path': 'app.py', 'start_line': bounds[0], 'end_line': bounds[1]})
 

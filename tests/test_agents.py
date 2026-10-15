@@ -28,6 +28,70 @@ def plan(files=None):
 
 
 class AgentTests(unittest.TestCase):
+    def test_oversized_read_continuation_then_edit_reaches_verifier(self):
+        (self.repo/'app.py').write_bytes(('# padding\n'*90+'VERSION = 1\n').encode())
+        result, model = self.execute([
+            {'tool': 'search_code', 'arguments': {'query': 'VERSION'}}, self.impact(), plan(),
+            {'tool': 'read_lines', 'arguments': {'path': 'app.py', 'start_line': 1, 'end_line': 220}},
+            {'tool': 'read_page', 'arguments': {'path': 'app.py', 'start_line': 81}},
+            {'tool': 'replace', 'arguments': {'path': 'app.py', 'old': 'VERSION = 1', 'new': 'VERSION = 2'}},
+            {'final': 'Updated'}], config={**self.config,
+                'agent': {'require_evidence': True, 'max_steps': 4}})
+        self.assertEqual(result['status'], 'passed')
+        first = json.loads(model.calls[4][-1]['content'])['result']
+        self.assertTrue(first['truncated'])
+        self.assertEqual(first['next_line'], 81)
+        second = json.loads(model.calls[5][-1]['content'])['result']
+        self.assertIn('VERSION = 1', second['text'])
+        self.assertIsNone(second['next_line'])
+        self.assertEqual(result['verification'][0]['returncode'], 0)
+
+    def test_planner_item_limit_feedback_recovers_within_same_budget(self):
+        too_many = {'final': [
+            {'id': 'inspect', 'description': 'Inspect source', 'files': ['app.py']},
+            {'id': 'change', 'description': 'Implement upgrade', 'files': ['app.py']}]}
+        result, model = self.execute([
+            {'tool': 'read_file', 'arguments': {'path': 'app.py'}}, self.impact(),
+            too_many, plan(),
+            {'tool': 'read_file', 'arguments': {'path': 'app.py'}},
+            {'tool': 'replace', 'arguments': {'path': 'app.py', 'old': 'VERSION = 1', 'new': 'VERSION = 2'}},
+            {'final': 'Updated'}], config={**self.config,
+                'agent': {'require_evidence': True, 'max_steps': 3, 'max_work_items': 1}})
+        self.assertEqual(result['status'], 'passed')
+        feedback = json.loads(model.calls[3][-1]['content'])
+        self.assertFalse(feedback['ok'])
+        self.assertIn('1..1 work items', feedback['error'])
+        self.assertEqual(result['budget']['model_calls'], 7)
+        self.assertEqual(len(result['work_items']), 1)
+
+    def test_bare_scout_after_observation_wraps_without_an_extra_model_call(self):
+        result, model = self.execute([
+            {'tool': 'read_file', 'arguments': {'path': 'app.py'}},
+            {'summary': 'Version needs updating', 'files': ['app.py']}, plan(),
+            {'tool': 'read_file', 'arguments': {'path': 'app.py'}},
+            {'tool': 'replace', 'arguments': {'path': 'app.py', 'old': 'VERSION = 1', 'new': 'VERSION = 2'}},
+            {'final': 'Changed version'}], config={**self.config,
+                'agent': {'require_evidence': True, 'max_steps': 3}})
+        self.assertEqual(result['status'], 'passed')
+        self.assertEqual(len(model.calls), 6)
+        events = [json.loads(line) for line in (self.repo/'.keel/run/trace.jsonl').read_text().splitlines()]
+        normalized = [e for e in events if e['event'] == 'action_envelope_normalized']
+        self.assertEqual(len(normalized), 1)
+        self.assertEqual(normalized[0]['rule'], 'scout-final-wrapper-v1')
+        self.assertEqual((self.repo/'app.py').read_text(), 'VERSION = 2\n')
+
+    def test_envelope_normalization_is_exact_and_role_evidence_gated(self):
+        from keel.agents import normalize_scout_envelope
+        valid = {'summary': 'Observed source', 'files': ['app.py']}
+        for value, role, ready in [
+            (valid, 'scout', False), (valid, 'implementer', True),
+            (valid, 'planner', True), ({**valid, 'tool': 'replace'}, 'scout', True),
+            ({'summary': 'Missing files'}, 'scout', True),
+            ({'summary': 1, 'files': ['app.py']}, 'scout', True),
+            ({'summary': 'Wrong types', 'files': [1]}, 'scout', True)]:
+            with self.subTest(value=value, role=role, ready=ready):
+                self.assertEqual(normalize_scout_envelope(value, role=role, ready=ready), (value, False))
+
     def test_bare_scout_output_is_rejected_then_recovers_through_real_evidence(self):
         result, model = self.execute([
             {'summary': 'Uninspected guess', 'files': ['app.py']},
@@ -238,11 +302,13 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(json.loads(request.call_args.args[0].data)["keep_alive"], 0)
 
     def test_plan_item_cap_is_enforced_before_implementation(self):
-        config = {**self.config, "agent": {"max_work_items": 1}}
+        config = {**self.config, "agent": {"max_work_items": 1, "max_steps": 1}}
         items = plan()["final"]
         items.append({"id": "extra", "description": "Another item", "files": ["app.py"]})
         result, _ = self.execute([self.impact(), {"final": items}], config)
-        self.assertEqual(result["failure"]["category"], "model_error")
+        self.assertEqual(result["failure"]["category"], "budget_exhausted")
+        self.assertEqual(result["failure"]["stage"], "planner")
+        self.assertEqual(result['verification'], [])
         self.assertEqual((self.repo / "app.py").read_text(), "VERSION = 1\n")
 
     def test_evidence_gate_rejects_early_final_and_recovers(self):

@@ -6,6 +6,15 @@ from .core import BudgetExceeded, ModelError, PolicyDenied
 from .gateway import ToolGateway
 
 
+def normalize_scout_envelope(action, *, role, ready):
+    """Repair one unambiguous transport shape, never infer fields or evidence."""
+    if (role == 'scout' and ready and isinstance(action, dict) and
+        set(action) == {'summary', 'files'} and isinstance(action['summary'], str) and
+        isinstance(action['files'], list) and all(isinstance(path, str) for path in action['files'])):
+        return {'final': action}, True
+    return action, False
+
+
 class AgentSession:
     """One bounded history per role/item; no implicit transfer of other histories."""
 
@@ -42,7 +51,9 @@ class AgentSession:
              "not the top-level response. Always wrap it as {\"final\": VALUE}. "
              "Tool calls are JSON messages interpreted and executed by the host, not native API function calls. "
              "For example, inspect a known file with {\"tool\":\"read_lines\",\"arguments\":{\"path\":\"relative/path.py\",\"start_line\":1,\"end_line\":40}}. "
-             "read_lines accepts at most 80 lines per call; use search_code to locate relevant lines first. "
+             "Prefer read_page with path and start_line; the host chooses a bounded page end. Continue at returned next_line, never guess page boundaries. "
+             "read_lines returns at most 80 lines per call; larger requests return a partial page. Check truncated and next_line rather than assuming the whole requested range was read. Use search_code to locate relevant lines first. "
+             + (f"Planner must return 1..{self.max_work_items} work items. Include necessary inspection within implementation items; do not create a separate inspection item. " if self.role == 'planner' else '') +
              "Final VALUE contract: " + final_contract},
             {"role": "user", "content": json.dumps(task, ensure_ascii=False)},
         ]
@@ -104,11 +115,21 @@ class AgentSession:
                                response_metadata=getattr(reply, 'metadata', None))
             try:
                 action = json.loads(reply.content)
+                action, normalized = normalize_scout_envelope(action, role=self.role,
+                    ready=bool(self.gateway.observed_facts))
+                if normalized:
+                    self.ws.trace.emit(self.role, 'action_envelope_normalized',
+                        fact_id=fact_id, rule='scout-final-wrapper-v1')
                 if not isinstance(action, dict):
                     raise ValueError("Expected a JSON object")
                 if set(action) == {"final"}:
                     if not ready:
                         raise ValueError("Inspect repository evidence with a tool in this session before returning a final answer; inherited evidence is not an executed action")
+                    if self.role == 'planner' and (not isinstance(action['final'], list) or
+                            not 1 <= len(action['final']) <= self.max_work_items):
+                        raise ValueError(f'Planner final must be an array of 1..{self.max_work_items} work items. '
+                            'Combine necessary inspection and implementation into the same work item; '
+                            'return the corrected plan inside the final key.')
                     return action["final"]
                 if set(action) != {"tool", "arguments"} or not isinstance(action["arguments"], dict):
                     raise ValueError('Invalid action envelope. Return {"tool":"read_file","arguments":{"path":"relative/path.py"}} '

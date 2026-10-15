@@ -136,6 +136,23 @@ class MetadataIntegrationTests(unittest.TestCase):
 
 
 class ExecutionTests(unittest.TestCase):
+    def test_relative_workspace_and_reports_resolve_before_docker_launch(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            base = Path(directory)
+            repo, reports = base/'repo', base/'reports'
+            repo.mkdir()
+            reports.mkdir()
+            relative_repo = repo.relative_to(Path.cwd())
+            relative_reports = reports.relative_to(Path.cwd())
+            with patch('keel.execution.shutil.which', return_value='docker'), patch(
+                    'keel.execution.subprocess.run', return_value=subprocess.CompletedProcess([], 0, b'ok', b'')) as launch:
+                CommandRunner({'backend': 'docker', 'image': 'test'}).run(
+                    ['python', '-c', 'pass'], relative_repo, 1, relative_reports)
+            args = launch.call_args.args[0]
+            self.assertIn(f'type=bind,source={repo.resolve()},target=/workspace,readonly', args)
+            self.assertIn(f'type=bind,source={reports.resolve()},target=/keel-reports', args)
+            self.assertEqual(launch.call_args.kwargs['cwd'], repo.resolve())
+
     def test_docker_command_enforces_isolation_flags_and_mounts(self):
         runner = CommandRunner({"backend": "docker", "image": "keel-tests:local"})
         command = runner.docker_command(["python", "-m", "pytest"], Path("/repo"), Path("/reports"), "keel-test")

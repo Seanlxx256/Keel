@@ -12,7 +12,8 @@ TOOLS = {
     "list_files": "{} -> repository file names",
     "search_code": '{"query": "literal text"} -> matches and ledger reference',
     "read_file": '{"path": "relative/path"} -> ledger reference and text preview',
-    "read_lines": '{"path": "relative/path", "start_line": 1, "end_line": 40} -> bounded source window; inclusive bounds, end_line <= start_line + 79; follow returned next_line',
+    "read_page": '{"path": "relative/path", "start_line": 1} -> source page capped at 80 lines/3000 characters; pass returned next_line as start_line for the next page',
+    "read_lines": '{"path": "relative/path", "start_line": 1, "end_line": 40} -> bounded source window; oversized requests return a partial page capped at 80 lines/3000 characters; follow returned next_line',
     "recall": '{"fact_id": 1, "offset": 0} -> next 4000 characters of stored evidence',
 }
 
@@ -23,6 +24,7 @@ LOCAL_CONTRACTS = {
     'replace': ({'path': str, 'old': str, 'new': str}, {}),
     'recall': ({'fact_id': int}, {'offset': int}),
     'read_lines': ({'path': str, 'start_line': int, 'end_line': int}, {}),
+    'read_page': ({'path': str, 'start_line': int}, {}),
 }
 
 
@@ -89,7 +91,9 @@ class ToolGateway:
                 if tool == 'read_lines':
                     for name in ('start_line', 'end_line'):
                         arguments['properties'][name]['minimum'] = 1
-                    arguments['properties']['end_line']['description'] = 'Inclusive end; at most start_line + 79. Prefer search_code to locate target lines.'
+                    arguments['properties']['end_line']['description'] = 'Requested inclusive end. Host returns at most 80 lines/3000 characters and reports truncation/next_line.'
+                if tool == 'read_page':
+                    arguments['properties']['start_line']['minimum'] = 1
             branches.append({'type': 'object', 'properties': {
                 'tool': {'type': 'string', 'enum': [tool]}, 'arguments': arguments},
                 'required': ['tool', 'arguments'], 'additionalProperties': False})
@@ -134,17 +138,18 @@ class ToolGateway:
                 raise ValueError(f"{name} must be {expected.__name__}")
         if tool == "get_context" and args["line"] < 1:
             raise ValueError("line must be positive")
-        if tool == 'read_lines' and not (1 <= args['start_line'] <= args['end_line'] < args['start_line'] + 80):
-            start = max(1, args['start_line'])
-            raise ValueError(f'read_lines uses inclusive bounds: end_line - start_line + 1 must be 1..80. '
-                f'For start_line={start}, use end_line between {start} and {start + 79}. '
-                'Use search_code to locate relevant lines; follow returned next_line for pagination.')
+        if tool == 'read_page' and args['start_line'] < 1:
+            raise ValueError('start_line must be positive')
+        if tool == 'read_lines' and not (1 <= args['start_line'] <= args['end_line']):
+            raise ValueError('read_lines requires positive inclusive bounds with end_line >= start_line')
 
     def _dispatch(self, tool, args):
-        if tool == 'read_lines':
+        if tool in {'read_lines', 'read_page'}:
             value = self.ws.read(args['path'], role=self.role)
             lines = value['value'].splitlines(keepends=True)
-            start, end = args['start_line'], min(args['end_line'], len(lines))
+            start = args['start_line']
+            requested_end = start + 79 if tool == 'read_page' else args['end_line']
+            end = min(start + 79, requested_end, len(lines))
             if start > len(lines):
                 raise ValueError('start_line is outside file')
             selected, size = [], 0
@@ -157,6 +162,8 @@ class ToolGateway:
                 raise ValueError('Source line exceeds read_lines character limit; use read_file and recall')
             last = start + len(selected) - 1
             payload = {'path': args['path'], 'start_line': start, 'end_line': last,
+                'requested_end_line': requested_end,
+                'truncated': last < min(requested_end, len(lines)),
                 'total_lines': len(lines), 'text': ''.join(selected),
                 'next_line': last + 1 if last < len(lines) else None,
                 'source_sha256': hashlib.sha256(value['value'].encode('utf-8')).hexdigest()}

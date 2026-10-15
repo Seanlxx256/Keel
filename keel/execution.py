@@ -81,6 +81,16 @@ class CommandRunner:
         return args + [self.config["image"], *command]
 
     def run(self, command, root: Path, timeout: float, reports: Path | None = None):
+        # Docker resolves bind sources independently of the subprocess cwd.
+        # Resolve once on the host so relative callers mount the same directory
+        # that local execution and source validation use.
+        root = Path(root).resolve(strict=True)
+        if not root.is_dir():
+            raise ValueError("Execution workspace must be a directory")
+        if reports is not None:
+            reports = Path(reports).resolve(strict=True)
+            if not reports.is_dir():
+                raise ValueError("Execution reports path must be a directory")
         self.check_available()
         name = "keel-" + uuid.uuid4().hex
         launched = self.docker_command(command, root, reports, name) if self.backend == "docker" else command
