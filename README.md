@@ -918,3 +918,14 @@ After a successful reproduction, `examples/run_starlette_upgrade_task.py
 Git history or gold source. Add `--execute` for the real CPU Ollama repair and
 Docker acceptance. Curator evidence stays outside the agent workspace; the
 agent process itself still runs on the host.
+
+Optional [bounded role context](docs/bounded-context.md) limits serialized input
+bytes while archiving complete exchanges as role-scoped ledger receipts. The
+Starlette runner enables a 12,000-byte cap; `--unbounded-context` retains the
+original behavior for comparison. This bounds input growth, not exact model
+tokens, and has no measured repair-rate benefit yet.
+
+Use the [fixed agent diagnostic baseline](docs/agent-baseline.md) for subsequent
+comparisons: `examples/run_agent_baseline.py --reproduction <artifact-directory>`
+prepares two synthetic controls and one real task with uniform settings. Add
+`--execute` for sequential model/Docker runs; outcomes remain grouped separately.

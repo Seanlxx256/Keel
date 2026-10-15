@@ -65,10 +65,10 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
     if agent_mode and ordered:
         raise ValueError("Agent mode generates its own plan; omit work_items")
     settings = config.get("agent", {})
-    if not isinstance(settings, dict) or set(settings) - {"max_steps", "max_output", "require_evidence", "max_work_items"} or any(
+    if not isinstance(settings, dict) or set(settings) - {"max_steps", "max_output", "require_evidence", "max_work_items", "max_context_bytes"} or any(
             type(v) is not int or v <= 0 for key, v in settings.items() if key != "require_evidence") or (
             "require_evidence" in settings and type(settings["require_evidence"]) is not bool):
-        raise ValueError("agent accepts positive integer max_steps/max_output/max_work_items and boolean require_evidence")
+        raise ValueError("agent accepts positive integer max_steps/max_output/max_work_items/max_context_bytes and boolean require_evidence")
     engine = config.get("orchestrator", "native")
     if engine not in {"native", "langgraph"}:
         raise ValueError("orchestrator must be native or langgraph")

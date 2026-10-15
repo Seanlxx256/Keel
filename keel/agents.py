@@ -9,12 +9,15 @@ from .gateway import ToolGateway
 class AgentSession:
     """One bounded history per role/item; no implicit transfer of other histories."""
 
-    def __init__(self, role, model, workspace, *, allowed_files=(), max_steps=12, max_output=1024, require_evidence=False, max_work_items=20):
+    def __init__(self, role, model, workspace, *, allowed_files=(), max_steps=12, max_output=1024, require_evidence=False, max_work_items=20, max_context_bytes=None):
         self.role, self.model, self.ws = role, model, workspace
         self.allowed_files = set(allowed_files)
         self.max_steps, self.max_output = max_steps, max_output
         self.require_evidence = require_evidence
         self.max_work_items = max_work_items
+        if max_context_bytes is not None and (type(max_context_bytes) is not int or max_context_bytes <= 0):
+            raise ValueError('max_context_bytes must be a positive integer')
+        self.max_context_bytes = max_context_bytes
         self.gateway = ToolGateway(role, workspace, allowed_files=allowed_files)
         self.visible_facts = self.gateway.visible_facts
         self.role_instruction = {
@@ -34,10 +37,19 @@ class AgentSession:
              "Do not claim tests passed; an independent verifier handles that. Tools: " + json.dumps(tools) +
              ". Finish as soon as the role's deliverable is ready. Scout only identifies affected files; "
              "Planner only produces work items; Implementer makes declared edits and then finishes. "
-             "A complete preview needs no recall. For truncated files, use search_code and read_lines to inspect relevant line windows instead of repeating read_file. Recall only a returned next_offset; stop when it is null. "
+             "A complete preview needs no recall. For truncated files, use search_code and read_lines to inspect relevant line windows instead of repeating read_file. To recall a visible fact or history index, start at offset 0; subsequent pages must use the returned next_offset and stop when it is null. "
              + self.role_instruction + ". Final value contract: " + final_contract},
             {"role": "user", "content": json.dumps(task, ensure_ascii=False)},
         ]
+        def archive(payload):
+            reference = self.ws.ledger.add('decision', self.role, 'Conversation archive', payload)
+            self.gateway.visible_facts.add(reference)
+            return reference
+        if self.max_context_bytes is not None:
+            from .conversation import BoundedConversation
+            history = BoundedConversation(self.messages, self.max_context_bytes, archive)
+        else:
+            history = None
         for step in range(self.max_steps):
             final_schema = {
                 "scout": {"type": "object", "properties": {"summary": {"type": "string"},
@@ -57,9 +69,13 @@ class AgentSession:
             # The last turn may still perform real work. Exhausting turns must
             # report budget failure, not coerce a prose completion.
             schema = {"oneOf": [tool_action, final_action]} if ready else tool_action
-            encoded = json.dumps(self.messages, ensure_ascii=False)
             structured = callable(getattr(self.model, "complete_json", None))
-            estimate = len(encoded.encode("utf-8")) + (len(json.dumps(schema).encode("utf-8")) if structured else 0)
+            schema_bytes = len(json.dumps(schema).encode('utf-8')) if structured else 0
+            if history is not None:
+                self.messages, metrics = history.build(schema_bytes)
+                self.ws.trace.emit(self.role, 'context_window', step=step, **metrics)
+            encoded = json.dumps(self.messages, ensure_ascii=False)
+            estimate = len(encoded.encode("utf-8")) + schema_bytes
             self.ws.budget.allow_model(estimate, self.max_output)
             self.ws.trace.emit(self.role, "llm_call_started", step=step, input_bytes=estimate)
             if structured:
@@ -103,8 +119,21 @@ class AgentSession:
                 observation = {"ok": False, "error": str(error)[:1000]}
                 failed = self.ws.ledger.add("failed_attempt", self.role, observation["error"], observation)
                 self.ws.trace.emit(self.role, "tool_or_protocol_error", fact_id=failed)
-            self.messages.append({"role": "assistant", "content": reply.content})
-            self.messages.append({"role": "user", "content": json.dumps(observation, ensure_ascii=False)})
+            if history is not None:
+                receipt = archive({'action': reply.content, 'observation': observation})
+                note = {'ok': observation['ok']}
+                if not observation['ok']:
+                    note['error'] = observation['error'][:160]
+                else:
+                    note['tool'] = action.get('tool')
+                    if observation['result'].get('changed'):
+                        note['changed'] = observation['result']['changed']
+                history.add(reply.content, observation, receipt, note)
+                if observation['ok'] and observation['result'].get('changed'):
+                    history.invalidate_evidence()
+            else:
+                self.messages.append({"role": "assistant", "content": reply.content})
+                self.messages.append({"role": "user", "content": json.dumps(observation, ensure_ascii=False)})
         raise BudgetExceeded(f"{self.role} exceeded its {self.max_steps}-turn limit")
 
     def dispatch(self, tool, args):

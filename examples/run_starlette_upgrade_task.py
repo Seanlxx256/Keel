@@ -60,7 +60,8 @@ def task_config(image, *, model='keel-chat', num_ctx=4096, max_seconds=900):
     return {'mode': 'agent', 'context_handoff': True, 'goal': GOAL,
         'model': {'provider': 'ollama', 'name': model, 'base_url': 'http://localhost:11434',
                   'num_gpu': 0, 'num_ctx': num_ctx},
-        'agent': {'max_steps': 12, 'max_output': 1024, 'require_evidence': True, 'max_work_items': 1},
+        'agent': {'max_steps': 12, 'max_output': 1024, 'require_evidence': True, 'max_work_items': 1,
+                  'max_context_bytes': 12000},
         'budget': {'max_wallclock': max_seconds, 'max_model_calls': 30,
                    'max_tool_calls': 60, 'max_tokens': 180000},
         'execution': {'backend': 'docker', 'image': image},
@@ -74,8 +75,10 @@ def main():
     parser.add_argument('--max-seconds', type=int, default=900, help='Agent runtime budget; baseline is separate')
     parser.add_argument('--max-steps', type=int, default=12, help='Maximum model turns per role')
     parser.add_argument('--model', default='keel-chat', help='Existing Ollama model name; no automatic downloads')
+    parser.add_argument('--max-context-bytes', type=int, default=12000, help='Message plus schema byte cap, not exact tokens')
+    parser.add_argument('--unbounded-context', action='store_true', help='Disable history compaction for controlled comparison')
     args = parser.parse_args()
-    if args.max_seconds <= 0 or not 2 <= args.max_steps <= 30:
+    if args.max_seconds <= 0 or not 2 <= args.max_steps <= 30 or args.max_context_bytes <= 0:
         parser.error('--max-seconds must be positive and --max-steps must be 2..30')
     root = Path(__file__).resolve().parents[1]
     output = root / '.keel/upgradebench-agent' / uuid.uuid4().hex
@@ -105,6 +108,13 @@ def main():
             raise ValueError('Export differs from verified base')
         config = task_config(image, model=args.model, max_seconds=args.max_seconds)
         config['agent']['max_steps'] = args.max_steps
+        if args.unbounded_context:
+            config['agent'].pop('max_context_bytes')
+        else:
+            config['agent']['max_context_bytes'] = args.max_context_bytes
+        summary['context_policy'] = {'max_input_bytes': config['agent'].get('max_context_bytes'),
+                                    'output_token_limit': config['agent']['max_output'],
+                                    'exact_token_counting': False}
         (output / 'task.json').write_text(json.dumps(config, indent=2), encoding='utf-8')
         (output / 'curator.json').write_text(json.dumps({**verified, 'base': BASE, 'gold': GOLD,
             'reproduction_sha256': hashlib.sha256(evidence_bytes).hexdigest()}, indent=2), encoding='utf-8')
