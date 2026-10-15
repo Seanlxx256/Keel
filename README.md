@@ -855,3 +855,55 @@ python -m unittest discover -s tests -p test_orchestration.py -v
 The demo supports `--decision approve` / `--decision deny` for scripted host tests
 and saves fixtures, checkpoints, ledger, trace, patch and summary under
 `.keel/approval-demo/<id>`. Denial returns nonzero.
+
+### W9 UpgradeBench candidate intake
+
+Collect a bounded set of merged upgrade/bump/migration PR metadata from an explicit
+repository (read-only GitHub requests; no repository code execution):
+
+```powershell
+python examples/mine_upgradebench.py --repository psf/requests --limit 3 --pages 1
+```
+
+For targeted discovery, add `--discovery search --query compatibility` (also
+`migration` or `upgrade`). Search mode skips PRs without source changes before
+commit/tree downloads and records discovery exclusions separately. Use
+`--resume-from <artifact-directory>` to reuse verified responses and fetch missing
+routes into a new run. Transport failures get at most three attempts; HTTP limits
+stop immediately. Keep the same discovery arguments when continuing a run.
+
+`--limit` caps collected PR records at 1..20; `--pages` caps recent closed-PR listing
+pages at 1..3. Each listing page has up to 100 PRs. Title-only selection is heuristic
+and may produce zero eligible candidates. Optional `GITHUB_TOKEN` is read from the
+environment for API access, never written to receipts or passed in subprocess args.
+Raw API responses and hashes are archived under `.keel/upgradebench-mining/<id>`;
+network/rate-limit/incomplete-data errors return nonzero and preserve completed
+candidates in a partial screening report. `--replay-from <artifact-directory>`
+recovers hash-verified cached responses offline. These archives are curator-only,
+not agent context.
+
+Screening requires a merged PR, title signal, at least three changed files,
+a dependency manifest change, non-test source change and CI evidence. Snapshot
+revisions use the merged commit and its first parent, not a mutable PR base field.
+PR file lists are count-checked; truncated CI tree responses fail closed. Raw PR
+file metadata is not yet verified against the exact merged Git diff.
+Tooling title signals and workflow-only changes are classified separately from
+provisional main-track candidates. Structural eligibility alone does not establish
+a runtime compatibility fix; `triage` reports tooling and main-track counts.
+An independent compatibility review queue retains small source migrations that
+fail only the file-count/manifest requirements. Every entry needs manual review
+and base/gold reproduction; strict eligibility and ready-task counts stay separate.
+
+For an existing local candidate export, use:
+
+```powershell
+python -m keel.upgradebench --input D:/path/to/candidates.json
+```
+
+Reports retain rejection reasons, canonical identities, frozen SHAs, input/manifest
+hashes and a seeded pending 10% manual-review sample. No candidate is marked
+`benchmark_ready`: reproducible images, shared base/gold acceptance, valid baseline
+failure, description leakage checks and review are still pending. No benchmark
+score or validated real-task count exists yet. This is a conservative first slice
+that requires dependency-file changes, and can miss runtime-only migrations.
+See [the UpgradeBench intake contract](docs/upgradebench.md).
