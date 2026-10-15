@@ -30,6 +30,8 @@ def registry(root):
 def canonical_repo(value, known):
     if not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', value):
         raise ValueError('Repository must be owner/name')
+    if any(part in {'.', '..'} for part in value.split('/')) or value.lower().endswith('.git'):
+        raise ValueError('Canonical repository without parent segments or .git required')
     return known.get('repository_aliases', {}).get(value.lower(), value.lower())
 
 

@@ -1,0 +1,15 @@
+{
+  "schema_version": 3,
+  "repositories": ["psf/requests", "encode/httpx", "pytest-dev/pytest", "Textualize/rich"],
+  "dependencies": {"psf/requests": "urllib3", "encode/httpx": "httpcore", "pytest-dev/pytest": "pluggy", "textualize/rich": "pygments"},
+  "query": "dependency-name",
+  "limit_per_repository": 5,
+  "pages": 1,
+  "seed": 20261016,
+  "selected_repositories": 3,
+  "max_changed_python_sources": 3,
+  "missing_commit_policy": "record_exclusion_count_toward_limit",
+  "localization_policy": "Future model inputs use base failure traceback paths and uniform source windows, never gold diff lines. PR file lists are curator screening metadata only.",
+  "attempt_policy": "First attempt only; no outcome-driven replacements. Failed reproduction remains visible; no silent reserve promotion.",
+  "scope": "New dependency/version-evidence discovery experiment. Bounded metadata mentions are not proof of migration, removed API, valid target versions or base failure. Not a continuation or replacement of v2."
+}

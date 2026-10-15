@@ -1,0 +1,21 @@
+{
+  "schema_version": 2,
+  "repositories": [
+    "psf/requests",
+    "encode/httpx",
+    "pallets/click",
+    "pytest-dev/pytest",
+    "Textualize/rich",
+    "python-pillow/Pillow"
+  ],
+  "query": "compatibility",
+  "limit_per_repository": 5,
+  "pages": 1,
+  "seed": 20261015,
+  "selected_repositories": 3,
+  "max_changed_python_sources": 3,
+  "localization_policy": "Future model inputs use base failure traceback paths and uniform source windows, never gold diff lines. PR file lists are curator screening metadata only.",
+  "attempt_policy": "First attempt only; no outcome-driven replacements. Failed reproduction remains visible; no silent reserve promotion.",
+  "scope": "Bounded metadata candidate discovery, not uniform sampling of all GitHub PRs, a frozen executable evaluation, or proof of unseen training data.",
+  "missing_commit_policy": "record_exclusion_count_toward_limit"
+}

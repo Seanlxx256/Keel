@@ -17,6 +17,16 @@ from compass.benchmarks import canonical_repository_id
 from keel.upgradebench import UPGRADE, freeze_candidates, source_file
 
 
+class MissingCommitError(ValueError):
+    """GitHub explicitly reports no object for a requested immutable commit."""
+
+
+def cached_value(value):
+    if isinstance(value, dict) and value.get('_keel_missing_commit') is True:
+        raise MissingCommitError('GitHub reports the requested merge commit is unavailable')
+    return value
+
+
 class GitHub:
     def __init__(self, output, *, cached=None):
         self.output, self.receipts = output, []
@@ -26,7 +36,7 @@ class GitHub:
 
     def get(self, route):
         if route in self.cached:
-            return self._save(route, json.dumps(self.cached[route]).encode('utf-8'))
+            return cached_value(self._save(route, json.dumps(self.cached[route]).encode('utf-8')))
         for attempt in range(3):
             try:
                 return self._get(route)
@@ -64,6 +74,11 @@ class GitHub:
                 category, hint = 'secondary_rate_limit', 'Stop retrying; respect retry-after or GitHub secondary-limit guidance.'
             elif error.code == 401:
                 category, hint = 'authentication_failed', 'Check GITHUB_TOKEN locally; never share its value.'
+            elif error.code in (404, 422) and re.fullmatch(r'/repos/[^/]+/[^/]+/commits/[0-9a-f]{40}', route) and message.startswith('no commit found for sha:'):
+                diagnostic.update(category='merge_commit_unavailable', hint='Preserve candidate exclusion; no commit metadata or parent is verified.')
+                self.last_error = diagnostic
+                self._save(route, json.dumps({'_keel_missing_commit': True, 'diagnostic': diagnostic}).encode())
+                raise MissingCommitError('GitHub reports the requested merge commit is unavailable') from None
             elif error.code == 422:
                 category, hint = 'request_validation_failed', 'Check the canonical repository name and search qualifiers; do not retry unchanged.'
             elif 'resource not accessible' in message or 'saml' in message:
@@ -104,13 +119,13 @@ def replay_fetch(directory):
     def fetch(route):
         if route not in routes:
             raise ValueError('Offline replay reached an uncached request')
-        return routes[route]
+        return cached_value(routes[route])
     fetch.routes = routes
     return fetch
 
 
 def collect(repository, fetch, *, limit=5, pages=1, on_candidate=None,
-            discovery='recent', query='migration', on_skip=None):
+            discovery='recent', query='migration', on_skip=None, record_missing_commits=False, dependency=None):
     repository = canonical_repository_id(repository)
     if discovery == 'search':
         metadata = fetch('/repos/' + repository)
@@ -139,6 +154,10 @@ def collect(repository, fetch, *, limit=5, pages=1, on_candidate=None,
             pr = fetch(f"{prefix}/pulls/{row['number']}")
             if pr.get('merged') is not True:
                 raise ValueError('Selected PR is not merged')
+            signal = None
+            if dependency is not None:
+                from keel.transition_signal import extract
+                signal = extract(pr['title'], pr.get('body'), dependency)
             count = pr.get('changed_files')
             if type(count) is not int or not 0 < count <= 300:
                 raise ValueError('Candidate file count is invalid or exceeds the 300-file collection cap')
@@ -155,7 +174,22 @@ def collect(repository, fetch, *, limit=5, pages=1, on_candidate=None,
             gold = pr['merge_commit_sha']
             if not isinstance(gold, str) or not re.fullmatch('[0-9a-f]{40}', gold):
                 raise ValueError('Merged revision must be a full commit SHA')
-            commit = fetch(f'{prefix}/commits/{gold}')
+            try:
+                commit = fetch(f'{prefix}/commits/{gold}')
+            except MissingCommitError:
+                if not record_missing_commits:
+                    raise
+                unresolved = {'repository': repository, 'number': row['number'], 'title': pr['title'],
+                    'merged': True, 'base_commit': None, 'gold_commit': gold, 'files': files, 'ci_paths': [],
+                    'metadata_error': 'merge_commit_unavailable'}
+                if dependency is not None:
+                    unresolved['transition_signal'] = signal
+                selected.append(unresolved)
+                if on_candidate is not None:
+                    on_candidate(unresolved)
+                if len(selected) == limit:
+                    return selected
+                continue
             if commit.get('sha') != gold or not commit.get('parents'):
                 raise ValueError('Merged commit is missing its verified first parent')
             tree = fetch(f'{prefix}/git/trees/{gold}?recursive=1')
@@ -166,6 +200,8 @@ def collect(repository, fetch, *, limit=5, pages=1, on_candidate=None,
             selected.append({'repository': repository, 'number': row['number'], 'title': pr['title'],
                              'merged': pr['merged'], 'base_commit': commit['parents'][0]['sha'],
                              'gold_commit': gold, 'files': files, 'ci_paths': ci})
+            if dependency is not None:
+                selected[-1]['transition_signal'] = signal
             if on_candidate is not None:
                 on_candidate(selected[-1])
             print(f"[UpgradeBench] collected {repository}#{row['number']} ({len(files)} files)", file=sys.stderr, flush=True)

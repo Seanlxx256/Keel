@@ -10,7 +10,7 @@ import tempfile
 import unittest
 
 from keel.upgradebench import freeze_candidates, screen
-from examples.mine_upgradebench import GitHub, collect, main, replay_fetch
+from examples.mine_upgradebench import GitHub, MissingCommitError, collect, main, replay_fetch
 
 
 def candidate(number=1):
@@ -21,6 +21,41 @@ def candidate(number=1):
 
 
 class UpgradeBenchTests(unittest.TestCase):
+    def test_missing_commit_is_typed_redacted_cached_and_replayed_without_network(self):
+        route = '/repos/org/repo/commits/'+'b'*40
+        with tempfile.TemporaryDirectory() as directory:
+            api = GitHub(Path(directory)/'responses')
+            error = urllib.error.HTTPError('https://api.github.com'+route, 422, 'Unprocessable', {},
+                io.BytesIO(json.dumps({'message': 'No commit found for SHA: '+'b'*40}).encode()))
+            with patch('urllib.request.urlopen', side_effect=error):
+                with self.assertRaises(MissingCommitError):
+                    api.get(route)
+            self.assertEqual(api.last_error['category'], 'merge_commit_unavailable')
+            with patch('urllib.request.urlopen', side_effect=AssertionError('No network')):
+                with self.assertRaises(MissingCommitError):
+                    replay_fetch(Path(directory))(route)
+            self.assertNotIn('No commit found for SHA', (Path(directory)/'responses/0000.json').read_text())
+
+    def test_explicit_missing_commit_policy_records_exclusion_and_counts_it_toward_limit(self):
+        def fetch(route):
+            if '/pulls?' in route:
+                return [{'number': 1, 'merged_at': 'date', 'title': 'Add compatibility'}]
+            if route.endswith('/pulls/1'):
+                return {'merged': True, 'changed_files': 1, 'title': 'Add compatibility', 'merge_commit_sha': 'b'*40}
+            if '/files?' in route:
+                return [{'filename': 'src/app.py'}]
+            if '/commits/' in route:
+                raise MissingCommitError('Unavailable')
+            raise AssertionError('Unexpected request: '+route)
+        with self.assertRaises(MissingCommitError):
+            collect('org/repo', fetch, limit=1)
+        retained = []
+        rows = collect('org/repo', fetch, limit=1, record_missing_commits=True, on_candidate=retained.append)
+        self.assertEqual(rows, retained)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['metadata_error'], 'merge_commit_unavailable')
+        self.assertIsNone(rows[0]['base_commit'])
+
     def test_compatibility_pool_preserves_strict_rejection_and_requires_full_review(self):
         row = {**candidate(), 'title': 'Add compatibility with next AnyIO',
                'files': ['src/client.py']}

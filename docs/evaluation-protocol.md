@@ -20,6 +20,9 @@ artifacts are not rewritten: apply the registry when interpreting them.
 
 No independent test set or independent result exists yet. Freeze tooling is
 infrastructure, not additional task coverage or evidence of runtime benefit.
+The next preparation step is [policy-bound candidate discovery](independent-candidates.md),
+which fixes a repository pool, bounded search and outcome-blind ranking before
+requesting metadata. A shortlist is not an executable independent task set.
 
 ## Rules for the next experiment
 
