@@ -15,7 +15,7 @@ The runtime supports two modes:
 
 Scout, Planner, and each Implementer receive independent conversation histories. Work items execute sequentially. Verifier and Auditor are deterministic Python components. Critic currently records failure evidence and returns control to the operator; it does not retry automatically.
 
-Execution now has an explicit sequential role state machine. Successful runs pass through Scout, Planner, Implementer, Verifier and Auditor; failures close through Critic. Optional baseline verification is a distinct Verifier phase that returns to Scout and cannot substitute for final verification. Invalid transitions are rejected. `result.json` includes `state_machine` with terminal outcome and per-role phase/status/duration; JSONL records `role_entered`, `role_exited` and `state_machine_finished`. Supplemental operator queries may return an agent-generated plan to Scout before plan validation. Unexpected exceptions retain a failed lifecycle artifact and propagate their original exception; this is not automatic recovery. These lifecycle events are local records, not an OTel exporter.
+Execution now has an explicit sequential role state machine. Successful runs pass through Scout, Planner, Implementer, Verifier and Auditor; failures close through Critic. Optional baseline verification is a distinct Verifier phase that returns to Scout and cannot substitute for final verification. Invalid transitions are rejected. `result.json` includes `state_machine` with terminal outcome and per-role phase/status/duration; JSONL records `role_entered`, `role_exited` and `state_machine_finished`. Supplemental operator queries may return an agent-generated plan to Scout before plan validation. Unexpected exceptions retain a failed lifecycle artifact and propagate their original exception; this is not automatic recovery. Lifecycle events are correlated with local OTLP/JSON spans; Collector upload and cross-process propagation remain planned.
 
 | Component | Available behavior |
 | --- | --- |
@@ -127,7 +127,7 @@ Prepare the image with the repository's dependencies in advance. Keel never pull
 
 The container runs with networking disabled, a read-only root filesystem and workspace, dropped capabilities, no-new-privileges, a non-root UID, CPU/memory/process limits, and bounded temporary shared-memory mounts. JUnit commands receive a separate writable report mount. Timeout handling attempts to force-remove only the uniquely named container and reports cleanup failure. Tests and builds must support a read-only source tree; cached files and build outputs need to go to `/tmp`. This backend currently offers no general writable build-output mount.
 
-Reference: [Docker run documentation](https://docs.docker.com/reference/cli/docker/container/run/). Docker flag construction and timeout cleanup are tested with mocks. **Live container isolation has not been validated in the current environment, where Docker is unavailable.** The backend currently protects verifier execution only; it is not a complete agent sandbox or a hostile-code security guarantee.
+Reference: [Docker run documentation](https://docs.docker.com/reference/cli/docker/container/run/). Docker flag construction and timeout cleanup are tested with mocks. Live verifier-container checks passed on 2026-10-15 (UID, capabilities, mount flags, denied writes and IPv4 routes); a real CPU-model/Docker smoke task also passed. The backend currently protects verifier execution only; it is not a complete agent sandbox or a hostile-code security guarantee.
 
 Local command timeouts constrain the immediate process, not all descendants. Model HTTP timeouts and application budget checks are also not operating-system hard limits. Local commands inherit the host environment. Only the operator chooses acceptance commands and execution settings.
 
@@ -145,11 +145,11 @@ Exit codes: `0` for a passed run, `1` for a recorded failed run, and `2` for inv
 
 ## Roadmap
 
-- Validate Docker isolation in a real Linux-container environment and strengthen resource/process control.
+- Extend validated verifier-container isolation to Agent/MCP execution and strengthen resource/process control.
 - Expand adversarial audit evaluation and mutation operators; measure false positives and misses.
 - Complete Compass public benchmark adapters, calibrated routing, cross-encoder reranking, and broader MCP client validation.
 - Add isolated concurrent workspaces, bounded Critic retries, and richer context management.
-- Export OpenTelemetry spans, collect labeled trajectories, and train the early-stopping predictor.
+- Extend local OTLP export with SDK/Collector integration, collect labeled trajectories, and train the early-stopping predictor.
 - Run public benchmarks and controlled ablations under fixed models and budgets.
 
 No benchmark improvements or production reliability claims are reported yet.
@@ -685,7 +685,7 @@ are reused. Trusted host orchestration can explicitly call
 16 selected file/symbol facts from the same Workspace. The copied evidence has a
 new recipient-owned ID and a traced source reference. It is a historical
 observation, not a freshness guarantee. This host API is not a model tool and
-is not automatically applied to the existing Scout/Planner handoff. Decision
+is applied at role boundaries only when `context_handoff` is enabled. Decision
 history, failed attempts and verification records cannot be shared through it.
 
 Run the saved, model-free integration demonstration:
@@ -695,5 +695,80 @@ python examples/memory_demo.py
 python -m unittest discover -s tests -p test_memory.py -v
 ```
 
-Artifacts persist under `.keel/memory-demo/<id>`. W8 still needs task-level
-selection of handoff evidence and larger-workload overhead measurements.
+Artifacts persist under `.keel/memory-demo/<id>`. W8 includes bounded file-read selection at role boundaries; larger-workload
+overhead and model-cost measurements remain outstanding.
+
+### Opt-in context handoff at role boundaries
+
+Set top-level `"context_handoff": true` in an agent task configuration, or run:
+
+```powershell
+python examples/run_keel_agent.py --backend docker --cpu --context-handoff
+```
+
+The host selects Scout file-read evidence matching the impact file list for the
+Planner. Before each Implementer session, it selects Scout/Planner file reads
+matching only that work item's declared files. Each selection is limited to four
+facts and one fact per canonical path, with recent Planner observations preferred.
+Source bytes must match the recorded SHA-256 at selection; stale or deleted
+files are skipped. The model receives recipient-owned fact IDs, bounded previews,
+source IDs, paths and hashes in `task.evidence`. Existing token preflight includes
+these previews. No role history, model decisions, file listings, search/MCP results
+or arbitrary ledger IDs are automatically transferred.
+
+The original source IDs confer no recall permission. Selected copies remain
+historical observations: source matching is a check at selection time, not a lock
+against subsequent external changes. Implementers should inspect current source;
+write scoping, static auditing and independent verification remain authoritative.
+Transferred facts do not satisfy the optional `require_evidence` gate: Scout and
+Implementer must obtain an observation through a tool in their own session.
+Earlier Implementer histories are not shared with later work items; initial
+Scout/Planner evidence is rechecked at every boundary. `result.memory` includes
+`handed_off_facts`, and trace events record `context_selected` and `evidence_handoff`.
+
+The default is false, preserving existing isolated sessions. The new role-boundary
+behavior has been tested with scripted agents; a live CPU/Docker run with handoff
+enabled is a separate validation from the previous no-handoff smoke result.
+
+For CPU host-memory pressure, the smoke runner accepts `--num-ctx 4096` to reduce
+context/cache allocation (default remains 8192). The selected context is recorded
+in task.json. This cannot replace adequate free host RAM; WSL swap does not serve
+as Windows-native Ollama's paging file. A context-handoff attempt on 2026-10-15
+failed before handoff with `std::bad_alloc`; its Ollama log reported only 525.9 MiB
+free host RAM. No model/handoff correctness failure is inferred from that request.
+
+```powershell
+python examples/run_keel_agent.py --backend docker --cpu --context-handoff --num-ctx 4096
+```
+
+### Controlled memoization measurement
+
+Set top-level `"memoization": false` to bypass local read/list/literal-search cache
+lookup and insertion; default is true. The same permission checks, budgets, source
+fingerprint guards, and output semantics remain active. Compass and MCP behavior
+is unaffected. `result.memory.tools` reports requests, hits and computations per
+supported tool, while snapshot_calls/snapshot_bytes expose hashing work.
+Computations count decode/list/scan invocations, including a miss that later fails;
+they are not counts of physical disk reads. A read hit still reads source bytes.
+
+Run a paired, model-free experiment with alternating mode order, fresh ledgers,
+fixed workloads and a source edit between two phases:
+
+```powershell
+python -m keel.memory_benchmark
+```
+
+It saves JSON, Markdown, traces and fixture repositories under
+`.keel/memory-bench/<id>`. CLI options include `--files`, `--lines`, `--repeats`,
+`--trials` and `--output-dir` (must not exist). Timing includes fingerprints, cache
+I/O, budget and trace costs, but not Agent model calls, gateway previews or task
+success measurement. Both modes keep fingerprint guards, so this isolates cache
+reuse, not removal of snapshot correctness checks. OS caches are uncontrolled.
+Results are checked for matching semantic observations and final source bytes.
+
+The initial 64-file synthetic run found 31 requests in both modes, computations
+31 -> 6 and 25 hits, but median elapsed time 0.749s -> 0.799s (6.7% slower).
+A separate 256-file fixture measured 3.256s -> 2.955s (9.2% faster), with
+identical outputs and request counts. Neither result establishes token savings,
+fewer model requests, or general speedup.
+See [the W8 measurement note](docs/evaluations/keel-memory-measurement.md).

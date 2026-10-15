@@ -14,6 +14,8 @@ from keel.runtime import run
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--context-handoff', action='store_true', help='Transfer bounded fresh file-read evidence between roles')
+    parser.add_argument('--num-ctx', type=int, default=8192, help='Ollama context window (1024 to 131072)')
     parser.add_argument('--cpu', action='store_true', help='Disable GPU model offload (slower)')
     parser.add_argument('--max-seconds', type=int, default=None, help='Wall-clock budget (CPU: 900s; default: 300s)')
     parser.add_argument('--model', default='keel-chat')
@@ -22,6 +24,8 @@ def main(argv=None):
     parser.add_argument('--image', default='python:3.11-slim')
     parser.add_argument('--output-dir', type=Path)
     args = parser.parse_args(argv)
+    if not 1024 <= args.num_ctx <= 131072:
+        parser.error('--num-ctx must be between 1024 and 131072')
     if args.max_seconds is not None and args.max_seconds <= 0:
         parser.error('--max-seconds must be positive')
     root = args.output_dir or Path(__file__).resolve().parents[1] / '.keel' / 'agent-smoke' / uuid.uuid4().hex
@@ -33,9 +37,10 @@ def main(argv=None):
     verifier = 'python' if args.backend == 'docker' else sys.executable
     config = {
         'mode': 'agent',
+        'context_handoff': args.context_handoff,
         'goal': 'Inspect app.py. Change only API_VERSION from 1 to 2 and preserve greeting(name) behavior. '
                 'Use read_file to inspect source before replace; declare app.py as the work item file.',
-        'model': {'provider': 'ollama', 'name': args.model, 'base_url': args.base_url, 'num_ctx': 8192, **({'num_gpu': 0} if args.cpu else {})},
+        'model': {'provider': 'ollama', 'name': args.model, 'base_url': args.base_url, 'num_ctx': args.num_ctx, **({'num_gpu': 0} if args.cpu else {})},
         'agent': {'max_steps': 10, 'max_output': 768, 'require_evidence': True, 'max_work_items': 1},
         'budget': {'max_wallclock': args.max_seconds if args.max_seconds is not None else (900 if args.cpu else 300), 'max_model_calls': 24, 'max_tool_calls': 40, 'max_tokens': 120000},
         'execution': {'backend': args.backend, **({'image': args.image} if args.backend == 'docker' else {})},

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import time
 import uuid
 
@@ -25,6 +26,8 @@ class ToolGateway:
         self.role, self.ws = role, workspace
         self.allowed_files = frozenset(allowed_files)
         self.visible_facts = set()
+        self.observed_facts = set()
+        self.read_evidence = {}
 
     def accept_evidence(self, source, fact_ids):
         """Trusted host-only handoff; deliberately absent from the model tool catalog."""
@@ -42,6 +45,8 @@ class ToolGateway:
         for original, fact, payload in selected:
             copied = self.ws.ledger.add(fact["kind"], self.role, fact["summary"], payload)
             self.visible_facts.add(copied)
+            if original in source.read_evidence:
+                self.read_evidence[copied] = dict(source.read_evidence[original])
             self.ws.trace.emit(self.role, "evidence_handoff", source_role=source.role,
                                source_fact_id=original, fact_id=copied)
             text = json.dumps(payload, ensure_ascii=False)
@@ -114,6 +119,7 @@ class ToolGateway:
             value = self.ws.mcp_tools.call(self.role, tool, args)
             fact_id = self.ws.ledger.add("symbol", self.role, tool + " evidence", value)
             self.visible_facts.add(fact_id)
+            self.observed_facts.add(fact_id)
             text = json.dumps(value, ensure_ascii=False)
             self.ws.trace.emit(self.role, "ledger_write", fact_id=fact_id)
             return {"fact_id": fact_id, "preview": text[:4000], "truncated": len(text) > 4000}
@@ -156,6 +162,11 @@ class ToolGateway:
             raise PolicyDenied(f"Unknown tool: {tool}")
         fact_id = self.ws.ledger.add(kind, self.role, tool + " evidence", value)
         self.visible_facts.add(fact_id)
+        self.observed_facts.add(fact_id)
+        if tool == "read_file":
+            canonical = self.ws.path(args["path"]).relative_to(self.ws.root).as_posix()
+            self.read_evidence[fact_id] = {"path": canonical,
+                "sha256": hashlib.sha256(value["value"].encode("utf-8")).hexdigest()}
         text = json.dumps(value, ensure_ascii=False)
         self.ws.trace.emit(self.role, "ledger_write", fact_id=fact_id)
         return {"fact_id": fact_id, "preview": text[:4000], "truncated": len(text) > 4000}

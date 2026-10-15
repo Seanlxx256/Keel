@@ -84,3 +84,59 @@ class MemoryTests(unittest.TestCase):
         with self.assertRaises(PolicyDenied):
             planner.call('recall', {'fact_id': first['fact_id']})
         self.assertNotIn('accept_evidence', planner.catalog())
+
+    def test_context_selection_is_bounded_and_skips_stale_or_deleted_reads(self):
+        from keel.context import handoff_context
+        scout, planner = ToolGateway('scout', self.ws), ToolGateway('planner', self.ws)
+        files = []
+        for i in range(6):
+            name = f'file{i}.py'
+            (self.repo / name).write_text(f'VALUE = {i}\n')
+            scout.call('read_file', {'path': name})
+            files.append(name)
+        refs = handoff_context(planner, [scout], files)
+        self.assertEqual(len(refs), 4)
+        self.assertEqual(len({ref['path'] for ref in refs}), 4)
+        (self.repo / 'file5.py').write_text('VALUE = 99\n')
+        (self.repo / 'file4.py').unlink()
+        target = ToolGateway('implementer', self.ws)
+        refs = handoff_context(target, [scout, planner], ['file5.py', 'file4.py'])
+        self.assertEqual(refs, [])
+
+    def test_disabled_cache_bypasses_existing_entries_and_preserves_budget(self):
+        self.ws.read('app.py')
+        self.ws.search('VALUE')
+        entries = self.ledger.statistics()['cache_entries']
+        ws = Workspace(self.repo, Budget(Limits()), self.ledger, self.ws.trace, memoization=False)
+        for _ in range(2):
+            self.assertFalse(ws.read('app.py')['cache_hit'])
+            self.assertFalse(ws.search('VALUE')['cache_hit'])
+        self.assertEqual(ws.tool_metrics['search_code'], {'requests': 2, 'cache_hits': 0, 'computations': 2})
+        self.assertEqual(ws.budget.tool_calls, 4)
+        self.assertEqual(self.ledger.statistics()['cache_entries'], entries)
+        self.assertGreater(ws.snapshot_bytes, 0)
+
+    def test_paired_benchmark_preserves_semantics_and_refuses_overwrite(self):
+        from keel.memory_benchmark import run_benchmark
+        result = run_benchmark(self.repo / 'experiment', files=2, lines=4, repeats=2, trials=2)
+        self.assertTrue(result['all_passed'])
+        self.assertEqual(result['summary']['off']['requests_per_trial'], result['summary']['on']['requests_per_trial'])
+        self.assertLess(result['summary']['on']['computations_per_trial'], result['summary']['off']['computations_per_trial'])
+        self.assertEqual(result['summary']['on']['snapshot_bytes_per_trial'], result['summary']['off']['snapshot_bytes_per_trial'])
+        with self.assertRaises(FileExistsError):
+            run_benchmark(self.repo / 'experiment')
+
+    def test_runtime_cache_ablation_preserves_independent_acceptance(self):
+        import sys
+        from keel.runtime import run
+        config = {'goal': 'Upgrade value', 'memoization': False,
+                  'work_items': [{'id': 'change', 'edits': [{'path': 'app.py', 'old': 'VALUE = 1', 'new': 'VALUE = 2'}]}],
+                  'acceptance': [[sys.executable, '-c', 'import app; assert app.VALUE == 2']]}
+        result = run(config, self.repo, self.repo / '.keel' / 'runtime')
+        self.assertEqual(result['status'], 'passed')
+        self.assertFalse(result['memory']['memoization'])
+        self.assertEqual(result['memory']['cache_entries'], 0)
+        self.assertEqual(result['memory']['tools']['read_file']['computations'], 1)
+        with self.assertRaisesRegex(ValueError, 'memoization'):
+            run({**config, 'memoization': 'false'}, self.repo, self.repo / '.keel' / 'invalid')
+        self.assertFalse((self.repo / '.keel' / 'invalid').exists())

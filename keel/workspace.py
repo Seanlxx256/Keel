@@ -15,7 +15,12 @@ IGNORED = {".git", ".keel", ".compass", ".venv", ".venv-deps", "node_modules", "
 
 class Workspace:
     def __init__(self, root: Path, budget: Budget, ledger: Ledger, trace: Trace, runner=None,
-                 retrieval=None, retrieval_model=None):
+                 retrieval=None, retrieval_model=None, memoization=True):
+        if type(memoization) is not bool:
+            raise ValueError("memoization must be boolean")
+        self.memoization = memoization
+        self.tool_metrics = {}
+        self.snapshot_calls = self.snapshot_bytes = 0
         self.root = root.resolve(strict=True)
         if not self.root.is_dir():
             raise ValueError("Repository must be a directory")
@@ -92,18 +97,31 @@ class Workspace:
                     yield path.relative_to(self.root).as_posix(), path
 
     def snapshot(self):
-        return {name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in self.files()}
+        self.snapshot_calls += 1
+        snapshot = {}
+        for name, path in self.files():
+            raw = path.read_bytes()
+            self.snapshot_bytes += len(raw)
+            snapshot[name] = hashlib.sha256(raw).hexdigest()
+        return snapshot
+
+    def _count_observation(self, tool, hit):
+        row = self.tool_metrics.setdefault(tool, {"requests": 0, "cache_hits": 0, "computations": 0})
+        row["requests"] += 1
+        row["cache_hits"] += int(hit)
+        row["computations"] += int(not hit)
 
     def _memoized(self, tool, arguments, compute, role):
         """Only deterministic local observations; never cache writes or verification."""
         self.budget.charge_tool()
         before = self.snapshot()
         key = digest(["local-observation-v1", str(self.root), tool, arguments, before])
-        cached = self.ledger.cached(key)
+        cached = self.ledger.cached(key) if self.memoization else None
+        self._count_observation(tool, cached is not None)
         value = cached["value"] if cached else compute(before)
         if self.snapshot() != before:
             raise ValueError("Repository changed during memoized observation; retry the tool")
-        if cached is None:
+        if cached is None and self.memoization:
             self.ledger.cache(key, value)
         self.trace.emit(role, "tool_cache", tool=tool, cache_hit=cached is not None,
                         repeat_count=cached["repeat_count"] if cached else 0)
@@ -122,10 +140,12 @@ class Workspace:
             raise ValueError("read_file supports files up to 1 MB")
         raw = path.read_bytes()
         key = digest(["read", relative, hashlib.sha256(raw).hexdigest()])
-        result = self.ledger.cached(key)
+        result = self.ledger.cached(key) if self.memoization else None
+        self._count_observation("read_file", result is not None)
         if result is None:
             value = raw.decode("utf-8")
-            self.ledger.cache(key, value)
+            if self.memoization:
+                self.ledger.cache(key, value)
             result = {"value": value, "cache_hit": False, "repeat_count": 0}
         self.trace.emit(role, "tool_call", tool="read", path=relative,
                         cache_hit=result["cache_hit"], repeat_count=result["repeat_count"])

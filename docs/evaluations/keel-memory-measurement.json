@@ -1,0 +1,595 @@
+{
+  "experiments": [
+    {
+      "source": ".keel\\memory-bench\\a64fc43139104c6ab3f38c7ae5969b47\\benchmark.json",
+      "source_sha256": "4830c00fedfbcb00ca7696304733a03b0c9f561b2401e4be97be09e95433d4af",
+      "result": {
+        "all_passed": true,
+        "semantic_outputs_equal": true,
+        "fixture": {
+          "files": 64,
+          "lines_per_file": 128,
+          "repeats_per_phase": 5,
+          "phases": 2,
+          "trials": 3,
+          "seed": 42,
+          "initial_content_sha256": "e5cb752df96d67c6234e551562e3fbf2040ffc299889f30aa997dca85bc31961"
+        },
+        "summary": {
+          "off": {
+            "median_seconds": 0.749332100036554,
+            "requests_per_trial": 31,
+            "computations_per_trial": 31,
+            "cache_hits_per_trial": 0,
+            "snapshot_bytes_per_trial": 5144680
+          },
+          "on": {
+            "median_seconds": 0.7991971999872476,
+            "requests_per_trial": 31,
+            "computations_per_trial": 6,
+            "cache_hits_per_trial": 25,
+            "snapshot_bytes_per_trial": 5144680
+          }
+        },
+        "on_over_off_time_ratio": 1.0665460614169084,
+        "records": [
+          {
+            "trial": 0,
+            "memoization": true,
+            "seconds": 0.8559080000268295,
+            "semantic_output_sha256": "a9ceffb5a8d10150becccdb63eddd39e1dafff46388bd5d685e022964b301671",
+            "correct_final_source": true,
+            "tools": {
+              "read_file": {
+                "requests": 11,
+                "cache_hits": 9,
+                "computations": 2
+              },
+              "list_files": {
+                "requests": 10,
+                "cache_hits": 8,
+                "computations": 2
+              },
+              "search_code": {
+                "requests": 10,
+                "cache_hits": 8,
+                "computations": 2
+              }
+            },
+            "budget": {
+              "tool_calls": 32,
+              "tokens": 0,
+              "model_calls": 0,
+              "wallclock_seconds": 0.875,
+              "limits": {
+                "max_wallclock": 600,
+                "max_tool_calls": 100000,
+                "max_tokens": 20000,
+                "max_model_calls": 40
+              }
+            },
+            "snapshot_calls": 40,
+            "snapshot_bytes": 5144680,
+            "ledger": {
+              "cache_entries": 6,
+              "cache_hits": 25,
+              "facts": 0
+            }
+          },
+          {
+            "trial": 0,
+            "memoization": false,
+            "seconds": 0.6649450999684632,
+            "semantic_output_sha256": "a9ceffb5a8d10150becccdb63eddd39e1dafff46388bd5d685e022964b301671",
+            "correct_final_source": true,
+            "tools": {
+              "read_file": {
+                "requests": 11,
+                "cache_hits": 0,
+                "computations": 11
+              },
+              "list_files": {
+                "requests": 10,
+                "cache_hits": 0,
+                "computations": 10
+              },
+              "search_code": {
+                "requests": 10,
+                "cache_hits": 0,
+                "computations": 10
+              }
+            },
+            "budget": {
+              "tool_calls": 32,
+              "tokens": 0,
+              "model_calls": 0,
+              "wallclock_seconds": 0.656,
+              "limits": {
+                "max_wallclock": 600,
+                "max_tool_calls": 100000,
+                "max_tokens": 20000,
+                "max_model_calls": 40
+              }
+            },
+            "snapshot_calls": 40,
+            "snapshot_bytes": 5144680,
+            "ledger": {
+              "cache_entries": 0,
+              "cache_hits": 0,
+              "facts": 0
+            }
+          },
+          {
+            "trial": 1,
+            "memoization": false,
+            "seconds": 0.749332100036554,
+            "semantic_output_sha256": "a9ceffb5a8d10150becccdb63eddd39e1dafff46388bd5d685e022964b301671",
+            "correct_final_source": true,
+            "tools": {
+              "read_file": {
+                "requests": 11,
+                "cache_hits": 0,
+                "computations": 11
+              },
+              "list_files": {
+                "requests": 10,
+                "cache_hits": 0,
+                "computations": 10
+              },
+              "search_code": {
+                "requests": 10,
+                "cache_hits": 0,
+                "computations": 10
+              }
+            },
+            "budget": {
+              "tool_calls": 32,
+              "tokens": 0,
+              "model_calls": 0,
+              "wallclock_seconds": 0.75,
+              "limits": {
+                "max_wallclock": 600,
+                "max_tool_calls": 100000,
+                "max_tokens": 20000,
+                "max_model_calls": 40
+              }
+            },
+            "snapshot_calls": 40,
+            "snapshot_bytes": 5144680,
+            "ledger": {
+              "cache_entries": 0,
+              "cache_hits": 0,
+              "facts": 0
+            }
+          },
+          {
+            "trial": 1,
+            "memoization": true,
+            "seconds": 0.7991971999872476,
+            "semantic_output_sha256": "a9ceffb5a8d10150becccdb63eddd39e1dafff46388bd5d685e022964b301671",
+            "correct_final_source": true,
+            "tools": {
+              "read_file": {
+                "requests": 11,
+                "cache_hits": 9,
+                "computations": 2
+              },
+              "list_files": {
+                "requests": 10,
+                "cache_hits": 8,
+                "computations": 2
+              },
+              "search_code": {
+                "requests": 10,
+                "cache_hits": 8,
+                "computations": 2
+              }
+            },
+            "budget": {
+              "tool_calls": 32,
+              "tokens": 0,
+              "model_calls": 0,
+              "wallclock_seconds": 0.813,
+              "limits": {
+                "max_wallclock": 600,
+                "max_tool_calls": 100000,
+                "max_tokens": 20000,
+                "max_model_calls": 40
+              }
+            },
+            "snapshot_calls": 40,
+            "snapshot_bytes": 5144680,
+            "ledger": {
+              "cache_entries": 6,
+              "cache_hits": 25,
+              "facts": 0
+            }
+          },
+          {
+            "trial": 2,
+            "memoization": true,
+            "seconds": 0.7906691000098363,
+            "semantic_output_sha256": "a9ceffb5a8d10150becccdb63eddd39e1dafff46388bd5d685e022964b301671",
+            "correct_final_source": true,
+            "tools": {
+              "read_file": {
+                "requests": 11,
+                "cache_hits": 9,
+                "computations": 2
+              },
+              "list_files": {
+                "requests": 10,
+                "cache_hits": 8,
+                "computations": 2
+              },
+              "search_code": {
+                "requests": 10,
+                "cache_hits": 8,
+                "computations": 2
+              }
+            },
+            "budget": {
+              "tool_calls": 32,
+              "tokens": 0,
+              "model_calls": 0,
+              "wallclock_seconds": 0.781,
+              "limits": {
+                "max_wallclock": 600,
+                "max_tool_calls": 100000,
+                "max_tokens": 20000,
+                "max_model_calls": 40
+              }
+            },
+            "snapshot_calls": 40,
+            "snapshot_bytes": 5144680,
+            "ledger": {
+              "cache_entries": 6,
+              "cache_hits": 25,
+              "facts": 0
+            }
+          },
+          {
+            "trial": 2,
+            "memoization": false,
+            "seconds": 0.7877681999816559,
+            "semantic_output_sha256": "a9ceffb5a8d10150becccdb63eddd39e1dafff46388bd5d685e022964b301671",
+            "correct_final_source": true,
+            "tools": {
+              "read_file": {
+                "requests": 11,
+                "cache_hits": 0,
+                "computations": 11
+              },
+              "list_files": {
+                "requests": 10,
+                "cache_hits": 0,
+                "computations": 10
+              },
+              "search_code": {
+                "requests": 10,
+                "cache_hits": 0,
+                "computations": 10
+              }
+            },
+            "budget": {
+              "tool_calls": 32,
+              "tokens": 0,
+              "model_calls": 0,
+              "wallclock_seconds": 0.797,
+              "limits": {
+                "max_wallclock": 600,
+                "max_tool_calls": 100000,
+                "max_tokens": 20000,
+                "max_model_calls": 40
+              }
+            },
+            "snapshot_calls": 40,
+            "snapshot_bytes": 5144680,
+            "ledger": {
+              "cache_entries": 0,
+              "cache_hits": 0,
+              "facts": 0
+            }
+          }
+        ],
+        "limitations": "Synthetic direct Workspace calls, not agent trajectories. Both modes retain fingerprint guards and budget/trace costs. Computations mean decode/list/scan invocations, not physical disk reads. File reads and fingerprints still read bytes on cache hits. OS caches uncontrolled; no model-token, duplicate-request-rate or task-success improvement claim."
+      }
+    },
+    {
+      "source": ".keel\\memory-bench\\ddd1a6e7f9d94f85af8bbd4e8031cc1a\\benchmark.json",
+      "source_sha256": "3a94aec7f948f83d05435a8e77df4b9fdd86dfa5fe99b890e71d629b68346248",
+      "result": {
+        "all_passed": true,
+        "semantic_outputs_equal": true,
+        "fixture": {
+          "files": 256,
+          "lines_per_file": 512,
+          "repeats_per_phase": 5,
+          "phases": 2,
+          "trials": 3,
+          "seed": 42,
+          "initial_content_sha256": "5131c1410ccfaa16d894b84cec6028f6a35c2c7def292c0a56cb8b9f32203492"
+        },
+        "summary": {
+          "off": {
+            "median_seconds": 3.256131000001915,
+            "requests_per_trial": 31,
+            "computations_per_trial": 31,
+            "cache_hits_per_trial": 0,
+            "snapshot_bytes_per_trial": 87931480
+          },
+          "on": {
+            "median_seconds": 2.9549645999795757,
+            "requests_per_trial": 31,
+            "computations_per_trial": 6,
+            "cache_hits_per_trial": 25,
+            "snapshot_bytes_per_trial": 87931480
+          }
+        },
+        "on_over_off_time_ratio": 0.9075078981705091,
+        "records": [
+          {
+            "trial": 0,
+            "memoization": true,
+            "seconds": 2.9960213000304066,
+            "semantic_output_sha256": "9569693a97a122040dac378d6cc60dc0952fec736e4d6d6516d6d61fd25460ab",
+            "correct_final_source": true,
+            "tools": {
+              "read_file": {
+                "requests": 11,
+                "cache_hits": 9,
+                "computations": 2
+              },
+              "list_files": {
+                "requests": 10,
+                "cache_hits": 8,
+                "computations": 2
+              },
+              "search_code": {
+                "requests": 10,
+                "cache_hits": 8,
+                "computations": 2
+              }
+            },
+            "budget": {
+              "tool_calls": 32,
+              "tokens": 0,
+              "model_calls": 0,
+              "wallclock_seconds": 3.015,
+              "limits": {
+                "max_wallclock": 600,
+                "max_tool_calls": 100000,
+                "max_tokens": 20000,
+                "max_model_calls": 40
+              }
+            },
+            "snapshot_calls": 40,
+            "snapshot_bytes": 87931480,
+            "ledger": {
+              "cache_entries": 6,
+              "cache_hits": 25,
+              "facts": 0
+            }
+          },
+          {
+            "trial": 0,
+            "memoization": false,
+            "seconds": 3.256131000001915,
+            "semantic_output_sha256": "9569693a97a122040dac378d6cc60dc0952fec736e4d6d6516d6d61fd25460ab",
+            "correct_final_source": true,
+            "tools": {
+              "read_file": {
+                "requests": 11,
+                "cache_hits": 0,
+                "computations": 11
+              },
+              "list_files": {
+                "requests": 10,
+                "cache_hits": 0,
+                "computations": 10
+              },
+              "search_code": {
+                "requests": 10,
+                "cache_hits": 0,
+                "computations": 10
+              }
+            },
+            "budget": {
+              "tool_calls": 32,
+              "tokens": 0,
+              "model_calls": 0,
+              "wallclock_seconds": 3.25,
+              "limits": {
+                "max_wallclock": 600,
+                "max_tool_calls": 100000,
+                "max_tokens": 20000,
+                "max_model_calls": 40
+              }
+            },
+            "snapshot_calls": 40,
+            "snapshot_bytes": 87931480,
+            "ledger": {
+              "cache_entries": 0,
+              "cache_hits": 0,
+              "facts": 0
+            }
+          },
+          {
+            "trial": 1,
+            "memoization": false,
+            "seconds": 3.211056699976325,
+            "semantic_output_sha256": "9569693a97a122040dac378d6cc60dc0952fec736e4d6d6516d6d61fd25460ab",
+            "correct_final_source": true,
+            "tools": {
+              "read_file": {
+                "requests": 11,
+                "cache_hits": 0,
+                "computations": 11
+              },
+              "list_files": {
+                "requests": 10,
+                "cache_hits": 0,
+                "computations": 10
+              },
+              "search_code": {
+                "requests": 10,
+                "cache_hits": 0,
+                "computations": 10
+              }
+            },
+            "budget": {
+              "tool_calls": 32,
+              "tokens": 0,
+              "model_calls": 0,
+              "wallclock_seconds": 3.218,
+              "limits": {
+                "max_wallclock": 600,
+                "max_tool_calls": 100000,
+                "max_tokens": 20000,
+                "max_model_calls": 40
+              }
+            },
+            "snapshot_calls": 40,
+            "snapshot_bytes": 87931480,
+            "ledger": {
+              "cache_entries": 0,
+              "cache_hits": 0,
+              "facts": 0
+            }
+          },
+          {
+            "trial": 1,
+            "memoization": true,
+            "seconds": 2.9549645999795757,
+            "semantic_output_sha256": "9569693a97a122040dac378d6cc60dc0952fec736e4d6d6516d6d61fd25460ab",
+            "correct_final_source": true,
+            "tools": {
+              "read_file": {
+                "requests": 11,
+                "cache_hits": 9,
+                "computations": 2
+              },
+              "list_files": {
+                "requests": 10,
+                "cache_hits": 8,
+                "computations": 2
+              },
+              "search_code": {
+                "requests": 10,
+                "cache_hits": 8,
+                "computations": 2
+              }
+            },
+            "budget": {
+              "tool_calls": 32,
+              "tokens": 0,
+              "model_calls": 0,
+              "wallclock_seconds": 2.953,
+              "limits": {
+                "max_wallclock": 600,
+                "max_tool_calls": 100000,
+                "max_tokens": 20000,
+                "max_model_calls": 40
+              }
+            },
+            "snapshot_calls": 40,
+            "snapshot_bytes": 87931480,
+            "ledger": {
+              "cache_entries": 6,
+              "cache_hits": 25,
+              "facts": 0
+            }
+          },
+          {
+            "trial": 2,
+            "memoization": true,
+            "seconds": 2.8706344999955036,
+            "semantic_output_sha256": "9569693a97a122040dac378d6cc60dc0952fec736e4d6d6516d6d61fd25460ab",
+            "correct_final_source": true,
+            "tools": {
+              "read_file": {
+                "requests": 11,
+                "cache_hits": 9,
+                "computations": 2
+              },
+              "list_files": {
+                "requests": 10,
+                "cache_hits": 8,
+                "computations": 2
+              },
+              "search_code": {
+                "requests": 10,
+                "cache_hits": 8,
+                "computations": 2
+              }
+            },
+            "budget": {
+              "tool_calls": 32,
+              "tokens": 0,
+              "model_calls": 0,
+              "wallclock_seconds": 2.875,
+              "limits": {
+                "max_wallclock": 600,
+                "max_tool_calls": 100000,
+                "max_tokens": 20000,
+                "max_model_calls": 40
+              }
+            },
+            "snapshot_calls": 40,
+            "snapshot_bytes": 87931480,
+            "ledger": {
+              "cache_entries": 6,
+              "cache_hits": 25,
+              "facts": 0
+            }
+          },
+          {
+            "trial": 2,
+            "memoization": false,
+            "seconds": 3.510171000030823,
+            "semantic_output_sha256": "9569693a97a122040dac378d6cc60dc0952fec736e4d6d6516d6d61fd25460ab",
+            "correct_final_source": true,
+            "tools": {
+              "read_file": {
+                "requests": 11,
+                "cache_hits": 0,
+                "computations": 11
+              },
+              "list_files": {
+                "requests": 10,
+                "cache_hits": 0,
+                "computations": 10
+              },
+              "search_code": {
+                "requests": 10,
+                "cache_hits": 0,
+                "computations": 10
+              }
+            },
+            "budget": {
+              "tool_calls": 32,
+              "tokens": 0,
+              "model_calls": 0,
+              "wallclock_seconds": 3.5,
+              "limits": {
+                "max_wallclock": 600,
+                "max_tool_calls": 100000,
+                "max_tokens": 20000,
+                "max_model_calls": 40
+              }
+            },
+            "snapshot_calls": 40,
+            "snapshot_bytes": 87931480,
+            "ledger": {
+              "cache_entries": 0,
+              "cache_hits": 0,
+              "facts": 0
+            }
+          }
+        ],
+        "limitations": "Synthetic direct Workspace calls, not agent trajectories. Both modes retain fingerprint guards and budget/trace costs. Computations mean decode/list/scan invocations, not physical disk reads. File reads and fingerprints still read bytes on cache hits. OS caches uncontrolled; no model-token, duplicate-request-rate or task-success improvement claim."
+      }
+    }
+  ],
+  "scope": "Two synthetic direct-Workspace measurements, not live-agent cost ablations."
+}

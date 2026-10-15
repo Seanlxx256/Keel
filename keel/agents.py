@@ -54,7 +54,7 @@ class AgentSession:
             tool_action = {"type": "object", "properties": {"tool": {"type": "string", "enum": list(tools)},
                            "arguments": {"type": "object"}}, "required": ["tool", "arguments"],
                            "additionalProperties": False}
-            ready = not self.require_evidence or self.role == "planner" or bool(self.visible_facts)
+            ready = not self.require_evidence or self.role == "planner" or bool(self.gateway.observed_facts)
             schema = (final_action if step == self.max_steps - 1 else {"oneOf": [tool_action, final_action]}) if ready else tool_action
             encoded = json.dumps(self.messages, ensure_ascii=False)
             structured = callable(getattr(self.model, "complete_json", None))
@@ -80,7 +80,7 @@ class AgentSession:
                     raise ValueError("Expected a JSON object")
                 if set(action) == {"final"}:
                     if not ready:
-                        raise ValueError("Inspect repository evidence with a tool before returning a final answer")
+                        raise ValueError("Inspect repository evidence with a tool in this session before returning a final answer; inherited evidence is not an executed action")
                     return action["final"]
                 if set(action) != {"tool", "arguments"} or not isinstance(action["arguments"], dict):
                     raise ValueError("Expected tool/arguments or final")
@@ -115,7 +115,11 @@ def generate_plan(config, model, workspace, on_role=lambda role: None):
     workspace.ledger.add("decision", "scout", "Impact analysis", impact)
     on_role("planner")
     planner = AgentSession("planner", model, workspace, **settings)
-    plan = planner.execute({"goal": config["goal"], "impact": impact},
+    planner_task = {"goal": config["goal"], "impact": impact}
+    if config.get("context_handoff", False):
+        from .context import handoff_context
+        planner_task["evidence"] = handoff_context(planner.gateway, [scout.gateway], impact["files"])
+    plan = planner.execute(planner_task,
                            'array of work items: {"id": "unique-id", "description": "implementation goal", '
                            '"depends_on": ["other-id"], "files": ["relative/path"]}. No edits field. '
                            "Every item must declare existing files it may modify.")
@@ -130,4 +134,6 @@ def generate_plan(config, model, workspace, on_role=lambda role: None):
             if not isinstance(path, str):
                 raise ModelError("Work item file names must be strings")
             workspace.path(path, write=True)
+    if config.get("context_handoff", False):
+        workspace.context_sources = [scout.gateway, planner.gateway]
     return plan

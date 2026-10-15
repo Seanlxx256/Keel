@@ -51,6 +51,10 @@ def validate(config: dict):
 def run(config: dict, repo: Path, output: Path, *, model=None) -> dict:
     from .mcp_client import validate_servers
     validate_servers(config.get("mcp_servers", {}))
+    if type(config.get("context_handoff", False)) is not bool:
+        raise ValueError("context_handoff must be boolean")
+    if type(config.get("memoization", True)) is not bool:
+        raise ValueError("memoization must be boolean")
     ordered = validate(config)
     mutation_samples = config.get("mutation_samples", 0)
     if type(mutation_samples) is not int or not 0 <= mutation_samples <= 20:
@@ -74,7 +78,7 @@ def run(config: dict, repo: Path, output: Path, *, model=None) -> dict:
     trace = Trace(output / "trace.jsonl", telemetry=telemetry)
     lifecycle = RoleStateMachine(trace)
     workspace = Workspace(repo, budget, ledger, trace, runner=CommandRunner(config.get("execution")),
-                          retrieval=config.get("retrieval"), retrieval_model=model)
+                          retrieval=config.get("retrieval"), retrieval_model=model, memoization=config.get("memoization", True))
     from .mcp_client import McpTools
     workspace.mcp_tools = McpTools(config.get("mcp_servers", {}), workspace)
     result = {"run_id": output.name, "goal": config["goal"], "status": "running",
@@ -144,11 +148,14 @@ def run(config: dict, repo: Path, output: Path, *, model=None) -> dict:
                 from .agents import AgentSession
                 session = AgentSession("implementer", model, workspace,
                                        allowed_files=item["files"], **settings)
-                report["summary"] = session.execute(
-                    {"goal": config["goal"], "work_item": item,
-                     "completed_items": [{"id": entry["id"], "summary": entry.get("summary")}
-                                         for entry in result["work_items"] if entry["status"] == "completed"]},
-                    "a string summarizing the actual modifications you made")
+                task = {"goal": config["goal"], "work_item": item,
+                        "completed_items": [{"id": entry["id"], "summary": entry.get("summary")}
+                                            for entry in result["work_items"] if entry["status"] == "completed"]}
+                if config.get("context_handoff", False):
+                    from .context import handoff_context
+                    task["evidence"] = handoff_context(session.gateway,
+                        getattr(workspace, "context_sources", []), item["files"])
+                report["summary"] = session.execute(task, "a string summarizing the actual modifications you made")
                 if not isinstance(report["summary"], str):
                     raise ModelError("Implementer final summary must be a string")
             for edit in item.get("edits", []):
@@ -230,7 +237,9 @@ def run(config: dict, repo: Path, output: Path, *, model=None) -> dict:
         (output / "changes.patch").write_text("".join(patch), encoding="utf-8")
         result["budget"] = budget.report()
         result["facts"] = ledger.summaries()
-        result["memory"] = ledger.statistics()
+        result["memory"] = {**ledger.statistics(), "handed_off_facts": getattr(workspace, "handed_off_facts", 0),
+                            "memoization": workspace.memoization, "tools": workspace.tool_metrics,
+                            "snapshot_calls": workspace.snapshot_calls, "snapshot_bytes": workspace.snapshot_bytes}
         result["artifacts"] = {name: str(output / name) for name in
                                ("changes.patch", "trace.jsonl", "ledger.sqlite")}
         trace.emit("runtime", "run_finished", status=result["status"])

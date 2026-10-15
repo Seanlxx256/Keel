@@ -64,6 +64,53 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(len(model.calls[3]), 2)  # Implementer starts fresh.
         self.assertNotIn('"fact_id"', model.calls[2][1]["content"])
 
+    def test_opt_in_handoff_filters_files_and_preserves_fresh_histories(self):
+        (self.repo / "private.py").write_text("SECRET = 9\n")
+        config = {**self.config, "context_handoff": True}
+        result, model = self.execute([
+            {"tool": "read_file", "arguments": {"path": "app.py"}},
+            {"tool": "read_file", "arguments": {"path": "private.py"}},
+            self.impact(), plan(),
+            {"tool": "replace", "arguments": {"path": "app.py", "old": "VERSION = 1", "new": "VERSION = 2"}},
+            {"final": "Updated version"},
+        ], config)
+        self.assertEqual(result["status"], "passed")
+        self.assertEqual(result["memory"]["handed_off_facts"], 2)
+        planner = json.loads(model.calls[3][1]["content"])
+        implementer = json.loads(model.calls[4][1]["content"])
+        self.assertEqual(len(planner["evidence"]), 1)
+        self.assertEqual(len(implementer["evidence"]), 1)
+        self.assertEqual(implementer["evidence"][0]["path"], "app.py")
+        self.assertNotEqual(planner["evidence"][0]["fact_id"], implementer["evidence"][0]["fact_id"])
+        self.assertNotIn("SECRET", model.calls[3][1]["content"])
+        self.assertEqual(len(model.calls[4]), 2)
+
+    def test_handoff_drops_evidence_changed_by_previous_work_item(self):
+        items = plan()["final"]
+        items.append({"id": "review", "description": "Review changed source", "files": ["app.py"],
+                      "depends_on": ["upgrade"]})
+        result, model = self.execute([
+            {"tool": "read_file", "arguments": {"path": "app.py"}}, self.impact(), {"final": items},
+            {"tool": "replace", "arguments": {"path": "app.py", "old": "VERSION = 1", "new": "VERSION = 2"}},
+            {"final": "Updated version"}, {"final": "Reviewed"},
+        ], {**self.config, "context_handoff": True})
+        self.assertEqual(result["status"], "passed")
+        self.assertEqual(json.loads(model.calls[5][1]["content"])["evidence"], [])
+
+    def test_inherited_evidence_cannot_satisfy_local_observation_gate(self):
+        result, model = self.execute([
+            {"tool": "read_file", "arguments": {"path": "app.py"}}, self.impact(), plan(),
+            {"final": "Already updated"},
+            {"tool": "read_file", "arguments": {"path": "app.py"}},
+            {"tool": "replace", "arguments": {"path": "app.py", "old": "VERSION = 1", "new": "VERSION = 2"}},
+            {"final": "Updated version"},
+        ], {**self.config, "context_handoff": True, "agent": {"require_evidence": True}})
+        self.assertEqual(result["status"], "passed")
+        self.assertEqual(result["memory"]["handed_off_facts"], 2)
+        self.assertTrue(any(f["kind"] == "failed_attempt" and f["role"] == "implementer"
+                            for f in result["facts"]))
+        self.assertIn("in this session", model.calls[4][-1]["content"])
+
     def test_readonly_role_cannot_write(self):
         result, _ = self.execute([{"tool": "replace", "arguments": {
             "path": "app.py", "old": "1", "new": "2"}}])
