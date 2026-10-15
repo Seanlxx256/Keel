@@ -106,6 +106,10 @@ base-fail/gold-pass execution. `benchmark_ready` remains false.
 Real Starlette cache replay produced two review candidates (#1936 and #2400),
 zero strictly eligible records and zero ready tasks. See the
 [preliminary #1936 review](evaluations/upgradebench-starlette-1936-review.md).
+The subsequent user Docker run reproduced #1936's two-case API failure on base
+and passing gold under the same AnyIO 4.0.0 image. Its saved executions passed
+independent assessment replay. This is one reproduced exploratory candidate,
+not a benchmark-ready task or Keel resolve result.
 Thirteen targeted tests pass, including exclusions for unmerged, missing CI,
 test-only and tooling changes.
 

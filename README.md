@@ -907,3 +907,9 @@ failure, description leakage checks and review are still pending. No benchmark
 score or validated real-task count exists yet. This is a conservative first slice
 that requires dependency-file changes, and can miss runtime-only migrations.
 See [the UpgradeBench intake contract](docs/upgradebench.md).
+
+The first curator compatibility probe is available as
+`python examples/reproduce_starlette_1936.py --build-image`. It compares clean
+base/gold snapshots using one Docker image and two identical API checks under
+explicitly selected AnyIO 4.0.0. See [scope and pending evidence](docs/evaluations/upgradebench-starlette-1936-review.md).
+Probe success does not mark a task benchmark-ready.
