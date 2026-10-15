@@ -20,9 +20,10 @@ class AgentSession:
         self.role_instruction = {
             "scout": "You cannot edit files. Read or search repository evidence first. Your final summary must describe current code and required changes, never claim implementation is done.",
             "planner": "Scout output is an unverified analysis, not proof of completed edits. Plan the changes required by the original goal. Each work item should implement a change, including any inspection needed; avoid separate inspection-only items.",
-            "implementer": "Previous role summaries are unverified claims. First read the declared files to observe current source. If the goal is not satisfied, call replace with exact old/new text. Returning a final summary does not modify files. Only claim changes backed by successful replace observations in this session.",
+            "implementer": "Previous role summaries are unverified claims. First read or search the declared files to observe current source. Use search_code to locate relevant lines in long files. For replace, supply all three arguments path, old, new. Use the shortest unique exact source snippet; never copy an entire file or unrelated classes into old/new. Make multiple small replacements when needed. Returning a final summary does not modify files. Only claim changes backed by successful replace observations in this session.",
         }[self.role]
         self.messages = []
+        self.paused_tools = set()
 
     def execute(self, task, final_contract):
         tools = self.gateway.catalog()
@@ -33,7 +34,7 @@ class AgentSession:
              "Do not claim tests passed; an independent verifier handles that. Tools: " + json.dumps(tools) +
              ". Finish as soon as the role's deliverable is ready. Scout only identifies affected files; "
              "Planner only produces work items; Implementer makes declared edits and then finishes. "
-             "A complete preview needs no recall. Recall only a returned next_offset; stop when it is null. "
+             "A complete preview needs no recall. For truncated files, use search_code and read_lines to inspect relevant line windows instead of repeating read_file. Recall only a returned next_offset; stop when it is null. "
              + self.role_instruction + ". Final value contract: " + final_contract},
             {"role": "user", "content": json.dumps(task, ensure_ascii=False)},
         ]
@@ -51,11 +52,11 @@ class AgentSession:
             }[self.role]
             final_action = {"type": "object", "properties": {"final": final_schema},
                             "required": ["final"], "additionalProperties": False}
-            tool_action = {"type": "object", "properties": {"tool": {"type": "string", "enum": list(tools)},
-                           "arguments": {"type": "object"}}, "required": ["tool", "arguments"],
-                           "additionalProperties": False}
+            tool_action = self.gateway.action_schema(excluded=self.paused_tools)
             ready = not self.require_evidence or self.role == "planner" or bool(self.gateway.observed_facts)
-            schema = (final_action if step == self.max_steps - 1 else {"oneOf": [tool_action, final_action]}) if ready else tool_action
+            # The last turn may still perform real work. Exhausting turns must
+            # report budget failure, not coerce a prose completion.
+            schema = {"oneOf": [tool_action, final_action]} if ready else tool_action
             encoded = json.dumps(self.messages, ensure_ascii=False)
             structured = callable(getattr(self.model, "complete_json", None))
             estimate = len(encoded.encode("utf-8")) + (len(json.dumps(schema).encode("utf-8")) if structured else 0)
@@ -84,8 +85,18 @@ class AgentSession:
                     return action["final"]
                 if set(action) != {"tool", "arguments"} or not isinstance(action["arguments"], dict):
                     raise ValueError("Expected tool/arguments or final")
+                if action['tool'] in self.paused_tools:
+                    raise ValueError('Repeated unchanged file reads are paused. Use search_code or read_lines to inspect new evidence.')
                 evidence = self.dispatch(action["tool"], action["arguments"])
                 observation = {"ok": True, "result": evidence}
+                if action['tool'] == 'read_file' and evidence.get('unchanged') is True:
+                    self.paused_tools.add('read_file')
+                    observation['strategy'] = 'read_file is paused for this role until a successful edit; use search_code, read_lines or recall to inspect evidence.'
+                    self.ws.trace.emit(self.role, 'tool_strategy_changed', tool='read_file', reason='unchanged_repeated_read', available=False)
+                elif action['tool'] == 'replace' and evidence.get('changed'):
+                    if 'read_file' in self.paused_tools:
+                        self.ws.trace.emit(self.role, 'tool_strategy_changed', tool='read_file', reason='source_edited', available=True)
+                    self.paused_tools.discard('read_file')
             except PolicyDenied:
                 raise
             except (ValueError, TypeError, KeyError, OSError, SyntaxError) as error:

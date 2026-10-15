@@ -9,6 +9,50 @@ from keel.workspace import Workspace
 
 
 class GatewayTests(unittest.TestCase):
+    def test_late_file_window_and_unchanged_read_do_not_repeat_prefix(self):
+        self.budget.limits.max_tool_calls = 20
+        text = ''.join(f'line_{i} = {i}\n' for i in range(1, 801))
+        (self.root/'app.py').write_text(text)
+        gateway = ToolGateway('implementer', self.ws, allowed_files=['app.py'])
+        first = gateway.call('read_file', {'path': 'app.py'})
+        repeated = gateway.call('read_file', {'path': 'app.py'})
+        self.assertEqual(repeated['fact_id'], first['fact_id'])
+        self.assertTrue(repeated['unchanged'])
+        self.assertNotIn('preview', repeated)
+        window = gateway.call('read_lines', {'path': 'app.py', 'start_line': 715, 'end_line': 720})
+        self.assertIn('line_717 = 717', window['text'])
+        self.assertNotIn('line_1 = 1\n', window['text'])
+        self.assertEqual(window['next_line'], 721)
+        self.assertEqual(window['total_lines'], 800)
+        (self.root/'app.py').write_text(text + '# changed\n')
+        changed = gateway.call('read_file', {'path': 'app.py'})
+        self.assertNotEqual(changed['fact_id'], first['fact_id'])
+        for bounds in [(0, 10), (5, 4), (1, 81), (900, 901)]:
+            with self.subTest(bounds=bounds), self.assertRaises(ValueError):
+                gateway.call('read_lines', {'path': 'app.py', 'start_line': bounds[0], 'end_line': bounds[1]})
+
+    def test_action_schema_rejects_incomplete_replace_and_readonly_write(self):
+        try:
+            import jsonschema
+        except ImportError:
+            self.skipTest('jsonschema is required for provider-schema validation')
+        implementer = ToolGateway('implementer', self.ws, allowed_files=['app.py'])
+        schema = implementer.action_schema()
+        jsonschema.Draft202012Validator.check_schema(schema)
+        valid = {'tool': 'replace', 'arguments': {'path': 'app.py', 'old': '1', 'new': '2'}}
+        jsonschema.validate(valid, schema)
+        for action in [
+            {'tool': 'replace', 'arguments': {'path': 'app.py', 'old': '1'}},
+            {'tool': 'replace', 'arguments': {'path': 'app.py', 'old': '1', 'new': 2}},
+            {'tool': 'read_file', 'arguments': {'path': 'app.py', 'new': '2'}},
+        ]:
+            with self.subTest(action=action), self.assertRaises(jsonschema.ValidationError):
+                jsonschema.validate(action, schema)
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(valid, ToolGateway('scout', self.ws).action_schema())
+        self.assertEqual(self.budget.tool_calls, 0)
+        self.assertEqual((self.root/'app.py').read_text(), 'VERSION = 1\n')
+
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)

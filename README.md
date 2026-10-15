@@ -913,3 +913,8 @@ The first curator compatibility probe is available as
 base/gold snapshots using one Docker image and two identical API checks under
 explicitly selected AnyIO 4.0.0. See [scope and pending evidence](docs/evaluations/upgradebench-starlette-1936-review.md).
 Probe success does not mark a task benchmark-ready.
+After a successful reproduction, `examples/run_starlette_upgrade_task.py
+--reproduction <artifact-directory>` prepares an isolated base export without
+Git history or gold source. Add `--execute` for the real CPU Ollama repair and
+Docker acceptance. Curator evidence stays outside the agent workspace; the
+agent process itself still runs on the host.

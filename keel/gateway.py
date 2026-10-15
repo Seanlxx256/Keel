@@ -12,7 +12,17 @@ TOOLS = {
     "list_files": "{} -> repository file names",
     "search_code": '{"query": "literal text"} -> matches and ledger reference',
     "read_file": '{"path": "relative/path"} -> ledger reference and text preview',
+    "read_lines": '{"path": "relative/path", "start_line": 1, "end_line": 40} -> bounded source window, up to 80 lines',
     "recall": '{"fact_id": 1, "offset": 0} -> next 4000 characters of stored evidence',
+}
+
+LOCAL_CONTRACTS = {
+    'list_files': ({}, {}), 'read_file': ({'path': str}, {}),
+    'search_code': ({'query': str}, {}), 'find_symbol': ({'name': str}, {}),
+    'get_context': ({'file': str, 'line': int}, {}),
+    'replace': ({'path': str, 'old': str, 'new': str}, {}),
+    'recall': ({'fact_id': int}, {'offset': int}),
+    'read_lines': ({'path': str, 'start_line': int, 'end_line': int}, {}),
 }
 
 
@@ -65,6 +75,22 @@ class ToolGateway:
             tools.update(self.ws.mcp_tools.catalog(self.role))
         return tools
 
+    def action_schema(self, *, excluded=()):
+        branches = []
+        for tool in self.catalog():
+            if tool in excluded:
+                continue
+            arguments = {'type': 'object'}
+            if tool in LOCAL_CONTRACTS:
+                required, optional = LOCAL_CONTRACTS[tool]
+                arguments.update(properties={key: {'type': 'string' if kind is str else 'integer'}
+                    for key, kind in {**required, **optional}.items()}, required=list(required),
+                    additionalProperties=False)
+            branches.append({'type': 'object', 'properties': {
+                'tool': {'type': 'string', 'enum': [tool]}, 'arguments': arguments},
+                'required': ['tool', 'arguments'], 'additionalProperties': False})
+        return {'oneOf': branches}
+
     def call(self, tool, args):
         call_id = uuid.uuid4().hex
         started = time.monotonic()
@@ -95,16 +121,7 @@ class ToolGateway:
 
     @staticmethod
     def _validate(tool, args):
-        contracts = {
-            "list_files": ({}, {}),
-            "read_file": ({"path": str}, {}),
-            "search_code": ({"query": str}, {}),
-            "find_symbol": ({"name": str}, {}),
-            "get_context": ({"file": str, "line": int}, {}),
-            "replace": ({"path": str, "old": str, "new": str}, {}),
-            "recall": ({"fact_id": int}, {"offset": int}),
-        }
-        required, optional = contracts[tool]
+        required, optional = LOCAL_CONTRACTS[tool]
         if not isinstance(args, dict) or set(required) - args.keys() or args.keys() - (required.keys() | optional.keys()):
             raise ValueError(f"Invalid arguments for {tool}")
         for name, value in args.items():
@@ -113,8 +130,34 @@ class ToolGateway:
                 raise ValueError(f"{name} must be {expected.__name__}")
         if tool == "get_context" and args["line"] < 1:
             raise ValueError("line must be positive")
+        if tool == 'read_lines' and not (1 <= args['start_line'] <= args['end_line'] < args['start_line'] + 80):
+            raise ValueError('read_lines requires positive ordered bounds of at most 80 lines')
 
     def _dispatch(self, tool, args):
+        if tool == 'read_lines':
+            value = self.ws.read(args['path'], role=self.role)
+            lines = value['value'].splitlines(keepends=True)
+            start, end = args['start_line'], min(args['end_line'], len(lines))
+            if start > len(lines):
+                raise ValueError('start_line is outside file')
+            selected, size = [], 0
+            for line in lines[start-1:end]:
+                if size + len(line) > 3000:
+                    break
+                selected.append(line)
+                size += len(line)
+            if not selected:
+                raise ValueError('Source line exceeds read_lines character limit; use read_file and recall')
+            last = start + len(selected) - 1
+            payload = {'path': args['path'], 'start_line': start, 'end_line': last,
+                'total_lines': len(lines), 'text': ''.join(selected),
+                'next_line': last + 1 if last < len(lines) else None,
+                'source_sha256': hashlib.sha256(value['value'].encode('utf-8')).hexdigest()}
+            fact_id = self.ws.ledger.add('file', self.role, 'read_lines evidence', payload)
+            self.visible_facts.add(fact_id)
+            self.observed_facts.add(fact_id)
+            self.ws.trace.emit(self.role, 'ledger_write', fact_id=fact_id)
+            return {'fact_id': fact_id, **payload}
         if tool.startswith("mcp__"):
             value = self.ws.mcp_tools.call(self.role, tool, args)
             fact_id = self.ws.ledger.add("symbol", self.role, tool + " evidence", value)
@@ -146,6 +189,12 @@ class ToolGateway:
             kind = "file"
         elif tool == "read_file":
             value = self.ws.read(args["path"], role=self.role)
+            canonical = self.ws.path(args['path']).relative_to(self.ws.root).as_posix()
+            source_hash = hashlib.sha256(value['value'].encode('utf-8')).hexdigest()
+            for previous, evidence in self.read_evidence.items():
+                if previous in self.observed_facts and evidence == {'path': canonical, 'sha256': source_hash}:
+                    return {'fact_id': previous, 'unchanged': True,
+                        'message': 'Already read this unchanged file. Use search_code to locate relevant lines, then read_lines; use recall for stored evidence.'}
             kind = "file"
         elif tool == "search_code":
             if not isinstance(args["query"], str) or not args["query"].strip():

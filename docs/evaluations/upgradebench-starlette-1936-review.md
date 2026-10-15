@@ -4,6 +4,127 @@ Status: selected-environment Docker probe reproduced; not a ready benchmark task
 
 ## Recorded live result (2026-10-15)
 
+## Exploratory Keel task export
+
+Prepare without model calls or Docker access:
+
+```powershell
+python examples/run_starlette_upgrade_task.py --reproduction .keel/upgradebench-reproduction/cb311b9aad5c466f8c360ec27e4b38f9
+```
+
+Run a fresh export with the CPU Ollama agent and Docker acceptance:
+
+```powershell
+python examples/run_starlette_upgrade_task.py --reproduction .keel/upgradebench-reproduction/cb311b9aad5c466f8c360ec27e4b38f9 --execute
+```
+
+The exporter verifies clean pinned snapshots, the raw gold commit's first-parent
+header (works with shallow fetches), and the exact changed-path set across both
+complete snapshots. The actual cached pair passed these checks. The base copy
+contains no `.git`, gold tree or reference patch. Curator inventories and hashes
+are written outside the agent workspace. The runtime receives the task goal and
+base tools; acceptance is trusted host configuration, not a reference answer.
+This is application-level separation, not host filesystem isolation.
+
+The goal provides the observed error and affected filename, so this is a repair
+task with supplied localization, not an independent Compass retrieval evaluation.
+Execution first rechecks the base failure in the resolved image, then runs Keel
+with CPU offload disabled, context 4096 and a 900-second runtime budget. Final
+success requires runtime audit success, real model calls, only the expected file
+changed, and matching probe cases/versions passing. Different correct patches
+can pass; byte equality with gold is not required. The filename restriction is
+in the goal and post-run assessment, not an additional runtime permission grant.
+
+Prepared artifact: `.keel/upgradebench-agent/aef8f5d423db452d98aa91c07d201359`.
+No live model run or resolve result has been established yet. Four reproduction
+tests cover evidence assessment, task-answer separation and range checks.
+
+## Live Docker evidence
+
+## First agent failures and protocol correction
+
+The bounded 450-second, five-turn-per-role attempt at
+`.keel/upgradebench-agent/55e49f5394dc474d9cb7c285c5b0074b` reached Verifier after
+11 model calls with no file changes. Acceptance correctly failed on the unchanged
+source. Archived decisions show Planner proposing `anyio.run_blocking`, a name
+not supported by the supplied evidence; Implementer searched for it, found no
+match, then returned a proposed change rather than performing it. This is a
+model planning/action failure, not a successful compatibility implementation.
+
+The last-turn provider schema also forced a final answer once evidence had been
+observed. That coercion is removed: a tool action remains possible on the last
+turn, and a session that uses its last turn without finishing reports budget
+exhaustion. Ordinary explicit finals still reach independent verification; no
+automatic patch or mandatory edit is injected. Agent tests cover both the last
+tool-turn failure path and a valid voluntary final. The task runner also exposes
+`--model` to select an existing Ollama model for a future controlled comparison;
+it does not download models or change the current model automatically.
+
+The attempted task remains unresolved. Further repeated runs of the same model
+should not be presented as benchmark progress; preserve these failures and
+separate runtime fixes from evidence of repair capability.
+
+A further run (`.keel/upgradebench-agent/b25bbc482025458cad021606171a8c78`)
+again made no edits and timed out after 22 model calls. Repeated preview
+suppression reduced prompt growth (Implementer input reached 17,134 bytes rather
+than 38,035), but the model kept selecting `read_file` despite the hints. No repair
+progress was established; adding a tool alone did not fix action selection.
+
+The session now pauses full-file reads after an actual unchanged repeat, removes
+that tool from subsequent provider schemas, and rejects the same action from
+unconstrained providers. Search, bounded line reads and recall remain available.
+A successful edit restores full-file reads. Both strategy transitions are traced;
+this is a deterministic loop intervention, not a learned early-stop predictor.
+It does not force a specific patch or imply all repetitive behavior is solved.
+Twenty agent tests and six gateway tests pass, including a complete structured
+read-repeat/window/edit/verify test and schema restoration after the edit.
+
+For a bounded live diagnostic rather than another default 15-minute run:
+
+```powershell
+python examples/run_starlette_upgrade_task.py --reproduction .keel/upgradebench-reproduction/cb311b9aad5c466f8c360ec27e4b38f9 --execute --max-seconds 450 --max-steps 5
+```
+
+The 450-second limit covers agent runtime, not snapshot preparation or baseline.
+The five-turn limit is per role. A short-budget failure remains a failure, not a
+discarded result; compare with earlier runs only while reporting changed limits.
+
+The next live run (`.keel/upgradebench-agent/6204c980effe452bbfce131a448a64d6`)
+used 18 model calls, changed no files and timed out in Implementer. Its trace
+shows six identical `read_file` calls in that role, increasing prompt input to
+38,035 bytes despite cache hits. Repeated file-prefix delivery, not file I/O,
+was a concrete context bottleneck. A 4096-token provider context may also lose
+earlier instructions as that history grows; this is an inference, not a measured
+provider truncation trace.
+
+The gateway now exposes `read_lines(path, start_line, end_line)` to all existing
+agent roles, with at most 80 lines and 3000 source characters per response.
+Search hits can guide direct reads near late-file call sites. Responses include
+line bounds, source hash and continuation line. These window facts count as
+observations but are not implicitly shared through full-file handoff metadata.
+Repeated full-file reads in the same session still perform fresh content checks
+and consume tool budget, but return the existing fact reference and guidance
+instead of another identical preview. Changed content yields fresh evidence.
+This bounds duplicate read output; it does not compact all conversation history
+or force a model to make progress. Live success remains unproven.
+
+The first live agent attempt failed to load the model (CPU_REPACK allocation).
+The subsequent attempt at `.keel/upgradebench-agent/ee7b4af988644705a09a1d3d1d5cefd6`
+reached Implementer, used 15 model calls and changed no files. Ledger facts
+17/19/21 show truncated JSON followed by two invalid `replace` argument objects;
+the final request timed out near the 900-second runtime deadline. This is not
+evidence of an independent short HTTP timeout or failed Docker acceptance.
+
+The provider tool schema previously constrained the tool name but allowed a
+generic argument object. It now emits a separate branch per available local tool,
+with required argument names/types and no extra fields, using the same contracts
+as the gateway's runtime validation. Namespaced MCP arguments retain their
+existing independent validation boundary. Implementer guidance requests short,
+unique edits and targeted searches rather than reproducing long file contents.
+Gateway checks remain authoritative; schema constraints do not authorize writes
+or guarantee complete responses within an output-token limit. No automatic
+repair or hidden reference patch is injected. A new live run is still needed.
+
 User-executed artifact:
 `.keel/upgradebench-reproduction/cb311b9aad5c466f8c360ec27e4b38f9`.
 The saved executions were independently re-evaluated using `assess()` and passed

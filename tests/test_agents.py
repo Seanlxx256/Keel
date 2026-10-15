@@ -28,6 +28,46 @@ def plan(files=None):
 
 
 class AgentTests(unittest.TestCase):
+    def test_last_turn_allows_tool_and_exhaustion_does_not_claim_completion(self):
+        schemas = []
+        class StructuredModel(ScriptedModel):
+            def complete_json(self, messages, *, schema, **kwargs):
+                schemas.append(schema)
+                return self.complete(messages, **kwargs)
+        model = StructuredModel([{'tool': 'read_file', 'arguments': {'path': 'app.py'}}])
+        config = {**self.config, 'agent': {'max_steps': 1}}
+        result = run(config, self.repo, self.repo/'.keel/run', model=model)
+        self.assertIn('"read_file"', json.dumps(schemas[0]))
+        self.assertEqual(result['status'], 'failed')
+        self.assertEqual(result['failure']['category'], 'budget_exhausted')
+        self.assertEqual(result['failure']['stage'], 'scout')
+        self.assertEqual(result['verification'], [])
+
+    def test_repeated_unchanged_read_switches_schema_and_edit_restores_it(self):
+        actions = [{'tool': 'read_file', 'arguments': {'path': 'app.py'}}, self.impact(), plan(),
+            {'tool': 'read_file', 'arguments': {'path': 'app.py'}},
+            {'tool': 'read_file', 'arguments': {'path': 'app.py'}},
+            {'tool': 'read_lines', 'arguments': {'path': 'app.py', 'start_line': 1, 'end_line': 1}},
+            {'tool': 'replace', 'arguments': {'path': 'app.py', 'old': 'VERSION = 1', 'new': 'VERSION = 2'}},
+            {'tool': 'read_file', 'arguments': {'path': 'app.py'}}, {'final': 'Updated version'}]
+        schemas = []
+        class StructuredModel(ScriptedModel):
+            def complete_json(self, messages, *, schema, **kwargs):
+                schemas.append(schema)
+                return self.complete(messages, **kwargs)
+        model = StructuredModel(actions)
+        result = run(self.config, self.repo, self.repo/'.keel/run', model=model)
+        self.assertEqual(result['status'], 'passed')
+        self.assertNotIn('"read_file"', json.dumps(schemas[5]))
+        self.assertIn('"read_lines"', json.dumps(schemas[5]))
+        self.assertIn('"read_file"', json.dumps(schemas[7]))
+        events = [json.loads(line) for line in (self.repo/'.keel/run/trace.jsonl').read_text().splitlines()]
+        switches = [event for event in events if event['event'] == 'tool_strategy_changed']
+        self.assertEqual(len(switches), 2)
+        self.assertEqual(switches[0]['reason'], 'unchanged_repeated_read')
+        self.assertEqual(switches[1]['reason'], 'source_edited')
+        self.assertEqual((self.repo/'app.py').read_text(), 'VERSION = 2\n')
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -218,8 +258,10 @@ class AgentTests(unittest.TestCase):
         model = StructuredModel()
         value = AgentSession("scout", model, workspace, max_steps=1).execute({}, "impact")
         self.assertEqual(value["files"], ["app.py"])
-        self.assertEqual(model.schemas[0]["required"], ["final"])
-        self.assertEqual(model.schemas[0]["properties"]["final"]["required"], ["summary", "files"])
+        final_branch = model.schemas[0]['oneOf'][1]
+        self.assertEqual(final_branch['required'], ['final'])
+        self.assertEqual(final_branch['properties']['final']['required'], ['summary', 'files'])
+        self.assertIn('"read_file"', json.dumps(model.schemas[0]['oneOf'][0]))
 
     def test_cpu_configuration_reaches_ollama_request(self):
         from keel.models import from_config
