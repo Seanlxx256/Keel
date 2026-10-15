@@ -28,6 +28,19 @@ def source_evidence(name, text, queries):
     for number, line in enumerate(lines):
         if any(query.casefold() in line.casefold() for query in queries):
             spans.append((max(0, number-8), min(len(lines), number+9)))
+    # A definition anchor promises implementation evidence, not just its header.
+    # Include the complete function; the unchanged request cap rejects oversized
+    # functions rather than silently discarding the relevant tail.
+    if name.endswith('.py'):
+        try:
+            tree = ast.parse(text, filename=name)
+        except SyntaxError:
+            tree = None
+        if tree is not None:
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and any(
+                        query.casefold() in lines[node.lineno-1].casefold() for query in queries):
+                    spans.append((node.lineno-1, node.end_lineno))
     merged = []
     for start, end in sorted(spans):
         if merged and start <= merged[-1][1]:

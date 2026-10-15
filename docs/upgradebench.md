@@ -2,6 +2,12 @@
 
 ## Status
 
+The intake screen below remains metadata-only. Separate curated reproduction
+scripts now exist: Starlette #1936 and #2526 have user-verified base/gold probes
+and observed model repairs. A [Flask-WTF #565 cross-repository candidate](evaluations/upgradebench-flask-wtf-565-review.md)
+has a reproduction script with offline contract tests; live verification is
+pending. None of these is yet an evaluation-ready UpgradeBench dataset.
+
 The code imports and screens PR metadata. It does not yet build evaluation-ready
 tasks, check out repositories, build Docker images, execute baseline/gold tests,
 or establish resolve-rate denominators. All outputs explicitly set

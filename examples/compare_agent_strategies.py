@@ -33,9 +33,12 @@ def compare(left, right):
     pairs = []
     for identity in sorted(indexed[0][0]):
         tasks = [index[0][identity] for index in indexed]
-        for field in ('source_sha256', 'target', 'group'):
+        for field in ('source_sha256', 'group'):
             if tasks[0][field] != tasks[1][field]:
                 raise ValueError(f'{identity}: {field} differs')
+        from examples.run_agent_baseline import target_paths
+        if sorted(target_paths(tasks[0])) != sorted(target_paths(tasks[1])):
+            raise ValueError(f'{identity}: declared targets differ')
         configs = []
         for task in tasks:
             config = dict(task['config'])

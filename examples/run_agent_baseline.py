@@ -3,6 +3,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import sys
@@ -30,6 +31,32 @@ def controls():
 
 
 def real_task(root, reproduction, case='1936'):
+    if case == 'flask-wtf-565':
+        from examples import reproduce_flask_wtf_565 as candidate
+        raw = (reproduction/'summary.json').read_bytes()
+        evidence = json.loads(raw)
+        if evidence.get('candidate') != 'pallets-eco__flask-wtf-565' or not candidate.assess(evidence.get('executions')):
+            raise ValueError('Matching successful Flask-WTF reproduction required')
+        if evidence.get('probe_sha256') != hashlib.sha256(candidate.PROBE.encode()).hexdigest():
+            raise ValueError('Reproduction probe mismatch')
+        base_revision, gold_revision = evidence['base_commit'], evidence['gold_commit']
+        image = evidence['image_id']
+        if any(not isinstance(value, str) or not re.fullmatch('[0-9a-f]{40}', value)
+               for value in (base_revision, gold_revision)) or not re.fullmatch('sha256:[0-9a-f]{64}', image):
+            raise ValueError('Pinned revisions and resolved Docker image ID required')
+        snapshots = root/'.keel/upgradebench-snapshots/pallets-eco--flask-wtf'
+        base, gold = snapshots/base_revision, snapshots/gold_revision
+        verified = candidate.verify(base_revision, gold_revision, base, gold)
+        targets = ['src/flask_wtf/recaptcha/widgets.py', 'src/flask_wtf/recaptcha/validators.py']
+        goal = ('Make Flask-WTF compatible with Flask 3.0.0 and Werkzeug 3.0.0. Importing flask_wtf '
+            "currently raises ImportError: cannot import name 'Markup' from 'flask'. Preserve reCAPTCHA "
+            'widget rendering, query parameter encoding and form rendering. Inspect and modify only '
+            + ', '.join(targets) + '. Do not modify tests, dependencies or other files.')
+        return {'id': 'flask-wtf-565', 'group': 'real_compatibility', 'goal': goal, 'targets': targets,
+            'files': {name: (base/name).read_bytes() for name in verified['base_inventory']},
+            'acceptance': candidate.PROBE, 'reference_execution': evidence['executions']['gold'],
+            'assessor': candidate.assess,
+            'queries': ['from flask import', 'from werkzeug.urls import', 'def recaptcha_html', 'def _validate_recaptcha']}, image, hashlib.sha256(raw).hexdigest()
     if case == '2526':
         from examples import reproduce_starlette_2526 as candidate
         raw = (reproduction/'summary.json').read_bytes()
@@ -73,6 +100,14 @@ def validate_remote_config(config):
     return config
 
 
+def target_paths(task):
+    return task['targets'] if 'targets' in task else [task['target']]
+
+
+def changed_scope_passes(task, changed):
+    return bool(changed) and set(changed) <= set(target_paths(task))
+
+
 def prepare(output, specs, image, model, *, context_bytes=12000, strategy='tool-loop', dependency_evidence=False, model_config=None):
     if dependency_evidence and strategy != 'proposal':
         raise ValueError('Dependency evidence is currently available only for proposal strategy')
@@ -95,7 +130,7 @@ def prepare(output, specs, image, model, *, context_bytes=12000, strategy='tool-
         config.update(goal=spec['goal'], acceptance=[['python', '-c', spec['acceptance']]])
         if strategy == 'proposal':
             config['mode'] = 'proposal'
-            config['proposal'] = {'files': [spec['target']],
+            config['proposal'] = {'files': target_paths(spec),
                 'queries': spec.get('queries', ['start_blocking_portal'] if spec['group'] == 'real_compatibility' else ['API_VERSION'])}
             if dependency_evidence and spec['group'] == 'real_compatibility':
                 config['proposal']['dependencies'] = [{'distribution': 'anyio', 'version': '4.0.0',
@@ -121,7 +156,9 @@ def prepare(output, specs, image, model, *, context_bytes=12000, strategy='tool-
         comparison['model'].pop('name')
         task = {'id': spec['id'], 'group': spec['group'], 'config': config, 'source_sha256': files,
             'comparison_key': digest({'source': files, 'config_except_model_name': comparison}),
-            'target': spec['target']}
+            'targets': target_paths(spec)}
+        if 'target' in spec:
+            task['target'] = spec['target']
         if preflight is not None:
             task['context_preflight'] = preflight
         (directory/'task.json').write_text(json.dumps(task, indent=2), encoding='utf-8')
@@ -131,7 +168,8 @@ def prepare(output, specs, image, model, *, context_bytes=12000, strategy='tool-
                      'keel/models.py', 'keel/proposals.py', 'keel/workspace.py', 'keel/execution.py',
                      'keel/audit.py', 'keel/core.py', 'keel/dependency_evidence.py', 'examples/run_agent_baseline.py',
                      'examples/run_starlette_upgrade_task.py', 'examples/reproduce_starlette_1936.py',
-                     'examples/reproduce_starlette_2526.py']}
+                     'examples/reproduce_starlette_2526.py', 'examples/reproduce_flask_wtf_565.py',
+                     'examples/repair_feedback.py']}
     manifest = {'schema_version': 1, 'suite': 'agent-diagnostic-v1', 'model': model, 'strategy': strategy,
         'dependency_evidence_requested': dependency_evidence, 'tasks': tasks,
         'implementation_sha256': implementation, 'benchmark_ready': False,
@@ -185,10 +223,11 @@ def model_identity(name):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--reproduction', required=True, type=Path)
-    parser.add_argument('--case', choices=['1936', '2526'], default='1936', help='Curated real task; requires its matching reproduction')
+    parser.add_argument('--case', choices=['1936', '2526', 'flask-wtf-565'], default='1936', help='Curated real task; requires its matching reproduction')
     parser.add_argument('--model', default='keel-chat')
     parser.add_argument('--model-config', type=Path, help='Credential-free compatible model JSON; keys are environment references')
     parser.add_argument('--execute', action='store_true')
+    parser.add_argument('--feedback-from', type=Path, help='One explicit proposal follow-up from a saved verification failure; fresh base and budget')
     parser.add_argument('--unbounded-context', action='store_true')
     parser.add_argument('--strategy', choices=['tool-loop', 'proposal'], default='tool-loop')
     parser.add_argument('--group', choices=['synthetic_control', 'real_compatibility'], help='Run only the selected diagnostic group')
@@ -198,6 +237,8 @@ def main():
         parser.error('--dependency-evidence requires --strategy proposal')
     if args.dependency_evidence and args.case != '1936':
         parser.error('--dependency-evidence currently supports only --case 1936')
+    if args.feedback_from and (args.strategy != 'proposal' or args.group != 'real_compatibility' or args.dependency_evidence or not args.model_config):
+        parser.error('--feedback-from requires proposal, real_compatibility, --model-config and no dependency evidence')
     remote = None
     if args.model_config:
         raw = args.model_config.read_bytes()
@@ -212,14 +253,23 @@ def main():
     specs = controls() + [real]
     if args.group:
         specs = [spec for spec in specs if spec['group'] == args.group]
+    feedback = None
+    if args.feedback_from:
+        from examples.repair_feedback import with_feedback
+        specs[0], feedback = with_feedback(specs[0], image, args.feedback_from, remote)
     manifest = prepare(output, specs, image, args.model,
                        context_bytes=None if args.unbounded_context else 12000, strategy=args.strategy,
                        dependency_evidence=args.dependency_evidence, model_config=remote)
+    if feedback:
+        manifest['feedback_from'] = feedback
+        (output/'manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
     records = [{'id': task['id'], 'group': task['group'], 'status': 'prepared',
                 'executed': False, 'passed': False} for task in manifest['tasks']]
     report = {'prepared_only': not args.execute, 'strategy': args.strategy,
               'dependency_evidence_requested': args.dependency_evidence, 'records': records, 'reproduction_sha256': provenance,
               'benchmark_ready': False}
+    if feedback:
+        report['feedback_from'] = feedback
     def checkpoint():
         report['groups'] = summarize(records)
         (output/'results.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
@@ -276,7 +326,7 @@ def main():
                 if task['group'] == 'real_compatibility':
                     accepted = accepted and assessor({'base': baseline, 'gold': verification[0]})
                 record.update(status='completed', passed=result['status'] == 'passed' and accepted
-                    and changed == [task['target']] and result['budget']['model_calls'] > 0,
+                    and changed_scope_passes(task, changed) and result['budget']['model_calls'] > 0,
                     changed_files=changed, failure=result['failure'], budget=result['budget'])
                 record['trace_metrics'] = trace_metrics(directory/'run/trace.jsonl')
                 if not remote and model_identity(args.model) != report['model_identity']:

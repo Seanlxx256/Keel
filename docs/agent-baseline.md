@@ -1,5 +1,13 @@
 # Fixed agent diagnostic baseline
 
+`--feedback-from PREVIOUS_RUN_DIRECTORY` supports one explicit proposal follow-up
+for a matching completed verification failure. It requires `--model-config`,
+`--group real_compatibility` and no dependency evidence. The follow-up starts
+from original source with prior patch/errors, links previous cost and uses a
+fresh per-attempt budget; count both attempts together, not as independent tasks.
+It is not a shared-budget automatic repair loop. See the
+[Flask-WTF failure and follow-up](evaluations/upgradebench-flask-wtf-565-review.md).
+
 For a controlled comparison of the existing one-call proposal and six-role
 tool loop, use the [paired orchestration diagnostic](strategy-comparison.md).
 The offline comparison preserves failed tasks and rejects mismatched inputs.
@@ -11,6 +19,11 @@ The default real case remains #1936. A second curated candidate can be selected
 with `--case 2526`, requiring its own matching successful reproduction; see
 [the HTTPX compatibility reproduction](evaluations/upgradebench-starlette-2526-review.md).
 Each invocation selects one real case; synthetic controls remain a separate group.
+`--case flask-wtf-565` adds a multi-file, second-repository diagnostic after its
+[successful reproduction](evaluations/upgradebench-flask-wtf-565-review.md).
+Saved tasks include `targets`; legacy single-file `target` remains supported.
+Passing requires nonempty changes confined to the declared scope and the same
+independent acceptance, rather than requiring every allowed file to be edited.
 Proposal preparation checks source-window messages plus output schema against
 the context byte cap and records `context_preflight`. This is not a token count
 or an exact serialized HTTP-body size. Optional dependency evidence is collected

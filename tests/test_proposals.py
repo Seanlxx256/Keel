@@ -10,6 +10,18 @@ from keel.runtime import run
 
 
 class ProposalTests(unittest.TestCase):
+    def test_definition_anchor_includes_function_tail_without_fabricating_source(self):
+        from keel.proposals import source_evidence, proposal_request
+        from keel.core import BudgetExceeded
+        text = '# padding\n' * 45 + 'def encode(value):\n' + '    # unchanged\n' * 20 + '    return old_api(value)\n'
+        evidence = source_evidence('fixture.py', text, ['def encode'])
+        rendered = ''.join(window['text'] for window in evidence['windows'])
+        self.assertIn('return old_api(value)', rendered)
+        for window in evidence['windows']:
+            self.assertEqual(window['text'], ''.join(text.splitlines(keepends=True)[window['start_line']-1:window['end_line']]))
+        with self.assertRaises(BudgetExceeded):
+            proposal_request('Repair', ['fixture.py'], [evidence], {'max_context_bytes': 100})
+
     def test_dependency_evidence_reaches_proposal_without_widening_scope(self):
         request = {'distribution': 'fixture', 'version': '1.0', 'symbols': ['portal']}
         self.config['proposal']['dependencies'] = [request]
