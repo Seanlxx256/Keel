@@ -40,6 +40,11 @@ class AgentBaselineTests(unittest.TestCase):
                 self.assertEqual(a['config']['model']['num_gpu'], 0)
             control = prepare(root/'control', specs, 'sha256:'+'a'*64, 'first', context_bytes=None)
             self.assertNotEqual(left['tasks'][0]['comparison_key'], control['tasks'][0]['comparison_key'])
+            proposals = prepare(root/'proposals', specs, 'sha256:'+'a'*64, 'first', strategy='proposal')
+            self.assertEqual(proposals['tasks'][0]['source_sha256'], left['tasks'][0]['source_sha256'])
+            self.assertEqual(proposals['tasks'][0]['config']['mode'], 'proposal')
+            self.assertEqual(proposals['tasks'][0]['config']['proposal']['files'], ['app.py'])
+            self.assertNotEqual(proposals['tasks'][0]['comparison_key'], left['tasks'][0]['comparison_key'])
             with self.assertRaises(FileExistsError):
                 prepare(root/'left', specs, 'image', 'first')
 

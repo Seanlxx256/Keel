@@ -929,3 +929,7 @@ Use the [fixed agent diagnostic baseline](docs/agent-baseline.md) for subsequent
 comparisons: `examples/run_agent_baseline.py --reproduction <artifact-directory>`
 prepares two synthetic controls and one real task with uniform settings. Add
 `--execute` for sequential model/Docker runs; outcomes remain grouped separately.
+Add `--strategy proposal` for the optional
+[localized patch-proposal path](docs/patch-proposals.md): deterministic evidence
+and planning, one generated patch batch, host policy checks, then independent
+acceptance. Free tool-loop orchestration stays default.

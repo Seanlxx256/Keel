@@ -45,7 +45,7 @@ def real_task(root, reproduction):
     return spec, evidence['image_id'], hashlib.sha256(raw).hexdigest()
 
 
-def prepare(output, specs, image, model, *, context_bytes=12000):
+def prepare(output, specs, image, model, *, context_bytes=12000, strategy='tool-loop'):
     output.mkdir(parents=True, exist_ok=False)
     tasks = []
     for spec in specs:
@@ -56,6 +56,10 @@ def prepare(output, specs, image, model, *, context_bytes=12000):
         else:
             config['agent']['max_context_bytes'] = context_bytes
         config.update(goal=spec['goal'], acceptance=[['python', '-c', spec['acceptance']]])
+        if strategy == 'proposal':
+            config['mode'] = 'proposal'
+            config['proposal'] = {'files': [spec['target']],
+                'queries': ['start_blocking_portal'] if spec['group'] == 'real_compatibility' else ['API_VERSION']}
         directory = output/'tasks'/spec['id']
         repo = directory/'template'
         repo.mkdir(parents=True)
@@ -73,8 +77,9 @@ def prepare(output, specs, image, model, *, context_bytes=12000):
         tasks.append(task)
     implementation = {path: hashlib.sha256((Path(__file__).resolve().parents[1]/path).read_bytes()).hexdigest()
         for path in ['keel/agents.py', 'keel/gateway.py', 'keel/conversation.py', 'keel/runtime.py',
-                     'keel/models.py', 'examples/run_agent_baseline.py']}
-    manifest = {'schema_version': 1, 'suite': 'agent-diagnostic-v1', 'model': model, 'tasks': tasks,
+                     'keel/models.py', 'keel/proposals.py', 'keel/workspace.py', 'keel/execution.py',
+                     'keel/audit.py', 'keel/core.py', 'examples/run_agent_baseline.py']}
+    manifest = {'schema_version': 1, 'suite': 'agent-diagnostic-v1', 'model': model, 'strategy': strategy, 'tasks': tasks,
         'implementation_sha256': implementation, 'benchmark_ready': False,
         'limitations': 'Synthetic controls and real tasks are separate groups. One real task, no benchmark resolve-rate claim.'}
     (output/'manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
@@ -123,17 +128,21 @@ def main():
     parser.add_argument('--model', default='keel-chat')
     parser.add_argument('--execute', action='store_true')
     parser.add_argument('--unbounded-context', action='store_true')
+    parser.add_argument('--strategy', choices=['tool-loop', 'proposal'], default='tool-loop')
+    parser.add_argument('--group', choices=['synthetic_control', 'real_compatibility'], help='Run only the selected diagnostic group')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     output = root/'.keel/agent-baseline'/uuid.uuid4().hex
     print(f'Artifacts: {output}', flush=True)
     real, image, provenance = real_task(root, args.reproduction)
     specs = controls() + [real]
+    if args.group:
+        specs = [spec for spec in specs if spec['group'] == args.group]
     manifest = prepare(output, specs, image, args.model,
-                       context_bytes=None if args.unbounded_context else 12000)
+                       context_bytes=None if args.unbounded_context else 12000, strategy=args.strategy)
     records = [{'id': task['id'], 'group': task['group'], 'status': 'prepared',
                 'executed': False, 'passed': False} for task in manifest['tasks']]
-    report = {'prepared_only': not args.execute, 'records': records, 'reproduction_sha256': provenance,
+    report = {'prepared_only': not args.execute, 'strategy': args.strategy, 'records': records, 'reproduction_sha256': provenance,
               'benchmark_ready': False}
     def checkpoint():
         report['groups'] = summarize(records)

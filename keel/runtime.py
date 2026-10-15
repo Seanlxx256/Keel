@@ -60,9 +60,13 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
     if type(mutation_samples) is not int or not 0 <= mutation_samples <= 20:
         raise ValueError("mutation_samples must be an integer from 0 to 20")
     agent_mode = config.get("mode", "explicit") == "agent"
-    if config.get("mode", "explicit") not in {"explicit", "agent"}:
-        raise ValueError("mode must be explicit or agent")
-    if agent_mode and ordered:
+    proposal_mode = config.get('mode') == 'proposal'
+    if config.get("mode", "explicit") not in {"explicit", "agent", "proposal"}:
+        raise ValueError("mode must be explicit, agent or proposal")
+    if proposal_mode:
+        from .proposals import validate_scope
+        validate_scope(config.get('proposal'))
+    if (agent_mode or proposal_mode) and ordered:
         raise ValueError("Agent mode generates its own plan; omit work_items")
     settings = config.get("agent", {})
     if not isinstance(settings, dict) or set(settings) - {"max_steps", "max_output", "require_evidence", "max_work_items", "max_context_bytes"} or any(
@@ -92,7 +96,7 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
                           retrieval=config.get("retrieval"), retrieval_model=model, memoization=config.get("memoization", True))
     from .mcp_client import McpTools
     workspace.mcp_tools = McpTools(config.get("mcp_servers", {}), workspace)
-    result = {"run_id": output.name, "goal": config["goal"], "status": "running",
+    result = {"run_id": output.name, "goal": config["goal"], "mode": config.get('mode', 'explicit'), "status": "running",
               "work_items": [], "baseline_verification": [], "verification": [], "failure": None}
     originals = {}
     stage = "scout"
@@ -102,8 +106,9 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
                         phase="baseline" if role == "baseline_verifier" else "main", previous_status=previous_status)
         stage = role
     initial, specs, impact, scout_session = {}, [], None, None
+    proposal_evidence = []
     def scout_phase():
-        nonlocal initial, specs, model, impact, scout_session
+        nonlocal initial, specs, model, impact, scout_session, proposal_evidence
         enter_role("scout")
         initial = workspace.snapshot()
         workspace.runner.check_available()
@@ -123,12 +128,16 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
             if invalid:
                 raise AuditFailed([{"rule": "invalid_baseline_test_metadata", "command_index": i} for i in invalid])
         enter_role("scout")
-        if agent_mode:
+        if agent_mode or proposal_mode:
             from .agents import inspect_repository
             from .models import from_config
             model = model if model is not None else from_config(config.get("model", {}))
             workspace.retrieval_model = model
-            impact, scout_session = inspect_repository(config, model, workspace)
+            if proposal_mode:
+                from .proposals import collect_evidence
+                proposal_evidence = collect_evidence(workspace, config['proposal'])
+            else:
+                impact, scout_session = inspect_repository(config, model, workspace)
         for query in config.get("queries", []):
             enter_role("scout")
             evidence = workspace.search(query)
@@ -141,11 +150,14 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
             from .agents import plan_repository
             generated = plan_repository(config, model, workspace, impact, scout_session)
             ordered = validate({**config, "work_items": generated})
+        elif proposal_mode:
+            ordered = [{'id': 'localized-repair', 'description': config['goal'],
+                        'files': config['proposal']['files']}]
         plan_id = ledger.add("decision", "planner", "Validated task DAG", ordered)
         trace.emit("planner", "plan_ready", fact_id=plan_id, items=len(ordered))
         # Validate every target before making the first mutation.
         for item in ordered:
-            if agent_mode:
+            if agent_mode or proposal_mode:
                 for name in item["files"]:
                     raw = workspace.path(name, write=True).read_bytes()
                     raw.decode("utf-8")
@@ -176,6 +188,9 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
                 report["summary"] = session.execute(task, "a string summarizing the actual modifications you made")
                 if not isinstance(report["summary"], str):
                     raise ModelError("Implementer final summary must be a string")
+            elif proposal_mode:
+                from .proposals import propose
+                report['summary'] = propose(model, workspace, config['goal'], item['files'], proposal_evidence, settings)
             for edit in item.get("edits", []):
                 workspace.replace(edit["path"], edit["old"], edit["new"])
             report["status"] = "completed"

@@ -107,3 +107,16 @@ The next useful experiment is an explicit bounded edit-proposal path compared
 with free tool-loop orchestration under the same tasks and acceptance, rather
 than further unpaired prompt tweaks or more retrieval features. A stronger-model
 comparison remains pending. Preserve these failed runs in the baseline.
+
+The bounded edit-proposal experiment is now available via `--strategy proposal`;
+see [its contract and evidence](patch-proposals.md). It reuses sources and Docker
+acceptance with deterministic file-localized Scout/Planner and one model proposal.
+The original `tool-loop` remains default; strategy is recorded in both manifests
+and results. This is not a model-only comparison.
+
+The proposal control rerun at
+`.keel/agent-baseline/1862e6beaca44d5088b7c911aca3d501` passed 2/2 synthetic
+controls with one model call per task and matching source, goal, image,
+acceptance, budget and model identity relative to the original failed controls.
+No real task was selected in that rerun. See the proposal contract for metrics
+and limitations; do not merge its result into the earlier three-task suite.
