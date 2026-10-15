@@ -933,3 +933,7 @@ Add `--strategy proposal` for the optional
 [localized patch-proposal path](docs/patch-proposals.md): deterministic evidence
 and planning, one generated patch batch, host policy checks, then independent
 acceptance. Free tool-loop orchestration stays default.
+For real API migrations, optional [dependency evidence](docs/dependency-evidence.md)
+retrieves static definitions from exact installed versions in the verifier image.
+Use `--strategy proposal --group real_compatibility --dependency-evidence` on the
+diagnostic suite; no target package imports, downloads or gold patches are used.

@@ -3,12 +3,23 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from keel.models import Reply
 from keel.runtime import run
 
 
 class ProposalTests(unittest.TestCase):
+    def test_dependency_evidence_reaches_proposal_without_widening_scope(self):
+        request = {'distribution': 'fixture', 'version': '1.0', 'symbols': ['portal']}
+        self.config['proposal']['dependencies'] = [request]
+        evidence = {'distribution': 'fixture', 'version': '1.0', 'records': [{'module': 'fixture.thread', 'symbol': 'portal'}]}
+        with patch('keel.dependency_evidence.collect', return_value=[evidence]):
+            result, model = self.execute([{'path': 'app.py', 'old': 'VERSION = 1', 'new': 'VERSION = 2'}])
+        self.assertEqual(result['status'], 'passed')
+        payload = json.loads(model.messages[1]['content'])
+        self.assertEqual(payload['installed_dependency_evidence'], [evidence])
+        self.assertEqual(payload['allowed_files'], ['app.py'])
     def test_correct_change_with_matching_preservation_entry_is_accepted(self):
         (self.root/'app.py').write_bytes(b'VERSION = 1\n\ndef greeting(name):\n    return "Hello, " + name\n')
         keep = 'def greeting(name):\n    return "Hello, " + name\n'
@@ -49,6 +60,7 @@ class ProposalTests(unittest.TestCase):
             calls = 0
             def complete_json(inner, messages, **kwargs):
                 inner.calls += 1
+                inner.messages = messages
                 self.assertIn('VERSION = 1', json.dumps(messages))
                 if callback:
                     callback()

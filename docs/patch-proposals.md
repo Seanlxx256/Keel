@@ -116,3 +116,8 @@ Next investigate target-dependency API evidence for real migrations. A model
 guessing an API name is not a substitute for retrieving that API from the fixed
 dependency environment. Such evidence must be obtained independently of gold
 patches and labeled as a separate experimental input.
+
+The optional [installed-dependency evidence collector](dependency-evidence.md)
+now implements that input under `proposal.dependencies`. Use the suite's
+`--dependency-evidence` flag only with proposal mode; it is recorded in manifests
+and results and keeps earlier evidence-free behavior available for comparison.

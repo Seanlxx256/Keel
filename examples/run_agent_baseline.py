@@ -45,7 +45,9 @@ def real_task(root, reproduction):
     return spec, evidence['image_id'], hashlib.sha256(raw).hexdigest()
 
 
-def prepare(output, specs, image, model, *, context_bytes=12000, strategy='tool-loop'):
+def prepare(output, specs, image, model, *, context_bytes=12000, strategy='tool-loop', dependency_evidence=False):
+    if dependency_evidence and strategy != 'proposal':
+        raise ValueError('Dependency evidence is currently available only for proposal strategy')
     output.mkdir(parents=True, exist_ok=False)
     tasks = []
     for spec in specs:
@@ -60,6 +62,9 @@ def prepare(output, specs, image, model, *, context_bytes=12000, strategy='tool-
             config['mode'] = 'proposal'
             config['proposal'] = {'files': [spec['target']],
                 'queries': ['start_blocking_portal'] if spec['group'] == 'real_compatibility' else ['API_VERSION']}
+            if dependency_evidence and spec['group'] == 'real_compatibility':
+                config['proposal']['dependencies'] = [{'distribution': 'anyio', 'version': '4.0.0',
+                                                       'symbols': ['start_blocking_portal']}]
         directory = output/'tasks'/spec['id']
         repo = directory/'template'
         repo.mkdir(parents=True)
@@ -78,8 +83,9 @@ def prepare(output, specs, image, model, *, context_bytes=12000, strategy='tool-
     implementation = {path: hashlib.sha256((Path(__file__).resolve().parents[1]/path).read_bytes()).hexdigest()
         for path in ['keel/agents.py', 'keel/gateway.py', 'keel/conversation.py', 'keel/runtime.py',
                      'keel/models.py', 'keel/proposals.py', 'keel/workspace.py', 'keel/execution.py',
-                     'keel/audit.py', 'keel/core.py', 'examples/run_agent_baseline.py']}
-    manifest = {'schema_version': 1, 'suite': 'agent-diagnostic-v1', 'model': model, 'strategy': strategy, 'tasks': tasks,
+                     'keel/audit.py', 'keel/core.py', 'keel/dependency_evidence.py', 'examples/run_agent_baseline.py']}
+    manifest = {'schema_version': 1, 'suite': 'agent-diagnostic-v1', 'model': model, 'strategy': strategy,
+        'dependency_evidence_requested': dependency_evidence, 'tasks': tasks,
         'implementation_sha256': implementation, 'benchmark_ready': False,
         'limitations': 'Synthetic controls and real tasks are separate groups. One real task, no benchmark resolve-rate claim.'}
     (output/'manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
@@ -107,6 +113,8 @@ def trace_metrics(path):
     return {'max_model_input_bytes': max((event['input_bytes'] for event in events
             if event['event'] == 'llm_call_started'), default=0),
         'archived_turns': sum(event['archived_turns'] for event in events if event['event'] == 'context_window'),
+        'dependency_scans': sum(event['event'] == 'dependency_scan_finished' for event in events),
+        'dependency_symbol_matches': sum(event['matches'] for event in events if event['event'] == 'dependency_scan_finished'),
         'tool_calls_by_name': calls}
 
 
@@ -130,7 +138,10 @@ def main():
     parser.add_argument('--unbounded-context', action='store_true')
     parser.add_argument('--strategy', choices=['tool-loop', 'proposal'], default='tool-loop')
     parser.add_argument('--group', choices=['synthetic_control', 'real_compatibility'], help='Run only the selected diagnostic group')
+    parser.add_argument('--dependency-evidence', action='store_true', help='Retrieve static target API definitions from the fixed Docker image')
     args = parser.parse_args()
+    if args.dependency_evidence and args.strategy != 'proposal':
+        parser.error('--dependency-evidence requires --strategy proposal')
     root = Path(__file__).resolve().parents[1]
     output = root/'.keel/agent-baseline'/uuid.uuid4().hex
     print(f'Artifacts: {output}', flush=True)
@@ -139,10 +150,12 @@ def main():
     if args.group:
         specs = [spec for spec in specs if spec['group'] == args.group]
     manifest = prepare(output, specs, image, args.model,
-                       context_bytes=None if args.unbounded_context else 12000, strategy=args.strategy)
+                       context_bytes=None if args.unbounded_context else 12000, strategy=args.strategy,
+                       dependency_evidence=args.dependency_evidence)
     records = [{'id': task['id'], 'group': task['group'], 'status': 'prepared',
                 'executed': False, 'passed': False} for task in manifest['tasks']]
-    report = {'prepared_only': not args.execute, 'strategy': args.strategy, 'records': records, 'reproduction_sha256': provenance,
+    report = {'prepared_only': not args.execute, 'strategy': args.strategy,
+              'dependency_evidence_requested': args.dependency_evidence, 'records': records, 'reproduction_sha256': provenance,
               'benchmark_ready': False}
     def checkpoint():
         report['groups'] = summarize(records)

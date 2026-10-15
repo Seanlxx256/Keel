@@ -45,6 +45,11 @@ class AgentBaselineTests(unittest.TestCase):
             self.assertEqual(proposals['tasks'][0]['config']['mode'], 'proposal')
             self.assertEqual(proposals['tasks'][0]['config']['proposal']['files'], ['app.py'])
             self.assertNotEqual(proposals['tasks'][0]['comparison_key'], left['tasks'][0]['comparison_key'])
+            fake_real = {**specs[0], 'id': 'real-fixture', 'group': 'real_compatibility', 'target': 'app.py'}
+            with_evidence = prepare(root/'dependency', [fake_real], 'sha256:'+'a'*64, 'first',
+                strategy='proposal', dependency_evidence=True)
+            request = with_evidence['tasks'][0]['config']['proposal']['dependencies'][0]
+            self.assertEqual(request, {'distribution': 'anyio', 'version': '4.0.0', 'symbols': ['start_blocking_portal']})
             with self.assertRaises(FileExistsError):
                 prepare(root/'left', specs, 'image', 'first')
 

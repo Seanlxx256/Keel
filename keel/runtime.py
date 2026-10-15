@@ -107,8 +107,9 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
         stage = role
     initial, specs, impact, scout_session = {}, [], None, None
     proposal_evidence = []
+    proposal_dependencies = []
     def scout_phase():
-        nonlocal initial, specs, model, impact, scout_session, proposal_evidence
+        nonlocal initial, specs, model, impact, scout_session, proposal_evidence, proposal_dependencies
         enter_role("scout")
         initial = workspace.snapshot()
         workspace.runner.check_available()
@@ -136,6 +137,8 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
             if proposal_mode:
                 from .proposals import collect_evidence
                 proposal_evidence = collect_evidence(workspace, config['proposal'])
+                from .dependency_evidence import collect
+                proposal_dependencies = collect(workspace, config['proposal'].get('dependencies', []))
             else:
                 impact, scout_session = inspect_repository(config, model, workspace)
         for query in config.get("queries", []):
@@ -190,7 +193,8 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
                     raise ModelError("Implementer final summary must be a string")
             elif proposal_mode:
                 from .proposals import propose
-                report['summary'] = propose(model, workspace, config['goal'], item['files'], proposal_evidence, settings)
+                report['summary'] = propose(model, workspace, config['goal'], item['files'], proposal_evidence, settings,
+                                            dependencies=proposal_dependencies)
             for edit in item.get("edits", []):
                 workspace.replace(edit["path"], edit["old"], edit["new"])
             report["status"] = "completed"
