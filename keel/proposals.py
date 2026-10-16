@@ -104,7 +104,15 @@ def collect_located_evidence(workspace, scope):
     return evidence
 
 
+def evidence_scope(files, evidence):
+    paths = [source['path'] for source in evidence]
+    if not paths or len(paths) != len(set(paths)) or not set(paths) <= set(files):
+        raise PolicyDenied('Proposal evidence must cover unique declared source files')
+    return [name for name in files if name in paths]
+
+
 def proposal_request(goal, files, evidence, settings, *, structured=True, dependencies=None):
+    files = evidence_scope(files, evidence)
     schema = {'type': 'object', 'properties': {
         'edits': {'type': 'array', 'minItems': 1, 'maxItems': 8, 'items': {
             'type': 'object', 'properties': {key: {'type': 'string'} for key in ('path', 'old', 'new')},
@@ -129,6 +137,7 @@ def proposal_request(goal, files, evidence, settings, *, structured=True, depend
 
 
 def propose(model, workspace, goal, files, evidence, settings, *, dependencies=None):
+    files = evidence_scope(files, evidence)
     structured = callable(getattr(model, 'complete_json', None))
     messages, schema, size = proposal_request(goal, files, evidence, settings,
         structured=structured, dependencies=dependencies)
@@ -170,7 +179,7 @@ def propose(model, workspace, goal, files, evidence, settings, *, dependencies=N
                 raise ValueError('Every edit requires string path/old/new')
             name, old, new = edit['path'], edit['old'], edit['new']
             if name not in files:
-                raise PolicyDenied('Proposal targets an undeclared file')
+                raise PolicyDenied('Proposal targets a file outside current evidence scope')
             workspace.path(name, write=True)
             before = shadow[name]
             if not old:

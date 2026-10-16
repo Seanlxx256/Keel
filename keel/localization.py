@@ -11,18 +11,21 @@ from .core import BudgetExceeded, ModelError, PolicyDenied
 
 ANCHOR_INSTRUCTION = ('Select 1..8 definition locations from the supplied structure for repair. '
     'Each symbols entry is [definition_line, name]. Return locations only as path:line, '
-    'combining a displayed file path and its displayed definition line. Prefer methods/functions over entire classes.')
+    'combining a displayed file path and its displayed definition line. definition_bytes aligns with symbols and reports full source bytes. '
+    'Prefer methods/functions over entire classes. Fit the supplied proposal input limit; do not select a whole class and its methods together.')
 
 
 def symbol_structure(name, text):
     """Lossless names/definition-line map without repeating the file path per symbol."""
     try:
         tree = ast.parse(text)
-        symbols = [[node.lineno, node.name] for node in ast.walk(tree)
-            if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))]
+        nodes = [node for node in ast.walk(tree) if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))]
+        symbols = [[node.lineno, node.name] for node in nodes]
+        lines = text.splitlines(keepends=True)
+        sizes = [len(''.join(lines[min([node.lineno] + [d.lineno for d in node.decorator_list])-1:node.end_lineno]).encode()) for node in nodes]
     except SyntaxError:
-        symbols = []
-    return {'path': name, 'symbols': symbols}
+        symbols, sizes = [], []
+    return {'path': name, 'symbols': symbols, 'definition_bytes': sizes}
 
 
 def selection_request(goal, settings, *, stage, data, keys, instruction, structured=True):
@@ -95,17 +98,34 @@ def localize(model, workspace, goal, settings):
         source[name] = workspace.read(name, role='scout')['value']
         structure.append(symbol_structure(name, source[name]))
         workspace.trace.emit('scout', 'localization_structure', files=len(structure), bytes=len(json.dumps(structure).encode()))
-    scope = select(model, workspace, goal, settings, stage='anchor-selection', data={'structure': structure},
-        keys=('locations',), instruction=ANCHOR_INSTRUCTION)
-    try:
-        allowed = {f"{row['path']}:{line}": (row['path'], line) for row in structure for line, _ in row['symbols']}
-        if not set(scope['locations']) <= allowed.keys():
-            raise ValueError('Locations must be exact identifiers shown in the selected structure')
-        locations = {}
-        for identifier in scope['locations']:
-            name, line = allowed[identifier]
-            locations.setdefault(name, []).append(line)
+    from .proposals import located_source_evidence, proposal_request
+    allowed = {f"{row['path']}:{line}": (row['path'], line) for row in structure for line, _ in row['symbols']}
+    data = {'structure': structure, 'proposal_input_limit_bytes': settings.get('max_context_bytes', 12000)}
+    for attempt in range(2):
+        scope = select(model, workspace, goal, settings,
+            stage='anchor-selection' if attempt == 0 else 'anchor-refinement', data=data,
+            keys=('locations',), instruction=ANCHOR_INSTRUCTION)
+        try:
+            if not set(scope['locations']) <= allowed.keys():
+                raise ValueError('Locations must be exact identifiers shown in the selected structure')
+            locations = {}
+            for identifier in scope['locations']:
+                name, line = allowed[identifier]
+                locations.setdefault(name, []).append(line)
+        except (ValueError, TypeError, KeyError) as error:
+            raise ModelError('Invalid localization: '+str(error)) from None
+        evidence = [located_source_evidence(name, source[name], positions) for name, positions in locations.items()]
+        try:
+            proposal_request(goal, list(locations), evidence, settings,
+                structured=callable(getattr(model, 'complete_json', None)))
+        except BudgetExceeded as error:
+            workspace.trace.emit('scout', 'localization_over_budget', selection=scope['locations'],
+                                 refinement=attempt, reason=str(error))
+            if attempt:
+                raise
+            data = {**data, 'previous_locations': scope['locations'],
+                    'capacity_error': str(error),
+                    'instruction': 'Reselect smaller relevant definitions from the same catalog. No source has been truncated.'}
+            continue
         return {'files': list(locations), 'locations': locations,
             'source_sha256': {name: hashlib.sha256(source[name].encode()).hexdigest() for name in locations}}
-    except (ValueError, TypeError, KeyError) as error:
-        raise ModelError('Invalid localization: '+str(error)) from None

@@ -14,3 +14,9 @@ python examples/run_repair_comparison.py --output .keel/repair-comparisons/devel
 Normally each disabled arm uses three localization/proposal calls and each enabled arm uses three to five. Across this four-run cohort that is 12–16 normal calls; failures can stop earlier. The per-run configured global budget remains authoritative; each arm receives its own equal budget, not a new budget per retry. `results.json` checkpoints outcomes, failures, model/tool/token usage, verification rounds and elapsed time including baseline. Do not compare these numbers directly with the earlier HTTPX pipeline, which also selected installed dependency contracts and used different task evidence.
 
 After this diagnostic, freeze the design and collect previously unseen tasks before further tuning. Keep benchmark readiness false until independent task/environment/acceptance criteria are actually met.
+
+## Paired reporting
+
+New runs checkpoint results.json and results.md with paired task counts, discordant outcomes and explicit exclusions. Completed pre-verification failures stay in the denominator. Missing or environment/runtime-error pairs are reported as exclusions. Original failure labels are preserved, not independently verified root causes. Execution returns nonzero if any arm fails.
+
+Existing reports can be exported without provider calls using examples/summarize_repair_comparison.py --source SOURCE_RESULTS_JSON --output NEW_DIRECTORY. Exports refuse overwrite and include the source SHA-256. The development-v2 export is saved under .keel/repair-comparison-summaries/development-v2. Source trial artifacts were not modified. Reporting code changes invalidate unexecuted frozen plans; never bypass their implementation checks.

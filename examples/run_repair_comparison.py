@@ -18,6 +18,7 @@ from keel.evaluation_protocol import implementation_hashes, file_hash
 from keel.execution import CommandRunner
 from keel.models import from_config
 from keel.runtime import run
+from keel.repair_reporting import summarize, markdown
 
 
 def pair_key(config):
@@ -100,7 +101,9 @@ def execute(root, output):
         os.environ['PATH'] = str(docker)+os.pathsep+os.environ.get('PATH', '')
     report = {'records': [], 'unique_tasks': plan['unique_tasks'], 'heldout_tasks': 0, 'benchmark_ready': False}
     def save():
+        report['summary'] = summarize(report)
         (output/'results.json').write_text(json.dumps(report, indent=2))
+        (output/'results.md').write_text(markdown(report['summary']), encoding='utf-8')
     save()
     for row in plan['rows']:
         record = {k: row[k] for k in ('task_id', 'repair_attempts', 'directory')}
@@ -166,8 +169,8 @@ def main():
         report = {'prepared_only': True, 'runs': len(plan['rows']), 'unique_tasks': plan['unique_tasks'],
                   'heldout_tasks': 0, 'new_model_calls': 0}
     print(json.dumps(report, indent=2))
-    return 0
+    return 1 if args.execute and not all(r['passed'] for r in report['records']) else 0
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())
