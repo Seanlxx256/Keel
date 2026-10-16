@@ -102,6 +102,7 @@ def localize(model, workspace, goal, settings):
     allowed = {f"{row['path']}:{line}": (row['path'], line) for row in structure for line, _ in row['symbols']}
     data = {'structure': structure, 'proposal_input_limit_bytes': settings.get('max_context_bytes', 12000)}
     for attempt in range(2):
+        allowed = {f"{row['path']}:{line}": (row['path'], line) for row in data['structure'] for line, _ in row['symbols']}
         scope = select(model, workspace, goal, settings,
             stage='anchor-selection' if attempt == 0 else 'anchor-refinement', data=data,
             keys=('locations',), instruction=ANCHOR_INSTRUCTION)
@@ -123,9 +124,18 @@ def localize(model, workspace, goal, settings):
                                  refinement=attempt, reason=str(error))
             if attempt:
                 raise
-            data = {**data, 'previous_locations': scope['locations'],
+            refined = []
+            for row in structure:
+                tree = ast.parse(source[row['path']])
+                classes = {n.lineno for n in ast.walk(tree) if isinstance(n, ast.ClassDef)
+                           and any(isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) for child in n.body)}
+                entries = [(symbol, size) for symbol, size in zip(row['symbols'], row['definition_bytes'])
+                           if symbol[0] not in classes]
+                refined.append({'path': row['path'], 'symbols': [e[0] for e in entries],
+                                'definition_bytes': [e[1] for e in entries]})
+            data = {**data, 'structure': refined, 'previous_locations': scope['locations'],
                     'capacity_error': str(error),
-                    'instruction': 'Reselect smaller relevant definitions from the same catalog. No source has been truncated.'}
+                    'instruction': 'Reselect from this method/function catalog. Whole classes with methods have been explicitly removed after overflow; no selected source definition has been truncated.'}
             continue
         return {'files': list(locations), 'locations': locations,
             'source_sha256': {name: hashlib.sha256(source[name].encode()).hexdigest() for name in locations}}

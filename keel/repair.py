@@ -6,6 +6,36 @@ import re
 from .proposals import located_source_evidence
 
 
+def select_repair_evidence(model, workspace, goal, scope, feedback, settings):
+    """Acquire explicitly selected current definitions within the original write scope."""
+    from .localization import select, symbol_structure, ANCHOR_INSTRUCTION
+    from .core import ModelError, PolicyDenied
+    source = {name: workspace.read(name, role='implementer')['value'] for name in scope['files']}
+    structure = [symbol_structure(name, text) for name, text in source.items()]
+    chosen = select(model, workspace, goal, settings, stage='repair-evidence-selection',
+        data={'structure': structure, 'verification_errors': feedback,
+              'proposal_input_limit_bytes': settings.get('max_context_bytes', 12000)},
+        keys=('locations',), instruction=ANCHOR_INSTRUCTION)
+    allowed = {f"{row['path']}:{line}": (row['path'], line) for row in structure for line, _ in row['symbols']}
+    if not set(chosen['locations']) <= allowed.keys():
+        raise ModelError('Repair evidence locations must belong to original declared files and displayed catalog')
+    locations = {}
+    for identifier in chosen['locations']:
+        name, line = allowed[identifier]
+        locations.setdefault(name, []).append(line)
+    evidence = []
+    for name, positions in locations.items():
+        current = workspace.read(name, role='implementer')['value']
+        if current != source[name]:
+            raise PolicyDenied('Source changed during repair evidence selection')
+        payload = located_source_evidence(name, current, positions)
+        payload['selection'] = 'model-selected-current-declared-definitions'
+        payload['omitted_declared_files'] = [n for n in scope['files'] if n not in locations]
+        workspace.ledger.add('file', 'implementer', 'Selected current repair evidence', payload)
+        evidence.append(payload)
+    return evidence
+
+
 def repair_evidence(workspace, scope, verification):
     feedback, frames = [], {}
     for result in verification:

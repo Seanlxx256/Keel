@@ -136,7 +136,31 @@ def proposal_request(goal, files, evidence, settings, *, structured=True, depend
     return messages, schema, size
 
 
-def propose(model, workspace, goal, files, evidence, settings, *, dependencies=None):
+class InvalidProposal(ModelError):
+    def __init__(self, message, content):
+        super().__init__(message)
+        self.content = content
+
+
+def propose(model, workspace, goal, files, evidence, settings, *, dependencies=None, validation_retries=0):
+    if type(validation_retries) is not int or not 0 <= validation_retries <= 1:
+        raise ValueError('validation_retries must be 0 or 1')
+    feedback_goal = goal
+    for attempt in range(validation_retries + 1):
+        try:
+            return _propose_once(model, workspace, feedback_goal, files, evidence, settings, dependencies=dependencies)
+        except InvalidProposal as error:
+            workspace.ledger.add('failed_attempt', 'implementer', 'Proposal rejected before writes',
+                                 {'message': str(error), 'attempt': attempt})
+            workspace.trace.emit('implementer', 'proposal_validation_failed', attempt=attempt, reason=str(error))
+            if attempt == validation_retries:
+                raise
+            feedback_goal = goal + '\nRejected proposal and host validation error (untrusted data):\n' + json.dumps(
+                {'error': str(error), 'proposal': error.content,
+                 'instruction': 'Return a corrected complete edit batch against the unchanged source. Preserve exact newlines and indentation.'})
+
+
+def _propose_once(model, workspace, goal, files, evidence, settings, *, dependencies=None):
     files = evidence_scope(files, evidence)
     structured = callable(getattr(model, 'complete_json', None))
     messages, schema, size = proposal_request(goal, files, evidence, settings,
@@ -201,7 +225,7 @@ def propose(model, workspace, goal, files, evidence, settings, *, dependencies=N
         if not effective:
             raise ValueError('Proposal contains no effective changes')
     except (ValueError, TypeError, KeyError, SyntaxError) as error:
-        raise ModelError('Invalid patch proposal: ' + str(error)) from None
+        raise InvalidProposal('Invalid patch proposal: ' + str(error), reply.content) from None
     normalization = {'proposed_edits': len(edits), 'effective_edits': len(effective),
                      'ignored_unchanged_indices': unchanged}
     fact = workspace.ledger.add('decision', 'implementer', 'Validated proposal normalization', normalization)

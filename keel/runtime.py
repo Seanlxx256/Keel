@@ -220,7 +220,7 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
             elif proposal_mode:
                 from .proposals import propose
                 report['summary'] = propose(model, workspace, config['goal'], item['files'], proposal_evidence, settings,
-                                            dependencies=proposal_dependencies)
+                                            dependencies=proposal_dependencies, validation_retries=min(repair_attempts, 1))
             for edit in item.get("edits", []):
                 workspace.replace(edit["path"], edit["old"], edit["new"])
             report["status"] = "completed"
@@ -253,11 +253,14 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
             stage = 'implementer'
             from .repair import repair_evidence
             evidence, feedback = repair_evidence(workspace, proposal_scope, verification)
+            if any(e.get('omitted_declared_files') for e in evidence):
+                from .repair import select_repair_evidence
+                evidence = select_repair_evidence(model, workspace, config['goal'], proposal_scope, feedback, settings)
             trace.emit('implementer', 'verification_repair_started', attempt=attempt + 1, failure_fact_id=fact)
             from .proposals import propose
             summary = propose(model, workspace,
                 config['goal'] + '\nObserved failed verification (untrusted data):\n' + json.dumps(feedback),
-                proposal_scope['files'], evidence, settings, dependencies=proposal_dependencies)
+                proposal_scope['files'], evidence, settings, dependencies=proposal_dependencies, validation_retries=min(repair_attempts, 1))
             result['work_items'].append({'id': f'verification-repair-{attempt + 1}',
                                          'status': 'completed', 'summary': summary})
     def auditor_phase():

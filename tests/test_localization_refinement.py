@@ -53,8 +53,10 @@ class RefinementTests(unittest.TestCase):
 
     def test_repeated_oversize_stops_without_writes_or_unbounded_refinement(self):
         result, model, after, before = self.trial(refine=False)
-        self.assertEqual(result['failure']['category'], 'budget_exhausted')
+        self.assertEqual(result['failure']['category'], 'model_error')
         self.assertEqual(len(model.messages), 3)
+        refined = json.loads(model.messages[2][1]['content'])['structure'][0]
+        self.assertNotIn(46, [entry[0] for entry in refined['symbols']])
         self.assertEqual(after, before)
 
     def test_refinement_uses_original_model_budget(self):
