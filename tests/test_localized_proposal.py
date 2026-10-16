@@ -20,6 +20,52 @@ class Model:
 
 
 class LocalizedProposalTests(unittest.TestCase):
+    def test_contract_selection_rejects_unknown_id_before_patch_and_obeys_budget(self):
+        class InvalidSelection(Model):
+            def complete_json(self, messages, **kwargs):
+                if len(self.messages) == 2:
+                    self.messages.append(messages)
+                    return Reply(json.dumps({'contracts': ['9:999']}), 100)
+                return super().complete_json(messages, **kwargs)
+        config = {**self.config, 'budget': {**self.config['budget'], 'max_model_calls': 4},
+            'select_dependency_contracts': True,
+            'localization_dependencies': [{'module': 'fixture', 'distribution': 'fixture', 'version': '1'}]}
+        evidence = [{'distribution': 'fixture', 'version': '1', 'signatures': ['def Pool.send(self)']}]
+        for index, limit in enumerate((4, 2)):
+            model = InvalidSelection({'files': ['module.py'], 'locations': ['module.py:1']})
+            current = {**config, 'budget': {**config['budget'], 'max_model_calls': limit}}
+            with patch('keel.dependency_evidence.collect_for_localization', return_value=evidence):
+                result = run(current, self.root, self.root/f'.keel/bad-contract-{index}', model=model)
+            self.assertEqual(result['status'], 'failed')
+            self.assertEqual(result['failure']['stage'], 'scout')
+            self.assertEqual(len(model.messages), 3 if limit == 4 else 2)
+            self.assertIn('return 1', (self.root/'module.py').read_text())
+
+    def test_model_selects_contract_ids_and_patch_gets_original_records_with_shared_budget(self):
+        scope = {'files': ['module.py'], 'locations': ['module.py:1']}
+        class Selecting(Model):
+            def complete_json(self, messages, **kwargs):
+                if len(self.messages) == 2:
+                    self.messages.append(messages)
+                    return Reply(json.dumps({'contracts': ['0:1']}), 100)
+                return super().complete_json(messages, **kwargs)
+        model = Selecting(scope)
+        evidence = [{'distribution': 'fixture', 'version': '1',
+            'signatures': ['def Pool.old(self)', 'def Pool.send(self, extensions)'], 'inventory_sha256': 'a'*64}]
+        config = {**self.config, 'budget': {**self.config['budget'], 'max_model_calls': 4},
+            'select_dependency_contracts': True,
+            'localization_dependencies': [{'module': 'fixture', 'distribution': 'fixture', 'version': '1'}]}
+        with patch('keel.dependency_evidence.collect_for_localization', return_value=evidence):
+            result = run(config, self.root, self.root/'.keel/selected-contracts', model=model)
+        self.assertEqual(result['status'], 'passed')
+        self.assertEqual(result['budget']['model_calls'], 4)
+        self.assertEqual(result['budget']['tokens'], 400)
+        supplied = json.loads(model.messages[3][1]['content'])['installed_dependency_evidence'][0]
+        self.assertEqual(supplied['signatures'], [evidence[0]['signatures'][1]])
+        self.assertEqual(supplied['selected_signature_indices'], [1])
+        self.assertEqual(supplied['available_signature_count'], 2)
+        self.assertEqual(evidence[0]['signatures'], ['def Pool.old(self)', 'def Pool.send(self, extensions)'])
+
     def test_installed_contracts_reach_patch_request_without_becoming_edit_instructions(self):
         model = Model({'files': ['module.py'], 'locations': ['module.py:1']})
         evidence = [{'distribution': 'fixture', 'version': '1', 'signatures': ['def Pool.send(self, extensions)']}]

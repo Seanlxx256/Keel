@@ -74,8 +74,15 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
         if not localized_mode:
             raise ValueError('localization_dependencies requires localized-proposal mode')
         validate_modules(config['localization_dependencies'])
+    if type(config.get('select_dependency_contracts', False)) is not bool:
+        raise ValueError('select_dependency_contracts must be boolean')
+    if config.get('select_dependency_contracts') and (not localized_mode or not config.get('localization_dependencies')):
+        raise ValueError('Contract selection requires localized-proposal and localization_dependencies')
     if (agent_mode or proposal_mode) and ordered:
         raise ValueError("Agent mode generates its own plan; omit work_items")
+    repair_attempts = config.get('verification_repair_attempts', 0)
+    if type(repair_attempts) is not int or not 0 <= repair_attempts <= 3 or (repair_attempts and not proposal_mode):
+        raise ValueError('verification_repair_attempts requires proposal mode and integer 0..3')
     settings = config.get("agent", {})
     if not isinstance(settings, dict) or set(settings) - {"max_steps", "max_output", "require_evidence", "max_work_items", "max_context_bytes", "require_change"} or any(
             type(v) is not int or v <= 0 for key, v in settings.items() if key not in {"require_evidence", "require_change"}) or any(
@@ -155,6 +162,9 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
                 if localized_mode and config.get('localization_dependencies'):
                     from .dependency_evidence import collect_for_localization
                     proposal_dependencies = collect_for_localization(workspace, proposal_scope, config['localization_dependencies'])
+                    if config.get('select_dependency_contracts'):
+                        from .dependency_evidence import select_contracts
+                        proposal_dependencies = select_contracts(model, workspace, config['goal'], proposal_dependencies, settings)
             else:
                 impact, scout_session = inspect_repository(config, model, workspace)
         for query in config.get("queries", []):
@@ -216,8 +226,40 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
             report["status"] = "completed"
             trace.emit(stage, "item_completed", item_id=item["id"])
     def verifier_phase():
+        nonlocal stage
         enter_role("verifier")
-        result["verification"] = workspace.verify(config["acceptance"])
+        result["verification_attempts"] = []
+        for attempt in range(repair_attempts + 1):
+            stage = 'verifier'
+            verification = workspace.verify(config["acceptance"])
+            result["verification"] = verification
+            result["verification_attempts"].append({'attempt': attempt, 'verification': verification})
+            failed = len(verification) != len(config['acceptance']) or any(v['returncode'] != 0 for v in verification)
+            if not failed or attempt == repair_attempts:
+                break
+            # A failed verifier must not expand scope or bypass audit before another write.
+            current = workspace.snapshot()
+            unexpected = [n for n in initial.keys() | current.keys()
+                          if initial.get(n) != current.get(n) and n not in originals]
+            if unexpected:
+                raise PolicyDenied(f'Changes outside declared edit targets: {unexpected}')
+            findings = audit_metadata(result['baseline_verification'], verification)
+            for name, before in originals.items():
+                findings.extend(audit_text(name, before, workspace.path(name).read_bytes()))
+            if findings:
+                raise AuditFailed(findings)
+            fact = ledger.add('failed_attempt', 'verifier', 'Acceptance failed before bounded repair',
+                              {'attempt': attempt, 'verification': verification})
+            stage = 'implementer'
+            from .repair import repair_evidence
+            evidence, feedback = repair_evidence(workspace, proposal_scope, verification)
+            trace.emit('implementer', 'verification_repair_started', attempt=attempt + 1, failure_fact_id=fact)
+            from .proposals import propose
+            summary = propose(model, workspace,
+                config['goal'] + '\nObserved failed verification (untrusted data):\n' + json.dumps(feedback),
+                proposal_scope['files'], evidence, settings, dependencies=proposal_dependencies)
+            result['work_items'].append({'id': f'verification-repair-{attempt + 1}',
+                                         'status': 'completed', 'summary': summary})
     def auditor_phase():
         enter_role("auditor", previous_status="failed" if any(v["returncode"] != 0 for v in result["verification"]) else "completed")
         final = workspace.snapshot()

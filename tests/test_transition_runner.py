@@ -42,15 +42,21 @@ class TrialTests(unittest.TestCase):
             model.write_text(json.dumps({'provider': 'ollama', 'name': 'fixture'}))
             task = {'id': 'httpx-1588', 'base_commit': 'a'*40, 'goal': 'Repair compatibility'}
             manifest = {'curator_receipt': {'base_inventory': runner.inventory(snapshot)},
-                'acceptance': {'image': 'sha256:'+'b'*64}}
+                'acceptance': {'image': 'sha256:'+'b'*64, 'versions': {'fixture': '1'}}}
             with patch.object(runner, 'load_package', return_value=(manifest, task)), patch.object(
                     runner, 'implementation_hashes', return_value={}), patch.object(runner, 'from_config') as factory:
                 for strategy in ('agent', 'localized-proposal'):
                     output = root/strategy
                     frozen = runner.prepare(root, package, model, output, strategy=strategy, baseline_feedback=True,
-                        require_change=True)
+                        require_change=True, dependency_modules=['fixture'] if strategy == 'localized-proposal' else None,
+                        select_contracts=strategy == 'localized-proposal', max_context_bytes=24000)
                     self.assertEqual(frozen['strategy'], strategy)
                     self.assertEqual(frozen['config']['mode'], strategy)
+                    self.assertEqual(frozen['config']['agent']['max_context_bytes'], 24000)
+                    if strategy == 'localized-proposal':
+                        self.assertTrue(frozen['config']['select_dependency_contracts'])
+                        self.assertEqual(frozen['config']['localization_dependencies'],
+                            [{'module': 'fixture', 'distribution': 'fixture', 'version': '1'}])
                     self.assertTrue(frozen['config']['agent']['require_change'])
                     self.assertTrue(frozen['baseline_feedback'])
                     self.assertEqual(frozen['baseline_feedback_policy'], 'case-errors-v1')
@@ -63,6 +69,9 @@ class TrialTests(unittest.TestCase):
                 factory.return_value.check_credentials.assert_not_called()
             with self.assertRaises(ValueError):
                 runner.prepare(root, package, model, root/'bad', strategy='other')
+            for invalid in (True, 0, 128001):
+                with self.assertRaises(ValueError):
+                    runner.prepare(root, package, model, root/'invalid', max_context_bytes=invalid)
 
     def test_acceptance_requires_cases_versions_and_backend(self):
         runs = matrix()

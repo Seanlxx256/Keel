@@ -29,14 +29,29 @@ def load_package(package):
     return manifest, task
 
 
-def prepare(root, package, model_file, output, *, strategy='agent', baseline_feedback=False, require_change=False):
+def prepare(root, package, model_file, output, *, strategy='agent', baseline_feedback=False, require_change=False,
+            dependency_modules=None, select_contracts=False, max_context_bytes=12000, repair_attempts=0):
     if strategy not in {'agent', 'localized-proposal'}:
         raise ValueError('Unknown transition strategy')
     if type(baseline_feedback) is not bool:
         raise ValueError('baseline_feedback must be boolean')
     if type(require_change) is not bool:
         raise ValueError('require_change must be boolean')
+    if type(max_context_bytes) is not int or not 1024 <= max_context_bytes <= 128000:
+        raise ValueError('max_context_bytes must be an integer in 1024..128000')
     manifest, task = load_package(package)
+    if type(select_contracts) is not bool or (select_contracts and not dependency_modules):
+        raise ValueError('Contract selection requires dependency modules')
+    if dependency_modules and strategy != 'localized-proposal':
+        raise ValueError('Dependency modules currently require localized-proposal')
+    modules = []
+    for item in dependency_modules or []:
+        module, separator, distribution = item.partition(':')
+        distribution = distribution if separator else module
+        modules.append({'module': module, 'distribution': distribution,
+            'version': manifest['acceptance']['versions'][distribution]})
+    from keel.dependency_evidence import validate_modules
+    validate_modules(modules)
     model = json.loads(model_file.read_text(encoding='utf-8'))
     from_config(model)  # Validate only, no credentials or network.
     # Configurations may reference credentials by environment variable only.
@@ -46,11 +61,18 @@ def prepare(root, package, model_file, output, *, strategy='agent', baseline_fee
     if inventory(snapshot) != manifest['curator_receipt']['base_inventory']:
         raise ValueError('Base snapshot inventory mismatch')
     config = task_config(manifest['acceptance']['image'], max_seconds=450)
+    if type(repair_attempts) is not int or not 0 <= repair_attempts <= 3 or (repair_attempts and strategy != 'localized-proposal'):
+        raise ValueError('repair_attempts requires localized-proposal and integer 0..3')
+    config['verification_repair_attempts'] = repair_attempts
     config['mode'] = strategy
     config['model'] = model
     config['goal'] = task['goal']+' Modify only existing Python files under httpx/. Search the repository to locate the implementation.'
     config['agent']['max_steps'] = 12
+    config['agent']['max_context_bytes'] = max_context_bytes
     config['agent']['require_change'] = require_change
+    if modules:
+        config['localization_dependencies'] = modules
+        config['select_dependency_contracts'] = select_contracts
     config['acceptance'] = [['python', '-c', (package/'acceptance.py').read_text(encoding='utf-8')]]
     output.mkdir(parents=True, exist_ok=False)
     shutil.copytree(snapshot, output/'repo', ignore=shutil.ignore_patterns('.git', '.compass', '.keel'))
@@ -129,6 +151,8 @@ def execute(root, output):
         'strategy': frozen.get('strategy', frozen.get('config', {}).get('mode', 'agent')),
         'baseline_feedback': frozen.get('baseline_feedback', False),
         'require_change': frozen.get('config', {}).get('agent', {}).get('require_change', False),
+        'select_dependency_contracts': frozen.get('config', {}).get('select_dependency_contracts', False),
+        'max_context_bytes': frozen.get('config', {}).get('agent', {}).get('max_context_bytes'),
         'status': 'running', 'benchmark_ready': False, 'prepared_sha256': file_hash(output/'prepared.json')}
     def save():
         (output/'results.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
@@ -187,19 +211,28 @@ def main():
     parser.add_argument('--strategy', choices=['agent', 'localized-proposal'], help='Preparation only; default agent')
     parser.add_argument('--baseline-feedback', action='store_true', help='Preparation only; include bounded observed errors in model input')
     parser.add_argument('--require-change', action='store_true', help='Preparation only; repair items must produce net source changes')
+    parser.add_argument('--dependency-module', action='append', help='Preparation only; module[:distribution], version from acceptance pins')
+    parser.add_argument('--select-contracts', action='store_true', help='Preparation only; model selects fixed-image contract IDs before patching')
+    parser.add_argument('--max-context-bytes', type=int, help='Preparation only; serialized input cap, default 12000, not exact model tokens')
+    parser.add_argument('--repair-attempts', type=int, help='Preparation only; bounded verification repair rounds, default 0')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     if args.execute:
-        if args.package or args.model_config or args.strategy or args.baseline_feedback or args.require_change:
+        if (args.package or args.model_config or args.strategy or args.baseline_feedback or args.require_change
+                or args.dependency_module or args.select_contracts or args.max_context_bytes is not None or args.repair_attempts is not None):
             parser.error('Execute uses existing prepared output only')
         report = execute(root, args.output)
     else:
         if not args.package or not args.model_config:
             parser.error('Preparation requires --package and --model-config')
         prepare(root, args.package, args.model_config, args.output, strategy=args.strategy or 'agent',
-            baseline_feedback=args.baseline_feedback, require_change=args.require_change)
+            baseline_feedback=args.baseline_feedback, require_change=args.require_change,
+            dependency_modules=args.dependency_module, select_contracts=args.select_contracts,
+            max_context_bytes=args.max_context_bytes if args.max_context_bytes is not None else 12000,
+            repair_attempts=args.repair_attempts if args.repair_attempts is not None else 0)
         report = {'status': 'prepared_only', 'strategy': args.strategy or 'agent',
             'baseline_feedback': args.baseline_feedback, 'require_change': args.require_change,
+            'max_context_bytes': args.max_context_bytes if args.max_context_bytes is not None else 12000,
             'executed': False, 'benchmark_ready': False}
     print(json.dumps(report, indent=2))
     return 1 if args.execute and not report['passed'] else 0

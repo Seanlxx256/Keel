@@ -1,0 +1,9 @@
+# HTTPX 1588: first observed acceptance pass
+
+Artifact: `.keel/transition-trials/httpx-1588-repair-focused-v2`, prepared SHA-256 `985a23a195aca54709d56ae5a6483fbad32ea7597aaf87de29f3d732c5f2a922`.
+
+The localized-proposal path completed five model calls using 8,585 reported tokens, 22 tool calls and 40.156 runtime seconds under the original shared budget. The initial patch renamed the synchronous/asynchronous pool methods and the `extensions` argument. Verification attempt 0 failed with `'bytes' object has no attribute 'encode'`. One feedback repair then updated response extension conversion to preserve existing bytes and encode string values. Verification attempt 1 passed all four unchanged curated cases: synchronous/asynchronous GET and POST.
+
+Only `httpx/_transports/default.py` changed. The saved final audit reports no unexpected changes and no findings. JUnit metadata checking was not enabled (`metadata_checked: false`); this run does not demonstrate mutation-test coverage or the full upstream suite. The final patch contains no probe-specific status/body constants and leaves verification infrastructure unchanged. Its type guard addresses the observed response representation mismatch, but passing these four cases cannot prove all library behavior is preserved.
+
+This establishes a functioning model-generated patch → failed Docker acceptance → bounded error/source feedback → model repair → passing Docker acceptance → final audit cycle on one known development task. It is not an independent benchmark result or evidence of an overall resolve-rate gain. Prior failed trials remain part of development history. Next evaluation should freeze this implementation and compare feedback enabled/disabled on additional tasks with identical model, acceptance, evidence access and total budgets. Do not tune this task further just to accumulate passes.

@@ -79,6 +79,39 @@ def collect_for_localization(workspace, scope, modules):
     return compact_contracts(collect(workspace, requests)) if requests else []
 
 
+def select_contracts(model, workspace, goal, evidence, settings):
+    """Select references only; the host supplies the original scanned signatures."""
+    from .localization import select
+    from .core import ModelError
+    catalog, lookup = [], {}
+    for dependency, payload in enumerate(evidence):
+        entries = []
+        for index, signature in enumerate(payload['signatures']):
+            identity = f'{dependency}:{index}'
+            lookup[identity] = (dependency, index)
+            entries.append([identity, signature])
+        catalog.append({'distribution': payload['distribution'], 'version': payload['version'], 'entries': entries})
+    selection = select(model, workspace, goal, settings, stage='dependency-selection',
+        data={'installed_contracts': catalog}, keys=('contracts',), instruction=
+        'Select 1..8 contract IDs needed to repair the observed dependency failures. '
+        'Check method names and parameters together. Return contracts containing exact displayed IDs only. '
+        'This is static evidence; it does not prove behavior, inheritance or public exports.')
+    if not set(selection['contracts']) <= lookup.keys():
+        raise ModelError('Dependency selection references an unknown contract ID')
+    chosen = {}
+    for identity in selection['contracts']:
+        dependency, index = lookup[identity]
+        chosen.setdefault(dependency, []).append(index)
+    result = []
+    for dependency, indices in chosen.items():
+        payload = evidence[dependency]
+        result.append({**payload, 'signatures': [payload['signatures'][index] for index in indices],
+            'selected_signature_indices': indices, 'available_signature_count': len(payload['signatures']),
+            'selection_scope': 'Model-selected subset of static contracts; omitted signatures may be relevant'})
+    workspace.trace.emit('scout', 'dependency_contracts_selected', available=len(lookup), selected=len(selection['contracts']))
+    return result
+
+
 SCAN = r'''
 import ast, hashlib, importlib.metadata, json, pathlib, sys
 request = json.loads(sys.argv[1])
