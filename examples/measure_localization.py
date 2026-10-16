@@ -31,7 +31,7 @@ def measure(repo, output, *, cap=12000, tools=60):
     before = workspace.snapshot()
     model = NoNetworkModel()
     report = {'repository': str(repo.resolve()), 'cap_bytes': cap, 'tool_limit': tools,
-        'new_model_calls': 0, 'scope': 'Localization preflight only, not selected-context or repair quality'}
+        'new_model_calls': 0, 'scope': 'First request preflight only; file selection in hierarchical mode. No selected-file, anchor or repair-context measurement'}
     try:
         localize(model, workspace, 'Repair a dependency compatibility issue in this repository.',
             {'max_context_bytes': cap, 'max_output': 1024})

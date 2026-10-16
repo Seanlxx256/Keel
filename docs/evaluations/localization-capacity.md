@@ -46,3 +46,22 @@ Selected source context can still overflow and must remain bounded. No default
 architecture replacement, index replacement or shell permission expansion is
 required. The existing mode remains an experimental prototype until those limits
 and tests are addressed.
+
+## V2 file-first request measurement
+
+The optional mode now selects files from paths before reading selected symbols.
+The same non-network preflight was repeated to `.keel/localization-capacity-v2/`:
+
+| Repository | First request bytes | Tool requests before model boundary |
+| --- | ---: | ---: |
+| HTTPX | 1,079 | 1 |
+| Starlette | 1,606 | 1 |
+| Flask-WTF | 979 | 1 |
+
+All first requests fit the unchanged 12,000-byte cap; source inventories matched
+before/after and real model calls remained zero. These requests carry paths,
+not the same symbol-map information as v1. Do not present the smaller sizes as
+an equal-information compression gain or an end-to-end token/cost reduction.
+Workspace listing still hashes the repository. The sentinel stops before file
+selection, so **selected symbol maps and repair windows are unmeasured here**.
+The full path now normally uses three model requests rather than two.

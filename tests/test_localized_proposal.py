@@ -13,7 +13,7 @@ class Model:
 
     def complete_json(self, messages, **kwargs):
         self.messages.append(messages)
-        value = self.scope if len(self.messages) == 1 else {
+        value = ({'files': self.scope.get('files', [])} if len(self.messages) == 1 else self.scope) if len(self.messages) <= 2 else {
             'edits': [{'path': 'module.py', 'old': 'return 1', 'new': 'return 2'}], 'summary': 'Update version'}
         return Reply(json.dumps(value), 100)
 
@@ -33,11 +33,12 @@ class LocalizedProposalTests(unittest.TestCase):
         model = Model({'files': ['module.py'], 'queries': ['def version']})
         result = run(self.config, self.root, self.root/'.keel/run', model=model)
         self.assertEqual(result['status'], 'passed')
-        self.assertEqual(result['budget']['model_calls'], 2)
-        self.assertEqual(result['budget']['tokens'], 200)
-        self.assertEqual(len(model.messages), 2)
-        self.assertIn('symbols', json.loads(model.messages[0][1]['content'])['structure'][0])
-        patch_input = json.loads(model.messages[1][1]['content'])
+        self.assertEqual(result['budget']['model_calls'], 3)
+        self.assertEqual(result['budget']['tokens'], 300)
+        self.assertEqual(len(model.messages), 3)
+        self.assertEqual(json.loads(model.messages[0][1]['content'])['paths'], ['module.py'])
+        self.assertIn('symbols', json.loads(model.messages[1][1]['content'])['structure'][0])
+        patch_input = json.loads(model.messages[2][1]['content'])
         self.assertEqual(patch_input['allowed_files'], ['module.py'])
         self.assertIn('return 1', patch_input['evidence'][0]['windows'][0]['text'])
         self.assertEqual(result['verification'][0]['returncode'], 0)
@@ -52,7 +53,7 @@ class LocalizedProposalTests(unittest.TestCase):
                 result = run(self.config, self.root, self.root/f'.keel/run-{index}', model=model)
                 self.assertEqual(result['status'], 'failed')
                 self.assertEqual(result['failure']['stage'], 'scout')
-                self.assertEqual(len(model.messages), 1)
+                self.assertEqual(len(model.messages), 1 if index == 0 else 2)
                 self.assertIn('return 1', (self.root/'module.py').read_text())
 
     def test_operator_scope_is_rejected_and_context_cap_cannot_silently_truncate(self):
@@ -64,3 +65,28 @@ class LocalizedProposalTests(unittest.TestCase):
             self.root, self.root/'.keel/capped', model=model)
         self.assertEqual(result['failure']['category'], 'budget_exhausted')
         self.assertEqual(model.messages, [])
+
+    def test_unselected_large_file_is_not_scanned_for_symbols(self):
+        (self.root/'unrelated.py').write_bytes(('def unrelated():\n    pass\n'+'# large padding\n'*5000).encode())
+        model = Model({'files': ['module.py'], 'queries': ['def version']})
+        result = run(self.config, self.root, self.root/'.keel/selected', model=model)
+        self.assertEqual(result['status'], 'passed')
+        self.assertIn('unrelated.py', json.loads(model.messages[0][1]['content'])['paths'])
+        self.assertEqual([r['path'] for r in json.loads(model.messages[1][1]['content'])['structure']], ['module.py'])
+
+    def test_anchor_stage_cannot_expand_scope_or_exceed_model_budget(self):
+        (self.root/'other.py').write_bytes(b'def other():\n    return 1\n')
+        class Expanding(Model):
+            def complete_json(self, messages, **kwargs):
+                self.messages.append(messages)
+                value = {'files': ['module.py']} if len(self.messages) == 1 else {'files': ['other.py'], 'queries': ['def other']}
+                return Reply(json.dumps(value), 100)
+        model = Expanding({})
+        result = run(self.config, self.root, self.root/'.keel/expanded', model=model)
+        self.assertEqual(result['failure']['category'], 'model_error')
+        self.assertEqual(len(model.messages), 2)
+        model = Model({'files': ['module.py'], 'queries': ['def version']})
+        config = {**self.config, 'budget': {**self.config['budget'], 'max_model_calls': 1}}
+        result = run(config, self.root, self.root/'.keel/budgeted', model=model)
+        self.assertEqual(result['failure']['category'], 'budget_exhausted')
+        self.assertEqual(len(model.messages), 1)
