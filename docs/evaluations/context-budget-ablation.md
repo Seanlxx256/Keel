@@ -41,6 +41,46 @@ This separates two bottlenecks: T1 can recover more evidence by emitting more
 candidates, while T2 also needs better evidence selection. Merely increasing
 time, call or token limits would not alter these already-completed selections.
 
+## Line-budget-normalized recall, audited from saved records
+
+For each task let N be deduplicated gold/core lines, B the total line budget,
+H the correctly retrieved unique lines, and P emitted unique lines. The relaxed
+line-count recall bound is U = min(B, N) / N. Normalized recall is
+(H/N) / U = H / min(B, N). Average this ratio within tasks before averaging tasks;
+do not divide mean recall by mean ceiling or substitute an average gold size.
+
+Code-aware T1, B=100 and symbol cap 32:
+
+| Task | Gold lines N | Line-count bound U | Actual recall | Fraction of bound |
+| --- | ---: | ---: | ---: | ---: |
+| Flask 5014 | 626 | 15.97% | 3.19% | 20.00% |
+| Requests 1724 | 1,385 | 7.22% | 4.62% | 64.00% |
+| Seaborn 3069 | 2,627 | 3.81% | 1.67% | 44.00% |
+
+Equal-task mean fraction: **42.67%** (RRF T1: **14.33%**). These are three
+development tasks, not a general benchmark or confidence estimate.
+
+At symbol cap 32, fixed-ranking replay gives:
+
+| Total budget | Mean recall | Mean fraction of line-count bound | Mean correct lines |
+| --- | ---: | ---: | ---: |
+| 100 | 3.16% | 42.67% | 42.67 |
+| 300 | 6.22% | 26.44% | 79.33 |
+| 500 | 9.28% | 21.80% | 109.00 |
+
+The additional 200 lines from 100 to 300 yield 36.67 more correct lines on
+average (18.33% marginal yield); the next 200 yield 29.67 (14.83%). This supports
+diminishing line-budget yield in this saved sample. It does not establish a
+live T1-to-T2 escalation threshold, token cost or downstream repair improvement.
+
+Here all N exceed B and T1 uses the full output budget (P=B), so normalized
+recall H/B is **exactly line precision H/P**. More generally with N>=B it equals
+precision times budget utilization P/B. It is a useful alternate interpretation,
+not a second independent performance improvement. Gold regions are broad and
+do not prove exact edit localization. The bound ignores candidate availability,
+symbol prefix caps and packing restrictions; call it a relaxed line-count bound,
+not an achievable oracle or a demonstrated maximum for this retriever.
+
 ## Scope
 
 Source configurations must have completed all repetitions; successful repetitions
