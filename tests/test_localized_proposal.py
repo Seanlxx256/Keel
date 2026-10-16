@@ -3,6 +3,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from keel.models import Reply
 from keel.runtime import run
 
@@ -19,6 +20,17 @@ class Model:
 
 
 class LocalizedProposalTests(unittest.TestCase):
+    def test_installed_contracts_reach_patch_request_without_becoming_edit_instructions(self):
+        model = Model({'files': ['module.py'], 'locations': ['module.py:1']})
+        evidence = [{'distribution': 'fixture', 'version': '1', 'signatures': ['def Pool.send(self, extensions)']}]
+        config = {**self.config, 'localization_dependencies': [
+            {'module': 'fixture', 'distribution': 'fixture', 'version': '1'}]}
+        with patch('keel.dependency_evidence.collect_for_localization', return_value=evidence) as collector:
+            result = run(config, self.root, self.root/'.keel/contracts', model=model)
+        self.assertEqual(result['status'], 'passed')
+        collector.assert_called_once()
+        self.assertEqual(json.loads(model.messages[2][1]['content'])['installed_dependency_evidence'], evidence)
+        self.assertIn('untrusted reference data', model.messages[2][0]['content'])
     def test_combined_symbol_map_reaches_patch_without_dropping_selected_files(self):
         names = ['module.py']
         for index in range(4):

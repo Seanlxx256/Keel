@@ -69,6 +69,11 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
         validate_scope(config.get('proposal'))
     if localized_mode and 'proposal' in config:
         raise ValueError('localized-proposal selects its own scope; omit proposal')
+    if 'localization_dependencies' in config:
+        from .dependency_evidence import validate_modules
+        if not localized_mode:
+            raise ValueError('localization_dependencies requires localized-proposal mode')
+        validate_modules(config['localization_dependencies'])
     if (agent_mode or proposal_mode) and ordered:
         raise ValueError("Agent mode generates its own plan; omit work_items")
     settings = config.get("agent", {})
@@ -147,6 +152,9 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
                     else collect_evidence(workspace, proposal_scope))
                 from .dependency_evidence import collect
                 proposal_dependencies = collect(workspace, proposal_scope.get('dependencies', []))
+                if localized_mode and config.get('localization_dependencies'):
+                    from .dependency_evidence import collect_for_localization
+                    proposal_dependencies = collect_for_localization(workspace, proposal_scope, config['localization_dependencies'])
             else:
                 impact, scout_session = inspect_repository(config, model, workspace)
         for query in config.get("queries", []):

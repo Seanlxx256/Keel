@@ -8,10 +8,50 @@ from types import SimpleNamespace
 import unittest
 
 from keel.core import Budget, Ledger, Limits, PolicyDenied, Trace
-from keel.dependency_evidence import SCAN, collect, validate_requests
+from keel.dependency_evidence import SCAN, collect, validate_requests, referenced_calls, compact_contracts
 
 
 class DependencyEvidenceTests(unittest.TestCase):
+    def test_projection_preserves_public_contracts_and_declares_private_omissions(self):
+        records = [{'symbol': symbol, 'signature': signature, 'signature_truncated': False}
+            for symbol, signature in [('Pool.send', 'def Pool.send(self, *, extensions)'),
+                ('Pool.__init__', 'def Pool.__init__(self)'), ('Pool._internal', 'def Pool._internal(self)')]]
+        payload = {'distribution': 'fixture', 'version': '1', 'records': records,
+            'inventory_sha256': 'a'*64, 'scope': 'Static only'}
+        projected = compact_contracts([payload])[0]
+        self.assertEqual(projected['signatures'], [r['signature'] for r in records[:2]])
+        self.assertEqual(projected['private_records_omitted'], 1)
+        records[0]['signature_truncated'] = True
+        with self.assertRaises(ValueError):
+            compact_contracts([payload])
+    def test_api_requests_come_from_observed_import_calls_not_repair_hints(self):
+        text = 'import fixture_api as api\nfrom fixture_api import Pool as P\nfrom other import NotOurs\nx=api.Pool()\ny=P()\nz=api.Stream()\nNotOurs()\nx.send()\n'
+        self.assertEqual(referenced_calls(text, 'fixture_api'), ['Pool', 'Stream'])
+        self.assertNotIn('send', referenced_calls(text, 'fixture_api'))
+        with self.assertRaises(ValueError):
+            referenced_calls(text, '../escape')
+
+    def test_direct_methods_include_real_signatures_without_importing_package(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.fixture(root)
+            (root/'fixture_api/thread.py').write_text(
+                'class Pool:\n'
+                '    def send(self, url, *, extensions=None):\n        raise RuntimeError("not executed")\n'
+                '    async def receive(self, *, timeout=1):\n        raise RuntimeError("not executed")\n')
+            request = {**self.request(), 'symbols': ['Pool'], 'include_methods': True}
+            result = self.scan(root, request)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            records = json.loads(result.stdout)['records']
+            self.assertEqual([r['symbol'] for r in records], ['Pool', 'Pool.send', 'Pool.receive'])
+            self.assertIn('extensions=None', records[1]['signature'])
+            self.assertTrue(records[2]['signature'].startswith('async def'))
+            self.assertTrue(all(len(r['source_sha256']) == 64 for r in records))
+            result = self.scan(root, {**request, 'include_methods': False})
+            self.assertEqual([r['symbol'] for r in json.loads(result.stdout)['records']], ['Pool'])
+        with self.assertRaises(ValueError):
+            validate_requests([{**self.request(), 'include_methods': 1}])
+
     def test_collector_charges_budget_archives_execution_and_checks_identity(self):
         with tempfile.TemporaryDirectory() as directory, ExitStack() as resources:
             root = Path(directory)
