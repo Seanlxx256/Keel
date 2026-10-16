@@ -10,6 +10,24 @@ from tests.test_httpx_1588 import matrix
 
 
 class TrialTests(unittest.TestCase):
+    def test_baseline_feedback_is_observed_bounded_data_without_reference_hints(self):
+        baseline = matrix()['base_new']
+        payload = json.loads(baseline['stdout'])
+        payload['records'][0]['traceback'] = 'SECRET_REFERENCE_PATCH'
+        baseline['stdout'] = json.dumps(payload)
+        observation = runner.baseline_observations(baseline)
+        self.assertEqual(len(observation['cases']), 4)
+        self.assertIn('request', observation['cases'][0]['message'])
+        self.assertNotIn('SECRET_REFERENCE_PATCH', json.dumps(observation))
+        self.assertNotIn('handle_request', json.dumps(observation))
+        payload['records'][0]['message'] = 'x'*500
+        baseline['stdout'] = json.dumps(payload)
+        self.assertTrue(runner.baseline_observations(baseline)['cases'][0]['message_truncated'])
+        del payload['records'][0]['message']
+        baseline['stdout'] = json.dumps(payload)
+        with self.assertRaises(ValueError):
+            runner.baseline_observations(baseline)
+
     def test_prepare_freezes_strategy_without_model_calls_or_operator_localization(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -29,9 +47,13 @@ class TrialTests(unittest.TestCase):
                     runner, 'implementation_hashes', return_value={}), patch.object(runner, 'from_config') as factory:
                 for strategy in ('agent', 'localized-proposal'):
                     output = root/strategy
-                    frozen = runner.prepare(root, package, model, output, strategy=strategy)
+                    frozen = runner.prepare(root, package, model, output, strategy=strategy, baseline_feedback=True,
+                        require_change=True)
                     self.assertEqual(frozen['strategy'], strategy)
                     self.assertEqual(frozen['config']['mode'], strategy)
+                    self.assertTrue(frozen['config']['agent']['require_change'])
+                    self.assertTrue(frozen['baseline_feedback'])
+                    self.assertEqual(frozen['baseline_feedback_policy'], 'case-errors-v1')
                     self.assertNotIn('proposal', frozen['config'])
                     self.assertNotIn('work_items', frozen['config'])
                     self.assertEqual(frozen['config']['budget']['max_model_calls'], 30)

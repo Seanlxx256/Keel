@@ -28,6 +28,38 @@ def plan(files=None):
 
 
 class AgentTests(unittest.TestCase):
+    def test_required_change_returns_feedback_then_accepts_real_edit(self):
+        result, model = self.execute([
+            self.impact(), plan(),
+            {'tool': 'read_file', 'arguments': {'path': 'app.py'}},
+            {'final': 'I will inspect and edit next'},
+            {'tool': 'replace', 'arguments': {'path': 'app.py', 'old': 'VERSION = 1', 'new': 'VERSION = 2'}},
+            {'final': 'Updated'}], config={**self.config,
+                'agent': {'max_steps': 4, 'require_change': True}})
+        self.assertEqual(result['status'], 'passed')
+        feedback = json.loads(model.calls[4][-1]['content'])
+        self.assertFalse(feedback['ok'])
+        self.assertIn('nonempty net source change', feedback['error'])
+        self.assertEqual(result['budget']['model_calls'], 6)
+
+    def test_edit_then_revert_cannot_satisfy_required_change(self):
+        result, _ = self.execute([
+            self.impact(), plan(),
+            {'tool': 'replace', 'arguments': {'path': 'app.py', 'old': 'VERSION = 1', 'new': 'VERSION = 2'}},
+            {'tool': 'replace', 'arguments': {'path': 'app.py', 'old': 'VERSION = 2', 'new': 'VERSION = 1'}},
+            {'final': 'Done'}], config={**self.config, 'agent': {'max_steps': 3, 'require_change': True}})
+        self.assertEqual(result['failure']['category'], 'budget_exhausted')
+        self.assertEqual(result['failure']['stage'], 'implementer')
+        self.assertEqual(result['verification'], [])
+        self.assertEqual((self.repo/'app.py').read_text(), 'VERSION = 1\n')
+
+    def test_no_change_task_remains_valid_when_change_not_required(self):
+        config = {**self.config, 'goal': 'Inspect current version',
+            'acceptance': [[sys.executable, '-c', 'import app; assert app.VERSION == 1']],
+            'agent': {'require_change': False}}
+        result, _ = self.execute([self.impact(), plan(), {'final': 'No source changes needed'}], config=config)
+        self.assertEqual(result['status'], 'passed')
+
     def test_oversized_read_continuation_then_edit_reaches_verifier(self):
         (self.repo/'app.py').write_bytes(('# padding\n'*90+'VERSION = 1\n').encode())
         result, model = self.execute([

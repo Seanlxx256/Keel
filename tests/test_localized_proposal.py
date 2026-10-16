@@ -19,6 +19,25 @@ class Model:
 
 
 class LocalizedProposalTests(unittest.TestCase):
+    def test_combined_symbol_map_reaches_patch_without_dropping_selected_files(self):
+        names = ['module.py']
+        for index in range(4):
+            name = f'component_{index}.py'
+            names.append(name)
+            (self.root/name).write_bytes(''.join(
+                f'def operation_{number:03}(value):\n    return value\n\n' for number in range(60)).encode())
+        model = Model({'files': names, 'locations': ['module.py:1']})
+        result = run(self.config, self.root, self.root/'.keel/combined', model=model)
+        self.assertEqual(result['status'], 'passed')
+        structure = json.loads(model.messages[1][1]['content'])['structure']
+        self.assertEqual([r['path'] for r in structure], names)
+        self.assertEqual(sum(len(r['symbols']) for r in structure), 241)
+        events = [json.loads(line) for line in (self.root/'.keel/combined/trace.jsonl').read_text().splitlines()]
+        anchor = [e for e in events if e.get('localization_stage') == 'anchor-selection']
+        self.assertEqual(len(anchor), 1)
+        self.assertLessEqual(anchor[0]['input_bytes'], 12000)
+        self.assertEqual(result['budget']['model_calls'], 3)
+
     def test_compact_symbol_map_preserves_every_name_line_and_nested_duplicate(self):
         import ast
         from keel.localization import symbol_structure

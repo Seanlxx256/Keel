@@ -42,3 +42,27 @@ proposal (13) and runner (4) tests pass: 27 relevant tests. It is not a new live
 repair result. The selected patch contexts can still exceed the cap, and another
 model file choice can produce a different combined-map size. No silent exclusions,
 new permissions, default-mode replacement or overall runtime-success claim.
+
+## Bounded follow-up after combined-map regression
+
+A synthetic integration test now selects five files containing 241 definitions,
+asserts that every selected file and definition remains in the anchor request,
+then generates a patch and passes a real local verifier. The full anchor request
+must fit 12KB and all three model calls are charged. This guards the combined-map
+case rather than relying only on individual-file tests. Scripted model choices
+do not establish live-model quality.
+
+Localization (8), runner (4) and exact-source (2) tests passed. The saved real
+five-file capacity replay remains 7,318 bytes; no gold-based file reduction or
+task-specific repair rule was added.
+
+Next preparation: `.keel/transition-trials/httpx-1588-localized-compact-v1`.
+Same task, base, model settings, 12KB cap, verifier and global budget. It is an
+observed development case, not an independent task or a default-mode comparison.
+Normal execution uses file choice, exact-location choice and patch generation;
+request overflow or invalid output terminates without an automatic paid retry.
+All outcomes must be analyzed before considering another run.
+
+```powershell
+python examples/run_transition_task.py --output .keel/transition-trials/httpx-1588-localized-compact-v1 --execute
+```
