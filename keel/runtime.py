@@ -60,12 +60,15 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
     if type(mutation_samples) is not int or not 0 <= mutation_samples <= 20:
         raise ValueError("mutation_samples must be an integer from 0 to 20")
     agent_mode = config.get("mode", "explicit") == "agent"
-    proposal_mode = config.get('mode') == 'proposal'
-    if config.get("mode", "explicit") not in {"explicit", "agent", "proposal"}:
-        raise ValueError("mode must be explicit, agent or proposal")
-    if proposal_mode:
+    localized_mode = config.get('mode') == 'localized-proposal'
+    proposal_mode = config.get('mode') in {'proposal', 'localized-proposal'}
+    if config.get("mode", "explicit") not in {"explicit", "agent", "proposal", "localized-proposal"}:
+        raise ValueError("mode must be explicit, agent, proposal or localized-proposal")
+    if proposal_mode and not localized_mode:
         from .proposals import validate_scope
         validate_scope(config.get('proposal'))
+    if localized_mode and 'proposal' in config:
+        raise ValueError('localized-proposal selects its own scope; omit proposal')
     if (agent_mode or proposal_mode) and ordered:
         raise ValueError("Agent mode generates its own plan; omit work_items")
     settings = config.get("agent", {})
@@ -108,8 +111,9 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
     initial, specs, impact, scout_session = {}, [], None, None
     proposal_evidence = []
     proposal_dependencies = []
+    proposal_scope = config.get('proposal', {})
     def scout_phase():
-        nonlocal initial, specs, model, impact, scout_session, proposal_evidence, proposal_dependencies
+        nonlocal initial, specs, model, impact, scout_session, proposal_evidence, proposal_dependencies, proposal_scope
         enter_role("scout")
         initial = workspace.snapshot()
         workspace.runner.check_available()
@@ -135,10 +139,13 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
             model = model if model is not None else from_config(config.get("model", {}))
             workspace.retrieval_model = model
             if proposal_mode:
+                if localized_mode:
+                    from .localization import localize
+                    proposal_scope = localize(model, workspace, config['goal'], settings)
                 from .proposals import collect_evidence
-                proposal_evidence = collect_evidence(workspace, config['proposal'])
+                proposal_evidence = collect_evidence(workspace, proposal_scope)
                 from .dependency_evidence import collect
-                proposal_dependencies = collect(workspace, config['proposal'].get('dependencies', []))
+                proposal_dependencies = collect(workspace, proposal_scope.get('dependencies', []))
             else:
                 impact, scout_session = inspect_repository(config, model, workspace)
         for query in config.get("queries", []):
@@ -155,7 +162,7 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
             ordered = validate({**config, "work_items": generated})
         elif proposal_mode:
             ordered = [{'id': 'localized-repair', 'description': config['goal'],
-                        'files': config['proposal']['files']}]
+                        'files': proposal_scope['files']}]
         plan_id = ledger.add("decision", "planner", "Validated task DAG", ordered)
         trace.emit("planner", "plan_ready", fact_id=plan_id, items=len(ordered))
         # Validate every target before making the first mutation.

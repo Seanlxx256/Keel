@@ -61,3 +61,52 @@ No tests were changed or skipped to conceal those failures. Recheck those two
 suites from the user's ordinary terminal before declaring the full suite green.
 The new offline diagnostics test passed, including read-only ledger preservation
 and classification of rejected edits separately from completed tool actions.
+
+The user subsequently ran both affected suites from the ordinary activated
+terminal: `test_mcp_client.py` passed all 5 tests in 2.844 seconds;
+`test_validation.py` passed all 3 tests in 2.211 seconds, including both previously
+nonpassing live-SDK checks. This resolves those checks in the user environment.
+It is a split verification (334 full-suite passes plus targeted user reruns),
+not a claim that a new single full-suite invocation passed all 336 tests.
+
+## Bounded next diagnostic run
+
+After the offline regression and ordinary-terminal MCP verification, prepare
+`.keel/transition-trials/httpx-1588-post-regression`. No new prompts, model
+settings, budget increases or task-specific source hints are introduced.
+The purpose is to test the current existing-tool pagination and role feedback,
+with at most 450 runtime seconds / 30 model calls / 60 tools / 180,000 tokens
+and 12 turns per role. Baseline remains a separate 90-second check.
+
+```powershell
+python examples/run_transition_task.py --output .keel/transition-trials/httpx-1588-post-regression --execute
+```
+
+Do not repeat this preparation after failure or count it as an independent task.
+Whether it passes or fails, analyze the saved evidence without another paid call.
+If editing is still not attempted, stop tweaking this task and proceed to a
+controlled simple-versus-multirole design with equivalent tool/source access.
+
+## Post-regression result: intention returned as completion
+
+The user executed the bounded preparation. It failed verification after 8 model
+calls, 15,044 tokens and 56.281 runtime seconds; changed files were empty.
+Offline analysis is `.keel/transition-trial-post-regression-analysis.json`.
+
+Scout listed/searched and identified six potential files. Planner returned one
+work item. Implementer listed files, searched `httpcore`, then returned a final
+string saying it would inspect and make minimal edits. It did not read source
+body windows or call `replace`. All four verifier cases reproduced the original
+missing `request`/`arequest` errors. This is still `no_edit_attempt`, not a failed
+patch. Verification correctly refused the unchanged source.
+
+The current observation gate accepts a successful list/search as evidence and
+does not require an edit receipt before an Implementer final. That is an observed
+contract limitation, not evidence that the migration cannot be solved by the
+model. A universal mandatory-edit rule would also be inappropriate for tasks
+whose correct outcome requires no changes; any future rule needs an explicit
+task completion contract. Do not infer completion from wording alone.
+
+As predeclared, stop paid HTTPX prompt/contract iteration here. Retain this fifth
+model-executed failure and the earlier pre-model environment failure. Timing and
+token reductions across these changing implementations are not performance wins.
