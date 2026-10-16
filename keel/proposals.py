@@ -65,6 +65,45 @@ def collect_evidence(workspace, scope):
     return evidence
 
 
+def located_source_evidence(name, text, positions):
+    """Complete selected definitions plus file preamble, no substring matching."""
+    if not isinstance(positions, list) or not positions or any(type(p) is not int for p in positions):
+        raise ValueError('Definition positions must be a nonempty integer list')
+    tree = ast.parse(text, filename=name)
+    definitions = {node.lineno: node for node in ast.walk(tree)
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))}
+    if not set(positions) <= definitions.keys():
+        raise ValueError('Selected position is not a definition')
+    lines = text.splitlines(keepends=True)
+    spans = [(0, min(40, len(lines)))]
+    for position in positions:
+        node = definitions[position]
+        start = min([node.lineno] + [d.lineno for d in node.decorator_list]) - 1
+        spans.append((start, node.end_lineno))
+    merged = []
+    for start, end in sorted(spans):
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    return {'path': name, 'sha256': hashlib.sha256(text.encode()).hexdigest(), 'total_lines': len(lines),
+        'windows': [{'start_line': a+1, 'end_line': b, 'text': ''.join(lines[a:b])} for a, b in merged]}
+
+
+def collect_located_evidence(workspace, scope):
+    evidence = []
+    for name in scope['files']:
+        workspace.path(name, write=True)
+        text = workspace.read(name, role='scout')['value']
+        if hashlib.sha256(text.encode()).hexdigest() != scope['source_sha256'][name]:
+            raise PolicyDenied('Source changed after symbol localization')
+        payload = located_source_evidence(name, text, scope['locations'][name])
+        fact = workspace.ledger.add('file', 'scout', 'Located definition evidence', payload)
+        workspace.trace.emit('scout', 'proposal_evidence', fact_id=fact, windows=len(payload['windows']), selection='definition-position')
+        evidence.append(payload)
+    return evidence
+
+
 def proposal_request(goal, files, evidence, settings, *, structured=True, dependencies=None):
     schema = {'type': 'object', 'properties': {
         'edits': {'type': 'array', 'minItems': 1, 'maxItems': 8, 'items': {

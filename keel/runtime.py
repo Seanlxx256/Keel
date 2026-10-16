@@ -142,8 +142,9 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
                 if localized_mode:
                     from .localization import localize
                     proposal_scope = localize(model, workspace, config['goal'], settings)
-                from .proposals import collect_evidence
-                proposal_evidence = collect_evidence(workspace, proposal_scope)
+                from .proposals import collect_evidence, collect_located_evidence
+                proposal_evidence = (collect_located_evidence(workspace, proposal_scope) if localized_mode
+                    else collect_evidence(workspace, proposal_scope))
                 from .dependency_evidence import collect
                 proposal_dependencies = collect(workspace, proposal_scope.get('dependencies', []))
             else:

@@ -3,6 +3,12 @@
 Status: offline-tested prototype, now file-first hierarchical localization.
 No live-model success or comparative gain.
 
+Symbol structure format is now grouped by file: each file has one path and a
+list of `[definition_line, name]` pairs. Exact location IDs are reconstructed as
+`path:line` and validated against that complete shown set. Names/lines, including
+nested and duplicate names, are retained; repeated per-symbol path fields are
+removed. This does not add function bodies or prove understanding of the code.
+
 Design research inspected Agentless's
 [localization module](https://github.com/OpenAutoCoder/Agentless/blob/main/agentless/fl/FL.py)
 and [repair context construction](https://github.com/OpenAutoCoder/Agentless/blob/main/agentless/repair/repair.py)
@@ -20,11 +26,14 @@ model, budget, execution and acceptance settings remain applicable.
 1. Scout lists writable Python source paths, excluding protected targets, and
    asks the model to select 1..8 exact files. No source bodies are read yet.
 2. Only selected files are read for AST class/function names and line numbers.
-   A second model request chooses a subset of those files and 1..8 literal
-   query anchors. Reads use ordinary permissions, size caps and accounting.
-   Schema, exact fields, types, scope membership and at least one matching anchor
-   per file are checked. No fuzzy path correction or guessed query replacement.
-3. The host collects windows with the existing proposal evidence constructor.
+   A second model request chooses 1..8 exact `path:definition_line` identifiers
+   shown in that structure. Reads use ordinary permissions, caps and accounting.
+   Schema, exact fields, types and membership in the shown symbol locations are
+   checked. No guessed paths/lines or fuzzy matching. The selected source hashes
+   are checked again before collecting evidence.
+3. The host collects the file's first 40 lines plus complete selected definitions,
+   including decorators, merging overlapping spans. It does not substring-match
+   names. Operator-localized proposal mode retains its original query behavior.
    Planner records a single deterministic work item for that selected scope.
 4. Implementer uses the existing one-call exact replacement proposal path. Batch
    validation happens before writes, followed by ordinary Verifier, Auditor and
@@ -77,8 +86,15 @@ preflight. Together with proposal (13), Agent (26) and native/LangGraph
 orchestration (13) tests: 58 tests passed.
 These are component/integration checks, not real-model repair results.
 
-Normal successful execution now has **three model requests**: file selection,
-anchor selection and patch generation. Each consumes the same global budget.
+Normal successful execution has **three model requests**: file selection,
+definition-location selection and patch generation. Each consumes the same global budget.
 The second stage may narrow but cannot expand the first stage's scope. This is
 an explicit cost/behavior change in an opt-in mode, not an unchanged two-call
 implementation. Default multirole and operator-localized proposal modes remain.
+
+The [downstream capacity audit](evaluations/localized-context-capacity.md)
+retains the name-anchor baseline (610 of 651 fit) and exact-definition variant
+(937 of 937 individually fit). Counts differ because methods with identical
+names were previously one query per file and are now separate definitions.
+No live repair gain, equal-information compression or guaranteed multi-symbol
+capacity follows. Do not tune this path against known HTTPX repair outcomes.

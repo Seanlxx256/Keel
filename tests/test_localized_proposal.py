@@ -13,12 +13,25 @@ class Model:
 
     def complete_json(self, messages, **kwargs):
         self.messages.append(messages)
-        value = ({'files': self.scope.get('files', [])} if len(self.messages) == 1 else self.scope) if len(self.messages) <= 2 else {
+        value = ({'files': self.scope.get('files', [])} if len(self.messages) == 1 else {k: v for k, v in self.scope.items() if k != 'files'}) if len(self.messages) <= 2 else {
             'edits': [{'path': 'module.py', 'old': 'return 1', 'new': 'return 2'}], 'summary': 'Update version'}
         return Reply(json.dumps(value), 100)
 
 
 class LocalizedProposalTests(unittest.TestCase):
+    def test_compact_symbol_map_preserves_every_name_line_and_nested_duplicate(self):
+        import ast
+        from keel.localization import symbol_structure
+        text = 'class A:\n    def get(self):\n        def inner(): pass\n        return inner()\nclass B:\n    async def get(self): pass\n'
+        tree = ast.parse(text)
+        expected = [(n.lineno, n.name) for n in ast.walk(tree)
+            if isinstance(n, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))]
+        result = symbol_structure('pkg/a.py', text)
+        self.assertEqual(result['path'], 'pkg/a.py')
+        self.assertEqual([tuple(v) for v in result['symbols']], expected)
+        self.assertEqual(sum(name == 'get' for _, name in result['symbols']), 2)
+        self.assertNotIn('location', json.dumps(result))
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -30,7 +43,7 @@ class LocalizedProposalTests(unittest.TestCase):
             'acceptance': [[sys.executable, '-c', 'import module; assert module.version() == 2']]}
 
     def test_model_localizes_then_existing_proposal_verifier_and_auditor_execute(self):
-        model = Model({'files': ['module.py'], 'queries': ['def version']})
+        model = Model({'files': ['module.py'], 'locations': ['module.py:1']})
         result = run(self.config, self.root, self.root/'.keel/run', model=model)
         self.assertEqual(result['status'], 'passed')
         self.assertEqual(result['budget']['model_calls'], 3)
@@ -45,9 +58,9 @@ class LocalizedProposalTests(unittest.TestCase):
 
     def test_invalid_localization_never_reaches_patch_call(self):
         for index, scope in enumerate([
-            {'files': ['../outside.py'], 'queries': ['version']},
-            {'files': ['module.py'], 'queries': ['missing anchor']},
-            {'files': ['module.py'], 'queries': ['version'], 'extra': True}]):
+            {'files': ['../outside.py'], 'locations': ['module.py:1']},
+            {'files': ['module.py'], 'locations': ['module.py:999']},
+            {'files': ['module.py'], 'locations': ['module.py:1'], 'extra': True}]):
             with self.subTest(scope=scope):
                 model = Model(scope)
                 result = run(self.config, self.root, self.root/f'.keel/run-{index}', model=model)
@@ -58,7 +71,7 @@ class LocalizedProposalTests(unittest.TestCase):
 
     def test_operator_scope_is_rejected_and_context_cap_cannot_silently_truncate(self):
         with self.assertRaises(ValueError):
-            run({**self.config, 'proposal': {'files': ['module.py'], 'queries': ['version']}},
+            run({**self.config, 'proposal': {'files': ['module.py'], 'locations': ['module.py:1']}},
                 self.root, self.root/'.keel/invalid')
         model = Model({})
         result = run({**self.config, 'agent': {'max_context_bytes': 20}},
@@ -68,7 +81,7 @@ class LocalizedProposalTests(unittest.TestCase):
 
     def test_unselected_large_file_is_not_scanned_for_symbols(self):
         (self.root/'unrelated.py').write_bytes(('def unrelated():\n    pass\n'+'# large padding\n'*5000).encode())
-        model = Model({'files': ['module.py'], 'queries': ['def version']})
+        model = Model({'files': ['module.py'], 'locations': ['module.py:1']})
         result = run(self.config, self.root, self.root/'.keel/selected', model=model)
         self.assertEqual(result['status'], 'passed')
         self.assertIn('unrelated.py', json.loads(model.messages[0][1]['content'])['paths'])
@@ -79,14 +92,28 @@ class LocalizedProposalTests(unittest.TestCase):
         class Expanding(Model):
             def complete_json(self, messages, **kwargs):
                 self.messages.append(messages)
-                value = {'files': ['module.py']} if len(self.messages) == 1 else {'files': ['other.py'], 'queries': ['def other']}
+                value = {'files': ['module.py']} if len(self.messages) == 1 else {'locations': ['other.py:1']}
                 return Reply(json.dumps(value), 100)
         model = Expanding({})
         result = run(self.config, self.root, self.root/'.keel/expanded', model=model)
         self.assertEqual(result['failure']['category'], 'model_error')
         self.assertEqual(len(model.messages), 2)
-        model = Model({'files': ['module.py'], 'queries': ['def version']})
+        model = Model({'files': ['module.py'], 'locations': ['module.py:1']})
         config = {**self.config, 'budget': {**self.config['budget'], 'max_model_calls': 1}}
         result = run(config, self.root, self.root/'.keel/budgeted', model=model)
         self.assertEqual(result['failure']['category'], 'budget_exhausted')
         self.assertEqual(len(model.messages), 1)
+
+    def test_source_changed_during_selection_is_rejected_before_patch(self):
+        target = self.root/'module.py'
+        class Mutating(Model):
+            def complete_json(self, messages, **kwargs):
+                reply = super().complete_json(messages, **kwargs)
+                if len(self.messages) == 2:
+                    target.write_bytes(b'def version():\n    return 7\n')
+                return reply
+        model = Mutating({'files': ['module.py'], 'locations': ['module.py:1']})
+        result = run(self.config, self.root, self.root/'.keel/stale', model=model)
+        self.assertEqual(result['status'], 'failed')
+        self.assertIn('Source changed', result['failure']['message'])
+        self.assertEqual(len(model.messages), 2)

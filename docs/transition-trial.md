@@ -143,6 +143,41 @@ edits or verification; a new test covers a corrected plan in the same session.
 The next development preparation is `httpx-1588-planner-feedback`. It retains
 the same task, model settings and budgets. No live improvement is yet measured.
 
+## Optional hierarchical proposal diagnostic
+
+After offline capacity checks, the runner accepts preparation-only
+`--strategy localized-proposal`; the default remains `agent`. Execution uses
+the strategy frozen in prepared.json and rejects a runtime override. This is
+a staged localization/patch pipeline diagnostic, not the equal-access
+single-session comparison described in agent-comparison-plan.md.
+
+Prepare a new directory (already prepared locally as `httpx-1588-localized-v1`):
+
+```powershell
+python examples/run_transition_task.py --package .keel/task-packages/httpx-1588-v1 --model-config .keel/model-openai.json --strategy localized-proposal --output .keel/transition-trials/httpx-1588-localized-v1
+```
+
+Execute once:
+
+```powershell
+python examples/run_transition_task.py --output .keel/transition-trials/httpx-1588-localized-v1 --execute
+```
+
+Base source, goal, model configuration, verifier/image, audit and global budgets
+are unchanged. Normal staged execution has three model requests (file selection,
+exact definition selection, patch); malformed selections or source/cap failures
+terminate without a hidden model retry. Multi-selection context can still
+overflow. No reference patch or curator file location is provided.
+
+Final results include strategy and explicit checks for runtime success, nonempty
+source-scoped diff, acceptance and model calls. Old artifacts stay untouched.
+Freeze checks and exclusive execution markers still apply. A pass would support
+this one development task only, not orchestration superiority or benchmark
+readiness. A failure remains recorded; do not immediately tune and rerun.
+
+Four runner tests, six localized-proposal integration tests and two exact-source
+tests pass. No live outcome for this new preparation is claimed.
+
 ## Planner-feedback trial: persistent read friction
 
 That trial failed in Implementer without changes: 19 model calls, 41,706 tokens,

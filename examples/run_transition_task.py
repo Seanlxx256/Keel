@@ -29,7 +29,9 @@ def load_package(package):
     return manifest, task
 
 
-def prepare(root, package, model_file, output):
+def prepare(root, package, model_file, output, *, strategy='agent'):
+    if strategy not in {'agent', 'localized-proposal'}:
+        raise ValueError('Unknown transition strategy')
     manifest, task = load_package(package)
     model = json.loads(model_file.read_text(encoding='utf-8'))
     from_config(model)  # Validate only, no credentials or network.
@@ -40,6 +42,7 @@ def prepare(root, package, model_file, output):
     if inventory(snapshot) != manifest['curator_receipt']['base_inventory']:
         raise ValueError('Base snapshot inventory mismatch')
     config = task_config(manifest['acceptance']['image'], max_seconds=450)
+    config['mode'] = strategy
     config['model'] = model
     config['goal'] = task['goal']+' Modify only existing Python files under httpx/. Search the repository to locate the implementation.'
     config['agent']['max_steps'] = 12
@@ -48,7 +51,7 @@ def prepare(root, package, model_file, output):
     shutil.copytree(snapshot, output/'repo', ignore=shutil.ignore_patterns('.git', '.compass', '.keel'))
     if inventory(output/'repo') != manifest['curator_receipt']['base_inventory']:
         raise ValueError('Copied source inventory mismatch')
-    frozen = {'task_id': task['id'], 'config': config, 'source': inventory(output/'repo'),
+    frozen = {'task_id': task['id'], 'strategy': strategy, 'config': config, 'source': inventory(output/'repo'),
         'acceptance': manifest['acceptance'], 'package_sha256': file_hash(package/'manifest.json'),
         'implementation': implementation_hashes(root), 'attempt': 1, 'benchmark_ready': False,
         'scope': 'Single package trial, not a repository-disjoint benchmark result'}
@@ -93,6 +96,7 @@ def execute(root, output):
     with (output/'execution-started.json').open('x', encoding='utf-8') as stream:
         json.dump({'attempt': 1, 'started_unix': time.time()}, stream)
     report = {'task_id': frozen['task_id'], 'attempt': 1, 'executed': False, 'passed': False,
+        'strategy': frozen.get('strategy', frozen.get('config', {}).get('mode', 'agent')),
         'status': 'running', 'benchmark_ready': False, 'prepared_sha256': file_hash(output/'prepared.json')}
     def save():
         (output/'results.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
@@ -121,9 +125,11 @@ def execute(root, output):
         changed = sorted(n for n in after.keys() | frozen['source'].keys() if after.get(n) != frozen['source'].get(n))
         scoped = bool(changed) and all(n in frozen['source'] and n.startswith('httpx/') and n.endswith('.py') for n in changed)
         verification = result.get('verification', [])
+        checks = {'runtime_passed': result['status'] == 'passed', 'nonempty_scoped_diff': scoped,
+            'acceptance_passed': len(verification) == 1 and accepted(verification[0], frozen['acceptance']),
+            'real_model_calls': result['budget']['model_calls'] > 0}
         report.update(status='completed', changed_files=changed, failure=result['failure'], budget=result['budget'],
-            passed=result['status'] == 'passed' and scoped and len(verification) == 1 and
-            accepted(verification[0], frozen['acceptance']))
+            checks=checks, passed=all(checks.values()))
     except Exception as error:
         report.update(status='runtime_error' if report['executed'] else 'environment_error', error=f'{type(error).__name__}: {error}')
     finally:
@@ -139,17 +145,18 @@ def main():
     parser.add_argument('--model-config', type=Path)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--execute', action='store_true')
+    parser.add_argument('--strategy', choices=['agent', 'localized-proposal'], help='Preparation only; default agent')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     if args.execute:
-        if args.package or args.model_config:
+        if args.package or args.model_config or args.strategy:
             parser.error('Execute uses existing prepared output only')
         report = execute(root, args.output)
     else:
         if not args.package or not args.model_config:
             parser.error('Preparation requires --package and --model-config')
-        prepare(root, args.package, args.model_config, args.output)
-        report = {'status': 'prepared_only', 'executed': False, 'benchmark_ready': False}
+        prepare(root, args.package, args.model_config, args.output, strategy=args.strategy or 'agent')
+        report = {'status': 'prepared_only', 'strategy': args.strategy or 'agent', 'executed': False, 'benchmark_ready': False}
     print(json.dumps(report, indent=2))
     return 1 if args.execute and not report['passed'] else 0
 
