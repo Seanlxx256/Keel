@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from examples.swebench_bridge import grade
 from keel.evaluation_protocol import file_hash
 from keel.swebench import verify_task
+from keel.verification_feedback import failure_feedback
 
 
 def workspace_patch(repo, task):
@@ -41,17 +42,22 @@ def verify(repo, task_dir, output, harness_python, timeout=600):
         result = grade(task_dir, export, output/'grading', python=harness_python, timeout=timeout)
     feedback = {'official_resolved': result['official_resolved'], 'grading_status': result['status'],
                 'error': result.get('error')}
+    feedback['failure_kind'] = ('none' if result['official_resolved'] is True else
+                                'test_failure' if result['status'] == 'graded' else 'grading_error')
+    if 'TimeoutExpired' in str(result.get('error', '')):
+        feedback['failure_kind'] = 'grading_timeout'
+    feedback['artifact_directory'] = str(output.resolve())
     reports = list((output/'grading/logs').glob('*/'+result['run_id']+'/*/'+task['instance_id']+'/report.json'))
     if len(reports) == 1:
         report = json.loads(reports[0].read_text(encoding='utf-8'))[task['instance_id']]
-        feedback['tests_status'] = report.get('tests_status')
+        observed = ''
         log = reports[0].with_name('test_output.txt')
         if log.is_file():
             text = log.read_text(encoding='utf-8', errors='replace')
             # Exclude setup commands and test-patch application; expose observed test output only.
             if '>>>>> Start Test Output' in text and '>>>>> End Test Output' in text:
                 observed = text.split('>>>>> Start Test Output', 1)[1].split('>>>>> End Test Output', 1)[0]
-                feedback['observed_test_output_tail'] = observed[-6000:]
+        feedback.update(failure_feedback(report.get('tests_status'), observed))
     (output/'feedback.json').write_text(json.dumps(feedback, indent=2), encoding='utf-8')
     return feedback
 
@@ -65,7 +71,7 @@ def main():
     try:
         feedback = verify(Path.cwd(), args.task.resolve(), args.output_root.resolve()/uuid.uuid4().hex, args.harness_python)
         print(json.dumps(feedback))
-        return 0 if feedback['official_resolved'] is True else 1
+        return 0 if feedback['official_resolved'] is True else (2 if feedback['official_resolved'] is None else 1)
     except Exception as error:
         print(json.dumps({'official_resolved': None, 'grading_status': 'infrastructure_error', 'error': f'{type(error).__name__}: {error}'}))
         return 2

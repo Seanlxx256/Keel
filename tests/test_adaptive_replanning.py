@@ -36,7 +36,13 @@ class AdaptiveTests(unittest.TestCase):
                 self.calls = []
             def complete_json(self, messages, **kwargs):
                 self.calls.append(messages)
-                return Reply(json.dumps(responses[len(self.calls)-1]), 10)
+                response = responses[len(self.calls)-1]
+                if 'action' in response:
+                    response = {**response, 'hypothesis': 'Current implementation returns the wrong value.',
+                        'evidence': 'Assertion failed after the current source edit.',
+                        'next_check': 'Read the current value function and compare its return with the assertion.',
+                        'previous_attempt_assessment': 'The earlier edit did not satisfy the observed assertion.'}
+                return Reply(json.dumps(response), 10)
         return Model()
 
     def patch(self, name, old, new):
@@ -65,7 +71,35 @@ class AdaptiveTests(unittest.TestCase):
         self.assertIn('return 1', (root/'pkg/wrong.py').read_text())
         self.assertIn('AssertionError', str(model.calls[3]))
         self.assertEqual(result['recovery']['used_actions'], 1)
+        observation = json.loads(model.calls[3][1]['content'])
+        self.assertIn('+    return 2', str(observation['current_changes']))
+        self.assertIn('next_check', result['recovery']['diagnoses'][0])
+        self.assertIn('Perform the Critic next_check', str(model.calls[4]))
         return root, result
+
+    def test_second_diagnosis_receives_previous_hypothesis_and_current_diff(self):
+        root = self.workspace()
+        responses = [{'files': ['pkg/actual.py']}, {'locations': ['pkg/actual.py:1']},
+            self.patch('actual', 1, 2), {'action': 'repair', 'reason': 'Inspect observed wrong value'},
+            self.patch('actual', 2, 4), {'action': 'repair', 'reason': 'Earlier correction is disproved'},
+            self.patch('actual', 4, 3)]
+        model = self.model(responses)
+        result = run(self.config(), root, root/'.keel/run', model=model)
+        self.assertEqual(result['status'], 'passed', result.get('failure'))
+        observation = json.loads(model.calls[5][1]['content'])
+        self.assertEqual(len(observation['previous_diagnoses']), 1)
+        self.assertIn('+    return 4', str(observation['current_changes']))
+        self.assertEqual(len(result['recovery']['diagnoses']), 2)
+
+    def test_no_effective_repair_reselects_fresh_source_before_retry(self):
+        root = self.workspace()
+        model = self.model([{'files': ['pkg/actual.py']}, {'locations': ['pkg/actual.py:1']},
+            self.patch('actual', 1, 2), {'action': 'repair', 'reason': 'Inspect wrong value'},
+            self.patch('actual', 2, 2), {'locations': ['pkg/actual.py:1']}, self.patch('actual', 2, 3)])
+        result = run(self.config(), root, root/'.keel/run', model=model)
+        self.assertEqual(result['status'], 'passed', result.get('failure'))
+        self.assertIn('previous proposal did not change current source', str(model.calls[5]))
+        self.assertIn('return 2', str(model.calls[6]))
 
     def test_native_replans_wrong_localization_and_preserves_initial_audit_baseline(self):
         self.check_replan('native')

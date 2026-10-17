@@ -434,9 +434,11 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
         observation = verification_observation(result['verification'])
         recovery.permit('assess_verification', observation, recovery_snapshot)
         decision_error = None
+        changes = recovery.change_evidence(originals)
         while True:
             try:
-                decision = recovery.decide(model, config['goal'], ordered, result['verification'], settings, feedback=decision_error)
+                decision = recovery.decide(model, config['goal'], ordered, result['verification'], settings,
+                                           feedback=decision_error, changes=changes)
                 break
             except InvalidSelection as error:
                 recovery.permit('correct_critic_decision', error, recovery_snapshot)
@@ -452,7 +454,10 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
             'verification': bounded_verification(result['verification']), 'critic': decision,
             'previous_plan': [{'id': item['id'], 'files': item['files']} for item in ordered],
             'operator_write_roots': recovery_config['write_roots'],
-            'instruction': 'Inspect current code; preserve useful earlier changes and correct unsupported ones. New plans must stay within operator write roots.'})
+            'instruction': 'Perform the Critic next_check using current source evidence before editing. '
+                           'Treat the diagnosis as a hypothesis, not an instruction to assume it is true. '
+                           'Preserve useful earlier changes and correct unsupported ones. '
+                           'New plans must stay within operator write roots.'})
         if pending_action == 'replan':
             revision += 1
             result['_next_role'] = 'scout'

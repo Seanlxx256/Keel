@@ -54,9 +54,8 @@ def repair_evidence(workspace, scope, verification):
             for name, line in eligible[-2:]:
                 frames.setdefault(name, []).append(line)
         if not records:
-            feedback.append({'returncode': result.get('returncode'),
-                             'stdout': result.get('stdout', '')[:1000],
-                             'stderr': result.get('stderr', '')[:1000]})
+            from .recovery import bounded_verification
+            feedback.extend(bounded_verification([result]))
     evidence = []
     for name in scope['files']:
         if frames and name not in frames:

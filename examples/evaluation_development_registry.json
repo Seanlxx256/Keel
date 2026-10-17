@@ -2,6 +2,12 @@
   "schema_version": 1,
   "tasks": [
     {
+      "id": "sympy__sympy-16450",
+      "repository": "sympy/sympy",
+      "pr": 16450,
+      "reason": "Official harness integration, first failed repair inspected, localization feedback revised; second development run resolved after two verification rounds."
+    },
+    {
       "id": "starlette-1936",
       "repository": "kludex/starlette",
       "pr": 1936,
