@@ -943,3 +943,14 @@ to a [credential-free compatible model configuration](docs/compatible-models.md)
 Start from `examples/model-compatible.example.json`; secrets are environment
 references only. Ollama stays default. External API access is not exercised by
 preparation or offline adapter tests.
+
+Experimental [autonomous recovery and environment campaigns](docs/autonomous-recovery-and-campaign.md)
+add shared-budget observe/repair decisions and a generic Python/pytest task factory.
+`examples/run_autonomous_campaign.py` discovers repositories, freezes upstream tests,
+replans dependency environments from build logs, checks old/new/gold transitions and
+runs Keel without per-PR reproduction scripts. It defaults to plan-only; `--execute`
+enables Docker, network and metered model calls. Unsupported environments and failed
+repairs remain explicit records. Live generic campaign success is not established yet.
+Optional [adaptive role replanning](docs/adaptive-role-replanning.md) routes failed
+verification through Critic back to Scout/Planner or Implementer, with explicit
+host write roots and new approval interrupts for revised plans.

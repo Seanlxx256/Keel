@@ -1,4 +1,4 @@
-"""Explicit sequential role lifecycle; Critic records failures without retrying."""
+"""Role lifecycle with optional guarded recovery transitions from Critic."""
 import time
 
 
@@ -14,12 +14,13 @@ class RoleStateMachine:
         "finished": set(),
     }
 
-    def __init__(self, trace, clock=time.monotonic):
+    def __init__(self, trace, clock=time.monotonic, *, allow_recovery=False):
         self.trace, self.clock = trace, clock
         self.state, self.phase = "created", "main"
         self.history = []
         self.started = None
         self.outcome = None
+        self.allow_recovery = allow_recovery
 
     def enter(self, role, *, phase="main", previous_status="completed"):
         if not isinstance(role, str) or role not in self.TRANSITIONS or role in {"created", "finished"}:
@@ -35,7 +36,8 @@ class RoleStateMachine:
         if phase not in {"main", "baseline"} or (phase == "baseline" and not baseline) or (
                 self.state == "verifier" and self.phase == "baseline" and role not in {"scout", "critic"}):
             raise ValueError("Invalid baseline verification transition")
-        if self.state == "finished" or not (baseline or resumed or role in self.TRANSITIONS[self.state]):
+        recovery = self.allow_recovery and self.state == 'critic' and role in {'scout', 'implementer'}
+        if self.state == "finished" or not (baseline or resumed or recovery or role in self.TRANSITIONS[self.state]):
             raise ValueError(f"Invalid role transition: {self.state}/{self.phase} -> {role}/{phase}")
         self._close(previous_status)
         previous = self.state

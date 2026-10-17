@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 
 from .audit import audit_metadata, audit_text
-from .core import AuditFailed, Budget, BudgetExceeded, Ledger, Limits, ModelError, PolicyDenied, Trace, digest
+from .core import AuditFailed, Budget, BudgetExceeded, Ledger, Limits, ModelError, PolicyDenied, RecoveryStopped, Trace, digest
 from .execution import CommandRunner, normalize_acceptance, validate_execution
 from .workspace import Workspace
 from .state import RoleStateMachine
@@ -80,9 +80,22 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
         raise ValueError('Contract selection requires localized-proposal and localization_dependencies')
     if (agent_mode or proposal_mode) and ordered:
         raise ValueError("Agent mode generates its own plan; omit work_items")
-    repair_attempts = config.get('verification_repair_attempts', 0)
-    if type(repair_attempts) is not int or not 0 <= repair_attempts <= 3 or (repair_attempts and not proposal_mode):
-        raise ValueError('verification_repair_attempts requires proposal mode and integer 0..3')
+    from .recovery import RecoveryController, validate_recovery
+    recovery_config = validate_recovery(config.get('recovery', {}))
+    adaptive = recovery_config.get('strategy') == 'adaptive'
+    if adaptive and not (agent_mode or localized_mode):
+        raise ValueError('adaptive recovery requires agent or localized-proposal mode')
+    if adaptive:
+        root = Path(repo).resolve(strict=True)
+        for name in recovery_config['write_roots']:
+            directory = (root / name).resolve()
+            if not directory.is_relative_to(root) or not directory.is_dir():
+                raise ValueError('Recovery write_roots must be existing directories within the repository')
+    if recovery_config.get('max_actions', 0) and not (proposal_mode or agent_mode):
+        raise ValueError('recovery requires a model-driven mode')
+    repair_attempts = config.get('verification_repair_attempts', 3 if recovery_config.get('max_actions', 0) else 0)
+    if type(repair_attempts) is not int or not 0 <= repair_attempts <= 3 or (repair_attempts and not (proposal_mode or agent_mode)):
+        raise ValueError('verification_repair_attempts requires a model-driven mode and integer 0..3')
     settings = config.get("agent", {})
     if not isinstance(settings, dict) or set(settings) - {"max_steps", "max_output", "require_evidence", "max_work_items", "max_context_bytes", "require_change"} or any(
             type(v) is not int or v <= 0 for key, v in settings.items() if key not in {"require_evidence", "require_change"}) or any(
@@ -106,14 +119,17 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
     from .telemetry import LocalTelemetry
     telemetry = LocalTelemetry(output / "spans.otlp.json")
     trace = Trace(output / "trace.jsonl", telemetry=telemetry)
-    lifecycle = RoleStateMachine(trace)
+    lifecycle = RoleStateMachine(trace, allow_recovery=adaptive)
     workspace = Workspace(repo, budget, ledger, trace, runner=CommandRunner(config.get("execution")),
                           retrieval=config.get("retrieval"), retrieval_model=model, memoization=config.get("memoization", True))
     from .mcp_client import McpTools
     workspace.mcp_tools = McpTools(config.get("mcp_servers", {}), workspace)
+    recovery = RecoveryController(recovery_config, workspace) if recovery_config.get('max_actions', 0) else None
     result = {"run_id": output.name, "goal": config["goal"], "mode": config.get('mode', 'explicit'), "status": "running",
               "work_items": [], "baseline_verification": [], "verification": [], "failure": None}
     originals = {}
+    active_goal = config['goal']
+    revision, pending_action, recovery_snapshot = 0, None, None
     stage = "scout"
     def enter_role(role, *, previous_status="completed"):
         nonlocal stage
@@ -127,10 +143,11 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
     def scout_phase():
         nonlocal initial, specs, model, impact, scout_session, proposal_evidence, proposal_dependencies, proposal_scope
         enter_role("scout")
-        initial = workspace.snapshot()
+        if revision == 0:
+            initial = workspace.snapshot()
         workspace.runner.check_available()
         specs = normalize_acceptance(config["acceptance"])
-        if any(spec["junit"] for spec in specs):
+        if revision == 0 and any(spec["junit"] for spec in specs):
             enter_role("baseline_verifier")
             # Keep command indices aligned while avoiding unnecessary baseline build/lint runs.
             baseline = []
@@ -153,7 +170,9 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
             if proposal_mode:
                 if localized_mode:
                     from .localization import localize
-                    proposal_scope = localize(model, workspace, config['goal'], settings)
+                    allowed_files = writable_candidates() if adaptive else None
+                    proposal_scope = (recovery.localize(model, active_goal, settings, allowed_files=allowed_files) if recovery else
+                                      localize(model, workspace, active_goal, settings))
                 from .proposals import collect_evidence, collect_located_evidence
                 proposal_evidence = (collect_located_evidence(workspace, proposal_scope) if localized_mode
                     else collect_evidence(workspace, proposal_scope))
@@ -164,9 +183,9 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
                     proposal_dependencies = collect_for_localization(workspace, proposal_scope, config['localization_dependencies'])
                     if config.get('select_dependency_contracts'):
                         from .dependency_evidence import select_contracts
-                        proposal_dependencies = select_contracts(model, workspace, config['goal'], proposal_dependencies, settings)
+                        proposal_dependencies = select_contracts(model, workspace, active_goal, proposal_dependencies, settings)
             else:
-                impact, scout_session = inspect_repository(config, model, workspace)
+                impact, scout_session = inspect_repository({**config, 'goal': active_goal}, model, workspace)
         for query in config.get("queries", []):
             enter_role("scout")
             evidence = workspace.search(query)
@@ -177,13 +196,26 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
         enter_role("planner")
         if agent_mode:
             from .agents import plan_repository
-            generated = plan_repository(config, model, workspace, impact, scout_session)
+            generated = plan_repository({**config, 'goal': active_goal}, model, workspace, impact, scout_session)
             ordered = validate({**config, "work_items": generated})
         elif proposal_mode:
-            ordered = [{'id': 'localized-repair', 'description': config['goal'],
+            ordered = [{'id': 'localized-repair', 'description': active_goal,
                         'files': proposal_scope['files']}]
+        if adaptive:
+            from .recovery import within_write_roots
+            for item in ordered:
+                for name in item['files']:
+                    if not within_write_roots(name, recovery_config['write_roots']):
+                        raise PolicyDenied('Plan target outside operator recovery write_roots: ' + name)
+                    path = workspace.path(name, write=True)
+                    if not name.endswith('.py') or not path.is_file():
+                        raise PolicyDenied('Adaptive plans may target existing Python source files only')
+            if revision and workspace.snapshot() != recovery_snapshot:
+                raise PolicyDenied('Workspace changed during recovery localization/planning')
         plan_id = ledger.add("decision", "planner", "Validated task DAG", ordered)
         trace.emit("planner", "plan_ready", fact_id=plan_id, items=len(ordered))
+        if adaptive:
+            result.setdefault('plans', []).append({'revision': revision, 'plan_sha256': digest(ordered), 'items': ordered})
         # Validate every target before making the first mutation.
         for item in ordered:
             if agent_mode or proposal_mode:
@@ -198,16 +230,21 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
                 originals.setdefault(edit["path"], raw)
     def implementer_phase():
         enter_role("implementer")
+        if adaptive and pending_action == 'repair':
+            repair_implementation(result['verification'], len(result['verification_attempts']))
+            return
         for item in ordered:
             budget.check()
-            report = {"id": item["id"], "status": "running"}
+            report = {"id": item["id"] if revision == 0 else f"revision-{revision}:{item['id']}", "status": "running"}
+            if adaptive:
+                report.update(revision=revision, plan_item_id=item['id'])
             result["work_items"].append(report)
             trace.emit(stage, "item_started", item_id=item["id"])
             if agent_mode:
                 from .agents import AgentSession
                 session = AgentSession("implementer", model, workspace,
                                        allowed_files=item["files"], **settings)
-                task = {"goal": config["goal"], "work_item": item,
+                task = {"goal": active_goal, "work_item": item,
                         "completed_items": [{"id": entry["id"], "summary": entry.get("summary")}
                                             for entry in result["work_items"] if entry["status"] == "completed"]}
                 if config.get("context_handoff", False):
@@ -219,19 +256,22 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
                     raise ModelError("Implementer final summary must be a string")
             elif proposal_mode:
                 from .proposals import propose
-                report['summary'] = propose(model, workspace, config['goal'], item['files'], proposal_evidence, settings,
-                                            dependencies=proposal_dependencies, validation_retries=min(repair_attempts, 1))
+                report['summary'] = propose(model, workspace, active_goal, item['files'], proposal_evidence, settings,
+                                            dependencies=proposal_dependencies, validation_retries=min(repair_attempts, 1), recovery=recovery)
             for edit in item.get("edits", []):
                 workspace.replace(edit["path"], edit["old"], edit["new"])
             report["status"] = "completed"
             trace.emit(stage, "item_completed", item_id=item["id"])
     def verifier_phase():
         nonlocal stage
+        if adaptive:
+            adaptive_verifier_phase()
+            return
         enter_role("verifier")
         result["verification_attempts"] = []
         for attempt in range(repair_attempts + 1):
             stage = 'verifier'
-            verification = workspace.verify(config["acceptance"])
+            verification = workspace.verify(config["acceptance"], phase='final' if attempt == 0 else f'repair-{attempt}')
             result["verification"] = verification
             result["verification_attempts"].append({'attempt': attempt, 'verification': verification})
             failed = len(verification) != len(config['acceptance']) or any(v['returncode'] != 0 for v in verification)
@@ -243,14 +283,33 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
                           if initial.get(n) != current.get(n) and n not in originals]
             if unexpected:
                 raise PolicyDenied(f'Changes outside declared edit targets: {unexpected}')
-            findings = audit_metadata(result['baseline_verification'], verification)
+            # Failed cases are the observation being repaired, not evidence of
+            # tampering. Still reject missing identities, more skips or no tests.
+            findings = [finding for finding in audit_metadata(result['baseline_verification'], verification)
+                        if finding['rule'] != 'test_failures_in_report']
             for name, before in originals.items():
                 findings.extend(audit_text(name, before, workspace.path(name).read_bytes()))
             if findings:
                 raise AuditFailed(findings)
             fact = ledger.add('failed_attempt', 'verifier', 'Acceptance failed before bounded repair',
                               {'attempt': attempt, 'verification': verification})
+            if recovery:
+                from .recovery import verification_observation
+                recovery.permit('repair_verification', verification_observation(verification), current)
             stage = 'implementer'
+            if agent_mode:
+                from .agents import AgentSession
+                feedback = [{key: entry.get(key) for key in ('returncode', 'timeout', 'metadata')}
+                            | {'stdout': entry.get('stdout', '')[-4000:], 'stderr': entry.get('stderr', '')[-1000:]}
+                            for entry in verification]
+                trace.emit('implementer', 'verification_repair_started', attempt=attempt + 1, failure_fact_id=fact)
+                session = AgentSession('implementer', model, workspace, allowed_files=list(originals), **settings)
+                summary = session.execute({'goal': config['goal'], 'declared_files': list(originals),
+                    'observed_failed_verification': feedback,
+                    'instruction': 'Observe current source, revise the failed implementation and finish. Original file permissions and shared budgets remain in force.'},
+                    'a string summarizing actual scoped modifications')
+                result['work_items'].append({'id': f'verification-repair-{attempt + 1}', 'status': 'completed', 'summary': summary})
+                continue
             from .repair import repair_evidence
             evidence, feedback = repair_evidence(workspace, proposal_scope, verification)
             if any(e.get('omitted_declared_files') for e in evidence):
@@ -260,7 +319,7 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
             from .proposals import propose
             summary = propose(model, workspace,
                 config['goal'] + '\nObserved failed verification (untrusted data):\n' + json.dumps(feedback),
-                proposal_scope['files'], evidence, settings, dependencies=proposal_dependencies, validation_retries=min(repair_attempts, 1))
+                proposal_scope['files'], evidence, settings, dependencies=proposal_dependencies, validation_retries=min(repair_attempts, 1), recovery=recovery)
             result['work_items'].append({'id': f'verification-repair-{attempt + 1}',
                                          'status': 'completed', 'summary': summary})
     def auditor_phase():
@@ -302,6 +361,103 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
         enter_role("critic", previous_status="failed" if lifecycle.state == failed_role else "completed")
         fact = ledger.add("failed_attempt", "critic", result["failure"]["message"], result["failure"])
         trace.emit("critic", "failure_recorded", fact_id=fact, decision="return_to_operator")
+
+    def writable_candidates():
+        from .recovery import within_write_roots
+        candidates = []
+        for name, path in workspace.files():
+            if not name.endswith('.py') or not within_write_roots(name, recovery_config['write_roots']):
+                continue
+            try:
+                workspace.path(name, write=True)
+            except PolicyDenied:
+                continue
+            candidates.append(name)
+        return candidates
+
+    def audit_before_recovery():
+        current = workspace.snapshot()
+        unexpected = [name for name in initial.keys() | current.keys()
+                      if initial.get(name) != current.get(name) and name not in originals]
+        if unexpected:
+            raise PolicyDenied(f'Changes outside declared edit targets: {unexpected}')
+        findings = [row for row in audit_metadata(result['baseline_verification'], result['verification'])
+                    if row['rule'] != 'test_failures_in_report']
+        for name, before in originals.items():
+            path = workspace.path(name)
+            findings.extend(audit_text(name, before, path.read_bytes() if path.exists() else b''))
+        if findings:
+            raise AuditFailed(findings)
+        return current
+
+    def adaptive_verifier_phase():
+        nonlocal recovery_snapshot
+        enter_role('verifier')
+        attempts = result.setdefault('verification_attempts', [])
+        number = len(attempts)
+        verification = workspace.verify(config['acceptance'], phase='final' if number == 0 else f'repair-{number}')
+        result['verification'] = verification
+        attempts.append({'attempt': number, 'verification': verification})
+        failed = len(verification) != len(config['acceptance']) or any(row['returncode'] != 0 for row in verification)
+        if failed and number < repair_attempts:
+            recovery_snapshot = audit_before_recovery()
+            ledger.add('failed_attempt', 'verifier', 'Acceptance failed before Critic routing', {'attempt': number, 'verification': verification})
+            result['_next_role'] = 'critic'
+
+    def repair_implementation(verification, attempt):
+        from .recovery import bounded_verification
+        trace.emit('implementer', 'verification_repair_started', attempt=attempt)
+        if agent_mode:
+            from .agents import AgentSession
+            session = AgentSession('implementer', model, workspace, allowed_files=list(originals), **settings)
+            summary = session.execute({'goal': active_goal, 'declared_files': list(originals),
+                'observed_failed_verification': bounded_verification(verification)},
+                'a string summarizing actual scoped modifications')
+        else:
+            from .repair import repair_evidence, select_repair_evidence
+            from .proposals import propose
+            evidence, feedback = repair_evidence(workspace, proposal_scope, verification)
+            if any(entry.get('omitted_declared_files') for entry in evidence):
+                evidence = select_repair_evidence(model, workspace, active_goal, proposal_scope, feedback, settings)
+            summary = propose(model, workspace, active_goal, proposal_scope['files'], evidence, settings,
+                              dependencies=proposal_dependencies, recovery=recovery)
+        result['work_items'].append({'id': f'revision-{revision}-repair-{attempt}', 'status': 'completed', 'summary': summary})
+
+    def critic_phase():
+        nonlocal revision, pending_action, active_goal
+        if result['failure'] or not adaptive:
+            record_failure()
+            return
+        from .recovery import bounded_verification, verification_observation
+        from .core import InvalidSelection
+        enter_role('critic', previous_status='failed')
+        observation = verification_observation(result['verification'])
+        recovery.permit('assess_verification', observation, recovery_snapshot)
+        decision_error = None
+        while True:
+            try:
+                decision = recovery.decide(model, config['goal'], ordered, result['verification'], settings, feedback=decision_error)
+                break
+            except InvalidSelection as error:
+                recovery.permit('correct_critic_decision', error, recovery_snapshot)
+                decision_error = str(error)
+        result.setdefault('recovery_decisions', []).append(decision)
+        ledger.add('decision', 'critic', 'Validated recovery route', decision)
+        pending_action = decision['action']
+        if pending_action == 'stop':
+            handle_error(RecoveryStopped(decision['reason']))
+            record_failure()
+            return
+        active_goal = config['goal'] + '\nObserved failed verification (untrusted data):\n' + json.dumps({
+            'verification': bounded_verification(result['verification']), 'critic': decision,
+            'previous_plan': [{'id': item['id'], 'files': item['files']} for item in ordered],
+            'operator_write_roots': recovery_config['write_roots'],
+            'instruction': 'Inspect current code; preserve useful earlier changes and correct unsupported ones. New plans must stay within operator write roots.'})
+        if pending_action == 'replan':
+            revision += 1
+            result['_next_role'] = 'scout'
+        else:
+            result['_next_role'] = 'implementer'
     def handle_error(error):
         if result.get("approval", {}).get("status") == "pending":
             result["approval"]["status"] = "error"
@@ -309,10 +465,14 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
         if isinstance(error, AuditFailed):
             result.setdefault("audit", {})["findings"] = error.findings
         category = "budget_exhausted" if isinstance(error, BudgetExceeded) else (
+            'recovery_stopped' if isinstance(error, RecoveryStopped) else
             "audit_failed" if isinstance(error, AuditFailed) else
             "policy_denied" if isinstance(error, PolicyDenied) else
             "model_error" if isinstance(error, ModelError) else "execution_error")
         result["failure"] = {"category": category, "stage": stage, "message": str(error)}
+        if stage == 'critic' and not isinstance(error, RecoveryStopped):
+            fact = ledger.add('failed_attempt', 'critic', 'Recovery assessment failed', result['failure'])
+            trace.emit('critic', 'failure_recorded', fact_id=fact, decision='return_to_operator')
         for item in result["work_items"]:
             if item["status"] == "running":
                 item["status"] = "failed"
@@ -320,13 +480,16 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
     def request_approval():
         budget.check()
         snapshot = workspace.snapshot()
-        if snapshot != initial:
+        if snapshot != (recovery_snapshot if revision else initial):
             raise PolicyDenied("Workspace changed before write approval")
         approval_binding.update(snapshot=snapshot, plan=digest(ordered), config=digest(config))
         request = {"run_id": output.name, "files": sorted(originals), "items": len(ordered),
                    "plan_sha256": digest(ordered), "workspace_sha256": digest(snapshot),
                    "ledger_path": str(output / "ledger.sqlite"), "budget": budget.report(),
                    "scope": "Approve the validated plan's declared writes; no permission expansion"}
+        request['revision'] = revision
+        if result.get('approval'):
+            result.setdefault('approval_history', []).append(result['approval'])
         result["approval"] = {"status": "pending", "request": request}
         trace.emit("planner", "approval_requested", plan_sha256=request["plan_sha256"],
                    workspace_sha256=request["workspace_sha256"])
@@ -354,7 +517,7 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
             trace.emit("planner", "approval_invalidated", error_type=type(error).__name__)
             raise
     stages = {"scout": scout_phase, "planner": planner_phase, "implementer": implementer_phase,
-              "verifier": verifier_phase, "auditor": auditor_phase, "critic": record_failure}
+              "verifier": verifier_phase, "auditor": auditor_phase, "critic": critic_phase}
     result["orchestration"] = {"engine": engine, "resumable": False}
     try:
         trace.emit("runtime", "run_started", goal=config["goal"])
@@ -370,7 +533,8 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
             result["status"] = "failed"
             result["failure"] = {"category": "unexpected_termination", "stage": stage,
                                  "message": "Execution interrupted: " + (interrupted.__name__ if interrupted else "unknown")}
-        recorded = {item["id"] for item in result["work_items"]}
+        recorded = {item.get('plan_item_id', item['id']) for item in result['work_items']
+                    if item.get('revision', 0) == revision}
         result["work_items"].extend({"id": item["id"], "status": "not_started"}
                                     for item in ordered if item["id"] not in recorded)
         if result["failure"] and lifecycle.state != "critic":
@@ -388,6 +552,8 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
                 patch.append(line if line.endswith("\n") else line + "\n\\ No newline at end of file\n")
         (output / "changes.patch").write_text("".join(patch), encoding="utf-8")
         result["budget"] = budget.report()
+        if recovery:
+            result['recovery'] = recovery.report()
         result["facts"] = ledger.summaries()
         result["memory"] = {**ledger.statistics(), "handed_off_facts": getattr(workspace, "handed_off_facts", 0),
                             "memoization": workspace.memoization, "tools": workspace.tool_metrics,

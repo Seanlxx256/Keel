@@ -1,0 +1,11 @@
+# Flask-Login 813: original issue not reproduced at pinned base
+
+The real three-cell output rejects the preregistered import-failure transition. Base-old and base-new both import successfully and pass next-URL, cookie and session cases. Both fail login_query. Gold-new passes all five. This is not an old-dependency-pass/new-dependency-fail transition.
+
+Inspection of the actual pinned base shows it already imports urllib.parse.parse_qs/urlencode and no longer imports url_decode/url_encode from Werkzeug. The archived PR API diff described changes relative to a different comparison base than the merge first parent; its removed imports were therefore insufficient evidence that the actual chosen old snapshot still contained those imports. The earlier runner design should have checked pinned source before building an expected removed-import failure. That omission is a curation error, not a Keel failure.
+
+The actual base calls parse_qs without keep_blank_values. The gold sets keep_blank_values=True. This explains the empty query parameter assertion failing under both dependency versions. It could be considered as a separately defined behavior task with independent requirements, but must not be silently relabelled as successful reproduction of issue 5279 or dependency-upgrade breakage. No model trial/package is authorized by this result alone.
+
+Original reports and probe remain unchanged. A new diagnostic function categorizes the saved observations as `same_failure_under_old_and_new_dependency`, without changing the strict assessment. Offline diagnosis is saved at `.keel/flask-login-813-transition-diagnosis-v1.json`. Four assessment/diagnosis tests passed. No additional Docker or model calls were needed for diagnosis. A future rerun is unnecessary for this conclusion.
+
+Candidate status: mismatched original issue at this pinned base; do not promote to the dependency-transition repair track. Before another candidate consumes Docker time, inspect fixed base source and establish that the reported failing API/behavior remains present. Freeze that gate before generation, retain rejected candidates, and do not choose a different ancestor solely to force the expected failure without explicitly defining a new experiment.

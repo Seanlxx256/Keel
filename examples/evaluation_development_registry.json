@@ -30,6 +30,12 @@
       "repository": "django/django",
       "pr": 13586,
       "reason": "First model failure inspected; observed traceback handoff revised after missing location evidence. Further runs are development diagnostics."
+    },
+    {
+      "id": "flask-login-issue5279",
+      "repository": "maxcountryman/flask-login",
+      "pr": 813,
+      "reason": "Curated historical issue range, not adjacent PR pair; first model localization failure inspected and protocol feedback changed. Follow-up is development data."
     }
   ],
   "repository_aliases": {

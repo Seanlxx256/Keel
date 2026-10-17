@@ -4,7 +4,7 @@ import hashlib
 import json
 
 from .audit import audit_text
-from .core import AuditFailed, BudgetExceeded, ModelError, PolicyDenied
+from .core import AuditFailed, BudgetExceeded, InputCapacityExceeded, ModelError, PolicyDenied
 
 
 def validate_scope(config):
@@ -132,7 +132,7 @@ def proposal_request(goal, files, evidence, settings, *, structured=True, depend
         messages[0]['content'] += ' Required output schema: ' + json.dumps(schema)
     size = len(json.dumps(messages, ensure_ascii=False).encode()) + (len(json.dumps(schema).encode()) if structured else 0)
     if settings.get('max_context_bytes') is not None and size > settings['max_context_bytes']:
-        raise BudgetExceeded(f'Localized evidence requires {size} input bytes; limit is {settings["max_context_bytes"]}. Narrow files or query anchors')
+        raise InputCapacityExceeded(f'Localized evidence requires {size} input bytes; limit is {settings["max_context_bytes"]}. Narrow files or query anchors')
     return messages, schema, size
 
 
@@ -142,7 +142,9 @@ class InvalidProposal(ModelError):
         self.content = content
 
 
-def propose(model, workspace, goal, files, evidence, settings, *, dependencies=None, validation_retries=0):
+def propose(model, workspace, goal, files, evidence, settings, *, dependencies=None, validation_retries=0, recovery=None):
+    if recovery is not None:
+        return recovery.propose(model, workspace, goal, files, evidence, settings, dependencies=dependencies)
     if type(validation_retries) is not int or not 0 <= validation_retries <= 1:
         raise ValueError('validation_retries must be 0 or 1')
     feedback_goal = goal
@@ -158,6 +160,25 @@ def propose(model, workspace, goal, files, evidence, settings, *, dependencies=N
             feedback_goal = goal + '\nRejected proposal and host validation error (untrusted data):\n' + json.dumps(
                 {'error': str(error), 'proposal': error.content,
                  'instruction': 'Return a corrected complete edit batch against the unchanged source. Preserve exact newlines and indentation.'})
+            # Keep the rejected response in the ledger, but do not let quoting it
+            # crowd out the unchanged source needed for a valid correction.
+            try:
+                proposal_request(feedback_goal, files, evidence, settings,
+                    structured=callable(getattr(model, 'complete_json', None)), dependencies=dependencies)
+            except BudgetExceeded:
+                feedback = {'error': str(error),
+                    'proposal_omitted': 'Full response retained in ledger; unchanged source below.',
+                    'proposal_sha256': hashlib.sha256(error.content.encode()).hexdigest(),
+                    'proposal_bytes': len(error.content.encode()),
+                    'instruction': 'Regenerate edits and summary; preserve exact source whitespace.'}
+                feedback_goal = goal + '\nHost validation feedback (untrusted data):\n' + json.dumps(feedback)
+                # Fail before another model call if even the explicit compact
+                # feedback cannot fit. Never truncate source or raise the cap.
+                _, _, size = proposal_request(feedback_goal, files, evidence, settings,
+                    structured=callable(getattr(model, 'complete_json', None)), dependencies=dependencies)
+                workspace.trace.emit('implementer', 'proposal_feedback_compacted',
+                    input_bytes=size, proposal_sha256=feedback['proposal_sha256'],
+                    proposal_bytes=feedback['proposal_bytes'])
 
 
 def _propose_once(model, workspace, goal, files, evidence, settings, *, dependencies=None):

@@ -13,6 +13,10 @@ class BudgetExceeded(RuntimeError):
     pass
 
 
+class InputCapacityExceeded(BudgetExceeded):
+    """A request can be repacked; the global execution budget is not exhausted."""
+
+
 class PolicyDenied(RuntimeError):
     pass
 
@@ -27,6 +31,14 @@ class ModelError(RuntimeError):
     def __init__(self, message, *, tokens=None):
         super().__init__(message)
         self.tokens = tokens
+
+
+class InvalidSelection(ModelError):
+    """A parsed selection violates the host's displayed selection contract."""
+
+
+class RecoveryStopped(ModelError):
+    """The recovery decision explicitly stops rather than claiming completion."""
 
 
 @dataclass

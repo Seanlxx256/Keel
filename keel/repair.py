@@ -9,7 +9,7 @@ from .proposals import located_source_evidence
 def select_repair_evidence(model, workspace, goal, scope, feedback, settings):
     """Acquire explicitly selected current definitions within the original write scope."""
     from .localization import select, symbol_structure, ANCHOR_INSTRUCTION
-    from .core import ModelError, PolicyDenied
+    from .core import InvalidSelection, PolicyDenied
     source = {name: workspace.read(name, role='implementer')['value'] for name in scope['files']}
     structure = [symbol_structure(name, text) for name, text in source.items()]
     chosen = select(model, workspace, goal, settings, stage='repair-evidence-selection',
@@ -18,7 +18,7 @@ def select_repair_evidence(model, workspace, goal, scope, feedback, settings):
         keys=('locations',), instruction=ANCHOR_INSTRUCTION)
     allowed = {f"{row['path']}:{line}": (row['path'], line) for row in structure for line, _ in row['symbols']}
     if not set(chosen['locations']) <= allowed.keys():
-        raise ModelError('Repair evidence locations must belong to original declared files and displayed catalog')
+        raise InvalidSelection('Repair evidence locations must belong to original declared files and displayed catalog')
     locations = {}
     for identifier in chosen['locations']:
         name, line = allowed[identifier]

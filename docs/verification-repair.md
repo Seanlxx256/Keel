@@ -1,5 +1,7 @@
 # Bounded verification repair
 
+Invalid proposal feedback gets at most one correction call when repair is enabled. The host first checks whether the complete rejected response and validation error fit alongside unchanged source evidence. If not, it explicitly omits that response from the next input, retaining its SHA-256, byte count and validation error. Full raw responses remain in the ledger. Compact feedback is also checked against the same input cap before any further model call; source windows are never truncated and budgets are never reset.
+
 Proposal and localized-proposal runs may opt into `verification_repair_attempts` (integer 0..3; default 0). Failed acceptance can trigger another exact replacement proposal using current source, bounded observed errors and existing selected dependency contracts. All attempts share the original model/tool/token/wall-clock budget, declared files and acceptance commands. No gold patch or task-specific replacement is supplied.
 
 Before another proposal, compare the workspace against the initial snapshot, reject undeclared changes and run source/metadata audits. Final acceptance and the existing final audit/mutation path still decide success. Policy, audit, model and budget errors stop the run; this is not a general error retry mechanism. Each completed verification is retained in `verification_attempts`; failed verification evidence is stored in the ledger. Retry events are nested inside the verifier phase, not a new six-role orchestration cycle.

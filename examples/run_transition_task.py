@@ -24,14 +24,16 @@ def load_package(package):
         if file_hash(package/name) != expected:
             raise ValueError('Package file hash mismatch')
     task = json.loads((package/'task.json').read_text(encoding='utf-8'))
-    supported = {'httpx-1588': ('encode/httpx', 'httpx/**/*.py'), 'django-13586': ('django/django', 'django/**/*.py')}
+    supported = {'httpx-1588': ('encode/httpx', 'httpx/**/*.py'), 'django-13586': ('django/django', 'django/**/*.py'),
+                 'flask-login-issue5279': ('maxcountryman/flask-login', 'src/flask_login/**/*.py')}
     if task['id'] not in supported or (task['repository'], task['source_scope']) != supported[task['id']]:
         raise ValueError('Unsupported package')
     return manifest, task
 
 
 def prepare(root, package, model_file, output, *, strategy='agent', baseline_feedback=False, require_change=False,
-            dependency_modules=None, select_contracts=False, max_context_bytes=12000, repair_attempts=0):
+            dependency_modules=None, select_contracts=False, max_context_bytes=12000, repair_attempts=0, recovery_actions=0,
+            adaptive_recovery=False):
     if strategy not in {'agent', 'localized-proposal'}:
         raise ValueError('Unknown transition strategy')
     if type(baseline_feedback) is not bool:
@@ -59,13 +61,21 @@ def prepare(root, package, model_file, output, *, strategy='agent', baseline_fee
     if any(key in model for key in ('api_key', 'token', 'authorization')):
         raise ValueError('Use an environment credential reference')
     snapshot = root/'.keel/independent-snapshots'/task['repository'].replace('/', '--')/task['base_commit']
-    prefix = task['source_scope'].split('/')[0] + '/'
+    prefix = task['source_scope'].split('/**', 1)[0] + '/'
     if inventory(snapshot) != manifest['curator_receipt']['base_inventory']:
         raise ValueError('Base snapshot inventory mismatch')
     config = task_config(manifest['acceptance']['image'], max_seconds=450)
-    if type(repair_attempts) is not int or not 0 <= repair_attempts <= 3 or (repair_attempts and strategy != 'localized-proposal'):
-        raise ValueError('repair_attempts requires localized-proposal and integer 0..3')
+    if type(repair_attempts) is not int or not 0 <= repair_attempts <= 3:
+        raise ValueError('repair_attempts requires an integer 0..3')
     config['verification_repair_attempts'] = repair_attempts
+    from keel.recovery import validate_recovery
+    validate_recovery({'max_actions': recovery_actions})
+    if type(adaptive_recovery) is not bool or (adaptive_recovery and not recovery_actions):
+        raise ValueError('adaptive_recovery requires boolean true and positive recovery_actions')
+    if recovery_actions:
+        config['recovery'] = {'max_actions': recovery_actions}
+        if adaptive_recovery:
+            config['recovery'].update(strategy='adaptive', write_roots=[prefix.rstrip('/')])
     config['mode'] = strategy
     config['model'] = model
     config['goal'] = task['goal']+f' Modify only existing Python files under {prefix}. Search the repository to locate the implementation.'
@@ -113,6 +123,7 @@ def baseline_matches(execution, expected):
                 [r['case'] for r in data['records']] == expected['cases'] and
                 len(data['records']) == len(expected['baseline_errors']) and
                 all(row.get('passed') is False and row.get('case') == error['case'] and row.get('type') == error['type']
+                    and error.get('message_contains', '') in row.get('message', '')
                     for row, error in zip(data['records'], expected['baseline_errors'])))
         return (data['versions'] == expected['versions'] and
             [r['case'] for r in data['records']] == expected['cases'] and
@@ -235,11 +246,13 @@ def main():
     parser.add_argument('--select-contracts', action='store_true', help='Preparation only; model selects fixed-image contract IDs before patching')
     parser.add_argument('--max-context-bytes', type=int, help='Preparation only; serialized input cap, default 12000, not exact model tokens')
     parser.add_argument('--repair-attempts', type=int, help='Preparation only; bounded verification repair rounds, default 0')
+    parser.add_argument('--recovery-actions', type=int, default=0, help='Preparation only; shared autonomous recovery actions 0..12')
+    parser.add_argument('--adaptive-recovery', action='store_true', help='Preparation only; enable Critic routing and replanning within package source scope')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     if args.execute:
         if (args.package or args.model_config or args.strategy or args.baseline_feedback or args.require_change
-                or args.dependency_module or args.select_contracts or args.max_context_bytes is not None or args.repair_attempts is not None):
+                or args.dependency_module or args.select_contracts or args.max_context_bytes is not None or args.repair_attempts is not None or args.recovery_actions or args.adaptive_recovery):
             parser.error('Execute uses existing prepared output only')
         report = execute(root, args.output)
     else:
@@ -249,7 +262,8 @@ def main():
             baseline_feedback=args.baseline_feedback, require_change=args.require_change,
             dependency_modules=args.dependency_module, select_contracts=args.select_contracts,
             max_context_bytes=args.max_context_bytes if args.max_context_bytes is not None else 12000,
-            repair_attempts=args.repair_attempts if args.repair_attempts is not None else 0)
+            repair_attempts=args.repair_attempts if args.repair_attempts is not None else 0,
+            recovery_actions=args.recovery_actions, adaptive_recovery=args.adaptive_recovery)
         report = {'status': 'prepared_only', 'strategy': args.strategy or 'agent',
             'baseline_feedback': args.baseline_feedback, 'require_change': args.require_change,
             'max_context_bytes': args.max_context_bytes if args.max_context_bytes is not None else 12000,

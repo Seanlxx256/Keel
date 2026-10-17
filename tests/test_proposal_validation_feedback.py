@@ -8,7 +8,7 @@ from keel.runtime import run
 
 
 class ProposalValidationFeedbackTests(unittest.TestCase):
-    def trial(self, calls=2, policy=False, repeat_bad=False):
+    def trial(self, calls=2, policy=False, repeat_bad=False, oversized=False, cap=None):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         root = Path(temp.name)
@@ -21,12 +21,16 @@ class ProposalValidationFeedbackTests(unittest.TestCase):
                 bad = len(self.messages) == 1 or repeat_bad
                 value = {'summary': 'update', 'edits': [{'path': 'outside.py' if policy else 'app.py',
                          'old': 'VALUE = 1\n', 'new': 'VALUE = 2' if bad else 'VALUE = 2\n'}]}
+                if bad and oversized:
+                    value['summary'] = 'invalid response padding ' * 1000
                 return Reply(json.dumps(value), 10)
         model = Model()
         config = {'mode': 'proposal', 'goal': 'Update VALUE and preserve OTHER',
             'proposal': {'files': ['app.py'], 'queries': ['VALUE']},
             'verification_repair_attempts': 1, 'budget': {'max_model_calls': calls},
             'acceptance': [[sys.executable, '-B', '-c', 'import app; assert app.VALUE == 2 and app.OTHER == 3']]}
+        if cap is not None:
+            config['agent'] = {'max_context_bytes': cap}
         result = run(config, root, root/'.keel/run', model=model)
         return result, model, (root/'app.py').read_bytes()
 
@@ -55,4 +59,24 @@ class ProposalValidationFeedbackTests(unittest.TestCase):
         result, model, source = self.trial(repeat_bad=True)
         self.assertEqual(result['failure']['category'], 'model_error')
         self.assertEqual(len(model.messages), 2)
+        self.assertEqual(source, b'VALUE = 1\nOTHER = 3\n')
+
+    def test_oversized_rejected_response_is_explicitly_omitted_without_losing_source(self):
+        result, model, source = self.trial(oversized=True, cap=4000)
+        self.assertEqual(result['status'], 'passed')
+        self.assertEqual(len(model.messages), 2)
+        payload = json.loads(model.messages[1][1]['content'])
+        self.assertIn('proposal_omitted', payload['goal'])
+        self.assertIn('proposal_sha256', payload['goal'])
+        self.assertNotIn('invalid response padding', payload['goal'])
+        self.assertIn('VALUE = 1\nOTHER = 3\n', payload['evidence'][0]['windows'][0]['text'])
+        self.assertEqual(source, b'VALUE = 2\nOTHER = 3\n')
+
+    def test_compact_feedback_still_respects_input_cap(self):
+        from keel.proposals import proposal_request, source_evidence
+        evidence = [source_evidence('app.py', 'VALUE = 1\nOTHER = 3\n', ['VALUE'])]
+        _, _, size = proposal_request('Update VALUE and preserve OTHER', ['app.py'], evidence, {})
+        result, model, source = self.trial(oversized=True, cap=size)
+        self.assertEqual(result['failure']['category'], 'budget_exhausted')
+        self.assertEqual(len(model.messages), 1)
         self.assertEqual(source, b'VALUE = 1\nOTHER = 3\n')

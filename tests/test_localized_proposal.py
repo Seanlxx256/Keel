@@ -143,7 +143,7 @@ class LocalizedProposalTests(unittest.TestCase):
                 result = run(self.config, self.root, self.root/f'.keel/run-{index}', model=model)
                 self.assertEqual(result['status'], 'failed')
                 self.assertEqual(result['failure']['stage'], 'scout')
-                self.assertEqual(len(model.messages), 1 if index == 0 else 2)
+                self.assertEqual(len(model.messages), 1 if index == 0 else (3 if index == 1 else 2))
                 self.assertIn('return 1', (self.root/'module.py').read_text())
 
     def test_operator_scope_is_rejected_and_context_cap_cannot_silently_truncate(self):
@@ -174,7 +174,7 @@ class LocalizedProposalTests(unittest.TestCase):
         model = Expanding({})
         result = run(self.config, self.root, self.root/'.keel/expanded', model=model)
         self.assertEqual(result['failure']['category'], 'model_error')
-        self.assertEqual(len(model.messages), 2)
+        self.assertEqual(len(model.messages), 3)
         model = Model({'files': ['module.py'], 'locations': ['module.py:1']})
         config = {**self.config, 'budget': {**self.config['budget'], 'max_model_calls': 1}}
         result = run(config, self.root, self.root/'.keel/budgeted', model=model)

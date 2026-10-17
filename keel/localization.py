@@ -6,7 +6,7 @@ Original implementation; not an Agentless reproduction or imported code.
 import ast
 import hashlib
 import json
-from .core import BudgetExceeded, ModelError, PolicyDenied
+from .core import BudgetExceeded, InputCapacityExceeded, InvalidSelection, ModelError, PolicyDenied
 
 
 ANCHOR_INSTRUCTION = ('Select 1..8 definition locations from the supplied structure for repair. '
@@ -39,14 +39,70 @@ def selection_request(goal, settings, *, stage, data, keys, instruction, structu
         messages[0]['content'] += ' Output schema: '+json.dumps(schema)
     size = len(json.dumps(messages).encode()) + (len(json.dumps(schema).encode()) if structured else 0)
     if size > settings.get('max_context_bytes', 12000):
-        raise BudgetExceeded(f'{stage} request exceeds context cap; no silent truncation')
+        raise InputCapacityExceeded(f'{stage} request exceeds context cap; no silent truncation')
     return messages, schema, size
 
 
-def select(model, workspace, goal, settings, *, stage, data, keys, instruction):
+def paged_select(model, workspace, goal, settings, *, stage, data, keys, instruction):
+    """Rank every catalog page, carrying up to eight explicitly selected IDs.
+
+    This pages structure/path metadata, never truncates selected source code.
+    All page calls consume the same model and wall-clock budgets.
+    """
+    if keys == ('files',) and isinstance(data.get('paths'), list):
+        field, items = 'paths', data['paths']
+        identifiers = lambda chunk: set(chunk)
+    elif keys == ('locations',) and isinstance(data.get('structure'), list):
+        field = 'structure'
+        items = [{'path': row['path'], 'symbols': [symbol], 'definition_bytes': [size]}
+                 for row in data['structure'] for symbol, size in zip(row['symbols'], row['definition_bytes'])]
+        identifiers = lambda chunk: {f"{row['path']}:{symbol[0]}" for row in chunk for symbol in row['symbols']}
+    else:
+        raise InputCapacityExceeded(stage + ' cannot be paged: no supported catalog')
+    base = {key: value for key, value in data.items() if key != field}
+    carry, chunk, page = [], [], 0
+    page_instruction = instruction + ' This is one catalog page. Rank this page together with previous_selection and return the best 1..8 IDs from their union. All catalog pages will be visited; omitted candidates are explicitly pruned by this ranking.'
+    def payload(entries):
+        return {**base, field: entries, 'previous_selection': carry, 'catalog_page': page + 1}
+    def fits(entries):
+        selection_request(goal, settings, stage=stage, data=payload(entries), keys=keys,
+            instruction=page_instruction, structured=callable(getattr(model, 'complete_json', None)))
+    def flush(entries):
+        nonlocal carry, page
+        selected = select(model, workspace, goal, settings, stage=stage+'-page', data=payload(entries),
+                          keys=keys, instruction=page_instruction, _paginate=False)[keys[0]]
+        if not set(selected) <= identifiers(entries) | set(carry):
+            raise InvalidSelection('Paged selection contains an ID not displayed in this page or previous selection')
+        carry = selected
+        page += 1
+        workspace.trace.emit('scout', 'localization_catalog_page', stage=stage, page=page,
+                             entries=len(entries), retained=len(carry), pruning='model-ranking')
+    for item in items:
+        try:
+            fits([*chunk, item])
+        except InputCapacityExceeded:
+            if not chunk:
+                raise
+            flush(chunk)
+            chunk = []
+            fits([item])
+        chunk.append(item)
+    if chunk:
+        flush(chunk)
+    if not carry:
+        raise InvalidSelection('Empty localization catalog')
+    return {keys[0]: carry}
+
+
+def select(model, workspace, goal, settings, *, stage, data, keys, instruction, _paginate=True):
     structured = callable(getattr(model, 'complete_json', None))
-    messages, schema, size = selection_request(goal, settings, stage=stage, data=data, keys=keys,
-        instruction=instruction, structured=structured)
+    try:
+        messages, schema, size = selection_request(goal, settings, stage=stage, data=data, keys=keys,
+            instruction=instruction, structured=structured)
+    except InputCapacityExceeded:
+        if not _paginate:
+            raise
+        return paged_select(model, workspace, goal, settings, stage=stage, data=data, keys=keys, instruction=instruction)
     workspace.budget.allow_model(size, settings.get('max_output', 1024))
     workspace.trace.emit('scout', 'llm_call_started', input_bytes=size, strategy='localized-proposal', localization_stage=stage)
     try:
@@ -75,12 +131,14 @@ def select(model, workspace, goal, settings, *, stage, data, keys, instruction):
                 raise ValueError('Selection requires 1..8 unique nonempty strings per field')
         return selection
     except (ValueError, TypeError) as error:
-        raise ModelError('Invalid localization: '+str(error)) from None
+        raise InvalidSelection('Invalid localization: '+str(error)) from None
 
 
-def localize(model, workspace, goal, settings):
+def localize(model, workspace, goal, settings, *, allowed_files=None):
     files = []
     for name in workspace.list_files(role='scout')['files']:
+        if allowed_files is not None and name not in allowed_files:
+            continue
         if not name.endswith('.py'):
             continue
         try:
@@ -92,7 +150,7 @@ def localize(model, workspace, goal, settings):
     selected = select(model, workspace, goal, settings, stage='file-selection', data={'paths': files}, keys=('files',),
         instruction='Select 1..8 existing Python source paths most relevant to the task. Return files only.')['files']
     if not set(selected) <= set(files):
-        raise ModelError('Invalid localization: missing or protected source file')
+        raise InvalidSelection('Invalid localization: missing or protected source file')
     structure, source = [], {}
     for name in selected:
         source[name] = workspace.read(name, role='scout')['value']
@@ -107,14 +165,20 @@ def localize(model, workspace, goal, settings):
             stage='anchor-selection' if attempt == 0 else 'anchor-refinement', data=data,
             keys=('locations',), instruction=ANCHOR_INSTRUCTION)
         try:
-            if not set(scope['locations']) <= allowed.keys():
+            invalid = sorted(set(scope['locations']) - allowed.keys())
+            if invalid:
+                workspace.trace.emit('scout', 'localization_invalid_locations', invalid_locations=invalid, attempt=attempt)
+                if attempt == 0:
+                    data = {**data, 'previous_locations': scope['locations'], 'invalid_locations': invalid,
+                            'selection_error': 'Use only definition start lines explicitly shown in symbols. Traceback import lines are not definition IDs; do not guess or map them. Return a corrected complete locations array.'}
+                    continue
                 raise ValueError('Locations must be exact identifiers shown in the selected structure')
             locations = {}
             for identifier in scope['locations']:
                 name, line = allowed[identifier]
                 locations.setdefault(name, []).append(line)
         except (ValueError, TypeError, KeyError) as error:
-            raise ModelError('Invalid localization: '+str(error)) from None
+            raise InvalidSelection('Invalid localization: '+str(error)) from None
         evidence = [located_source_evidence(name, source[name], positions) for name, positions in locations.items()]
         try:
             proposal_request(goal, list(locations), evidence, settings,
