@@ -10,16 +10,19 @@ from .upgradebench import source_file
 def compare_python(before, after):
     record = {'base_sha256': hashlib.sha256(before).hexdigest() if before is not None else None,
               'gold_sha256': hashlib.sha256(after).hexdigest() if after is not None else None}
-    trees = []
+    trees, runtime_trees = [], []
     for source in (before, after):
         if source is None:
             trees.append(None)
+            runtime_trees.append(None)
             continue
         try:
             trees.append(ast.dump(ast.parse(source, type_comments=True), include_attributes=False))
+            runtime_trees.append(ast.dump(ast.parse(source, type_comments=False), include_attributes=False))
         except (SyntaxError, ValueError, UnicodeError):
-            return {**record, 'status': 'unsupported_python_syntax', 'ast_changed': None}
-    return {**record, 'status': 'compared', 'ast_changed': trees[0] != trees[1]}
+            return {**record, 'status': 'unsupported_python_syntax', 'ast_changed': None, 'runtime_ast_changed': None}
+    return {**record, 'status': 'compared', 'ast_changed': trees[0] != trees[1],
+            'runtime_ast_changed': runtime_trees[0] != runtime_trees[1]}
 
 
 def review_sources(row, base, gold):
@@ -48,6 +51,8 @@ def review_sources(row, base, gold):
         status = 'unsupported_python_syntax'
     elif not any(row['ast_changed'] for row in comparisons):
         status = 'excluded_no_python_ast_change'
+    elif not any(row['runtime_ast_changed'] for row in comparisons):
+        status = 'excluded_type_comments_only'
     else:
         status = 'needs_environment_reproduction'
     return {'status': status, 'files': comparisons, 'changed_files_curator_only': changed,

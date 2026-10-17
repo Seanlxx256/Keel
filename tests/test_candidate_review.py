@@ -8,6 +8,14 @@ from keel.candidate_review import compare_python, review_sources
 
 
 class CandidateReviewTests(unittest.TestCase):
+    def test_type_ignore_and_type_comments_do_not_imply_executable_changes(self):
+        for before, after in ((b'call()  # type: ignore[no-untyped-call]\n', b'call()\n'),
+                              (b'x = 1  # type: int\n', b'x = 1\n')):
+            result = compare_python(before, after)
+            self.assertTrue(result['ast_changed'])
+            self.assertFalse(result['runtime_ast_changed'])
+        self.assertTrue(compare_python(b'x = call()\n', b'x = other()\n')['runtime_ast_changed'])
+
     def test_comments_are_equivalent_but_docstrings_and_code_remain_changes(self):
         self.assertFalse(compare_python(b'x = 1 # old comment\n', b'x = 1 # corrected comment\n')['ast_changed'])
         self.assertTrue(compare_python(b'"old doc"\nx = 1\n', b'"new doc"\nx = 1\n')['ast_changed'])
@@ -35,6 +43,9 @@ class CandidateReviewTests(unittest.TestCase):
                 result = review_sources(row, base, gold)
                 self.assertEqual(result['status'], 'needs_environment_reproduction')
                 self.assertFalse(result['benchmark_ready'])
+                (gold/'app.py').write_text('x = 1 # type: int\n')
+                result = review_sources(row, base, gold)
+                self.assertEqual(result['status'], 'excluded_type_comments_only')
                 (gold/'extra.py').write_text('unexpected = 1\n')
                 with self.assertRaisesRegex(ValueError, 'source diff'):
                     review_sources(row, base, gold)

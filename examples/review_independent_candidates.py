@@ -55,7 +55,7 @@ def main():
         'collection_plan_sha256': file_hash(args.collection/'plan.json'),
         'shortlist_sha256': file_hash(args.collection/'shortlist.json'),
         'reviewer_sha256': file_hash(root/'keel/candidate_review.py'),
-        'runner_sha256': file_hash(Path(__file__).resolve()), 'screening_rule': 'python-ast-change-required-v1',
+        'runner_sha256': file_hash(Path(__file__).resolve()), 'screening_rule': 'python-runtime-ast-change-required-v2',
         'records': rows, 'independent_tasks_ready': 0, 'benchmark_ready': False,
         'review_scope': 'eligible-only diagnostic; original shortlist unchanged' if args.eligible_only else 'fixed selected shortlist',
         'limitations': 'Curator-only source review; fixed selected IDs retained, no reserve promotion, no model calls or executable task claims.'}
