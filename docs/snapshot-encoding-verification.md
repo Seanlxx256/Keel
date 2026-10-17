@@ -1,0 +1,9 @@
+# Exact-byte snapshots with upstream encoding attributes
+
+Sphinx gold staging snapshot `5d3bb2e3b7c47e4ecd540c657018f16b961c821b.partial` failed the tracked-change check. Git listed two `wrongenc.inc` fixtures. Their raw working-tree bytes exactly matched their commit blobs, but the upstream `.gitattributes` working-tree-encoding=latin-1 filter converted bytes during Git's normal cleanliness comparison. Therefore a nonzero diff did not establish an actual byte change.
+
+The snapshot validator now retains the normal strict diff check. Only a normal difference exit code (1) can trigger a fallback. Raw Git diff entries must all be ordinary modified regular files with identical old/new modes. Each current path must stay inside the snapshot and cannot be a symlink. Each file is then compared byte-for-byte with its exact commit blob. Missing files, actual content changes, mode/type changes, unexpected diff formats and Git errors remain rejected. Untracked Python checks remain unchanged. This does not disable attributes globally or normalize fixture content.
+
+Two regression tests cover the encoding-attribute false positive, actual content modification and deletion refusal. Eleven preparation tests and seventeen benchmark tests also passed. The actual saved gold staging snapshot passed the new check without content changes. Its marker and bounded destination were verified before publishing it to the final commit directory; the original failed review report remains preserved.
+
+An offline source review was then started from the already downloaded base/gold snapshots. This is curator source verification, not runtime inference, dependency-transition reproduction or benchmark success. No model calls or new snapshot downloads are needed for this correction. Future full implementation freezes must include the changed snapshot validator.

@@ -1,0 +1,15 @@
+{
+  "schema_version": 3,
+  "repositories": ["pallets/jinja", "sphinx-doc/sphinx", "pallets/werkzeug", "encode/uvicorn"],
+  "dependencies": {"pallets/jinja": "markupsafe", "sphinx-doc/sphinx": "docutils", "pallets/werkzeug": "markupsafe", "encode/uvicorn": "h11"},
+  "query": "dependency-name",
+  "limit_per_repository": 5,
+  "pages": 1,
+  "seed": 20261018,
+  "selected_repositories": 2,
+  "max_changed_python_sources": 3,
+  "missing_commit_policy": "record_exclusion_count_toward_limit",
+  "localization_policy": "Future runtime evidence comes from base source and observed target failures, including bounded source frames; never use gold diff or curator changed-path lists as model inputs.",
+  "attempt_policy": "New fixed cohort, not reserve promotion. Preserve selection and all failed reviews/reproductions. No model calls until three-cell behavior and environment gates pass. Outcome-driven runtime changes make the affected task development data.",
+  "scope": "Metadata discovery after observed-frame handoff stabilization. Jinja and Sphinx were previously metadata-collected but not repaired; no human/pretraining unseen claim. New candidate IDs require exposure review before model execution. No independent or official benchmark claim."
+}

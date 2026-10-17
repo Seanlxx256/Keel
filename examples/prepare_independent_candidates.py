@@ -10,7 +10,7 @@ import uuid
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from examples.mine_upgradebench import GitHub, collect, replay_fetch
 from keel.candidate_selection import shortlist, validate_policy
-from keel.evaluation_protocol import registry, file_hash
+from keel.evaluation_protocol import registry, file_hash, canonical_repo
 
 
 def main():
@@ -79,6 +79,7 @@ def main():
         return result
     result = save()
     active = bool(args.execute or prior)
+    resolved_repositories = {}
     if active:
         for number, repo in enumerate(repos, 1):
             print(f'[Candidates {number}/{len(repos)}] {repo}', flush=True)
@@ -87,6 +88,7 @@ def main():
             state = collections[repo]
             client = None
             route = None
+            resolved_repository = repo
             try:
                 if args.replay_from:
                     source = args.replay_from/'repositories'/repo.replace('/', '--')
@@ -99,10 +101,24 @@ def main():
                     client = GitHub(directory/'responses', cached=cached) if cached is not None else GitHub(directory/'responses')
                     fetch = client.get
                 def tracked_fetch(request_route):
-                    nonlocal route
+                    nonlocal route, resolved_repository
                     route = request_route
-                    return fetch(request_route)
+                    response = fetch(request_route)
+                    if request_route == '/repos/' + repo:
+                        resolved_repository = canonical_repo(response.get('full_name'), known)
+                        development = {canonical_repo(row['repository'], known) for row in known['tasks']}
+                        if resolved_repository in development or resolved_repository in resolved_repositories.values():
+                            raise ValueError('Resolved repository is development data or duplicates another planned repository')
+                        resolved_repositories[repo] = resolved_repository
+                        state['resolved_repository'] = resolved_repository
+                    return response
                 def retain(row):
+                    if canonical_repo(row['repository'], known) != resolved_repository:
+                        raise ValueError('Candidate repository does not match verified GitHub repository metadata')
+                    row = dict(row)
+                    if resolved_repository != repo:
+                        row.update(repository=repo, resolved_repository=resolved_repository,
+                                   repository_resolution_route='/repos/' + repo)
                     state['candidates'].append(row)
                     save()
                 dependency = policy['dependencies'][repo] if policy['schema_version'] == 3 else None

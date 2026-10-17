@@ -183,13 +183,37 @@ def canonical_repository_id(value):
     return value.casefold()
 
 
+def raw_tracked_changes_match(repo, prefix, expected):
+    """Accept only filter-induced diffs whose raw bytes and Git modes equal the commit."""
+    changed = subprocess.run(prefix + ['diff', '--raw', '--no-abbrev', '-z', '--no-ext-diff',
+        '--no-textconv', expected, '--'], capture_output=True, timeout=10)
+    if changed.returncode != 0 or not changed.stdout:
+        return False
+    entries = changed.stdout.split(b'\0')
+    if entries[-1] != b'' or (len(entries)-1) % 2:
+        return False
+    for i in range(0, len(entries)-1, 2):
+        header = entries[i].decode('ascii').split()
+        if (len(header) != 5 or header[4] != 'M' or header[0] not in (':100644', ':100755')
+                or header[0][1:] != header[1] or not re.fullmatch('[0-9a-f]{40,64}', header[2])):
+            return False
+        name = entries[i+1].decode('utf-8')
+        path = repo/name
+        if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(repo.resolve()):
+            return False
+        blob = subprocess.run(prefix + ['cat-file', 'blob', header[2]], capture_output=True, timeout=10)
+        if blob.returncode != 0 or path.read_bytes() != blob.stdout:
+            return False
+    return True
+
+
 def check_snapshot(repo: Path, expected):
     if not isinstance(expected, str) or not re.fullmatch(r"[0-9a-fA-F]{40,64}", expected) or git_ref(repo) != expected:
         raise ValueError("SWE evaluation requires the exact labeled Git base commit")
     prefix = ["git", "-c", f"safe.directory={repo.as_posix()}", "-C", str(repo)]
     changes = subprocess.run(prefix + ["diff", "--quiet", "--no-ext-diff", "--no-textconv", expected, "--"],
                              stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=10)
-    if changes.returncode != 0:
+    if changes.returncode != 0 and (changes.returncode != 1 or not raw_tracked_changes_match(repo, prefix, expected)):
         raise ValueError("SWE repository has tracked changes or could not be checked")
     for attempt in range(2):
         untracked = subprocess.run(prefix + ["ls-files", "--others", "-z"],
