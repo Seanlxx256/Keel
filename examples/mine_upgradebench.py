@@ -124,6 +124,24 @@ def replay_fetch(directory):
     return fetch
 
 
+def unique_file_paths(rows, expected):
+    groups = {}
+    for entry in rows:
+        name = entry.get('filename') if isinstance(entry, dict) else None
+        if not isinstance(name, str) or not name:
+            raise ValueError('Invalid PR file record')
+        groups.setdefault(name, []).append(entry)
+    duplicates = []
+    for name, entries in groups.items():
+        if len(entries) > 1:
+            if len(entries) != 2 or {e.get('status') for e in entries} != {'added', 'removed'}:
+                raise ValueError('Incomplete or duplicate PR file listing')
+            duplicates.append({'path': name, 'statuses': ['added', 'removed']})
+    if len(groups) != expected:
+        raise ValueError('Incomplete or duplicate PR file listing')
+    return list(groups), duplicates
+
+
 def collect(repository, fetch, *, limit=5, pages=1, on_candidate=None,
             discovery='recent', query='migration', on_skip=None, record_missing_commits=False, dependency=None):
     repository = canonical_repository_id(repository)
@@ -161,12 +179,13 @@ def collect(repository, fetch, *, limit=5, pages=1, on_candidate=None,
             count = pr.get('changed_files')
             if type(count) is not int or not 0 < count <= 300:
                 raise ValueError('Candidate file count is invalid or exceeds the 300-file collection cap')
-            files = []
+            file_entries = []
             for file_page in range(1, (count + 99) // 100 + 1):
                 file_rows = fetch(f"{prefix}/pulls/{row['number']}/files?per_page=100&page={file_page}")
-                files.extend(entry['filename'] for entry in file_rows)
-            if len(files) != count or len(set(files)) != count:
-                raise ValueError('Incomplete or duplicate PR file listing')
+                if not isinstance(file_rows, list):
+                    raise ValueError('Invalid PR file listing')
+                file_entries.extend(file_rows)
+            files, file_operations = unique_file_paths(file_entries, count)
             if discovery == 'search' and not any(source_file(path) for path in files):
                 if on_skip is not None:
                     on_skip({'number': row['number'], 'reason': 'no_non_test_source_change'})
@@ -199,7 +218,8 @@ def collect(repository, fetch, *, limit=5, pages=1, on_candidate=None,
                   (entry['path'].startswith('.github/workflows/') or entry['path'] in {'.gitlab-ci.yml', '.travis.yml', 'Jenkinsfile'})]
             selected.append({'repository': repository, 'number': row['number'], 'title': pr['title'],
                              'merged': pr['merged'], 'base_commit': commit['parents'][0]['sha'],
-                             'gold_commit': gold, 'files': files, 'ci_paths': ci})
+                             'gold_commit': gold, 'files': files, 'ci_paths': ci,
+                             'file_listing_operations': file_operations})
             if dependency is not None:
                 selected[-1]['transition_signal'] = signal
             if on_candidate is not None:

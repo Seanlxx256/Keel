@@ -20,7 +20,10 @@ def main():
     parser.add_argument('--replay-from', type=Path, help='Offline replay of hash-verified collection receipts')
     parser.add_argument('--resume-from', type=Path, help='Reuse verified cached responses; fetch only missing routes under the same policy')
     parser.add_argument('--cache-from', type=Path, help='New v2 experiment reusing a v1/v2 collection cache; provenance retained')
+    parser.add_argument('--file-listing-amendment', action='store_true', help='Explicit new collection using verified prior receipts with changed collector file-operation handling; requires resume-from')
     args = parser.parse_args()
+    if args.file_listing_amendment and not args.resume_from:
+        parser.error('--file-listing-amendment requires --resume-from')
     if sum(bool(value) for value in (args.execute, args.replay_from, args.resume_from, args.cache_from)) > 1:
         parser.error('Choose only one collection/replay/resume/cache mode')
     root = Path(__file__).resolve().parents[1]
@@ -50,6 +53,8 @@ def main():
             if original['policy_sha256'] != policy_hash:
                 raise ValueError('Replay policy differs')
             required_hashes = code_hashes if args.replay_from else {key: value for key, value in code_hashes.items() if key != 'runner_sha256'}
+            if args.file_listing_amendment:
+                required_hashes = {key: value for key, value in required_hashes.items() if key != 'collector_sha256'}
             if any(original.get(key) != value for key, value in required_hashes.items()):
                 raise ValueError('Replay collector/selection implementation differs')
     output = root/'.keel/independent-candidates'/uuid.uuid4().hex
@@ -58,6 +63,8 @@ def main():
     plan = {'policy': policy, 'policy_sha256': policy_hash,
         'development_registry_sha256': file_hash(root/'examples/evaluation_development_registry.json'),
         **code_hashes, 'benchmark_ready': False}
+    if args.file_listing_amendment:
+        plan['collector_amendment'] = 'unique-path-added-removed-pair-v1; raw receipts retained; policy and selector unchanged; new collection'
     if prior:
         plan['prior_collection'] = {'directory': str(prior.resolve()), 'mode': 'new_v2_cache_reuse' if args.cache_from else 'resume' if args.resume_from else 'offline_replay',
             'plan_sha256': file_hash(prior/'plan.json'), 'previous_runner_sha256': original.get('runner_sha256'),

@@ -40,7 +40,7 @@ class TrialTests(unittest.TestCase):
             (package/'acceptance.py').write_text('assert True')
             model = root/'model.json'
             model.write_text(json.dumps({'provider': 'ollama', 'name': 'fixture'}))
-            task = {'id': 'httpx-1588', 'base_commit': 'a'*40, 'goal': 'Repair compatibility'}
+            task = {'id': 'httpx-1588', 'repository': 'encode/httpx', 'source_scope': 'httpx/**/*.py', 'base_commit': 'a'*40, 'goal': 'Repair compatibility'}
             manifest = {'curator_receipt': {'base_inventory': runner.inventory(snapshot)},
                 'acceptance': {'image': 'sha256:'+'b'*64, 'versions': {'fixture': '1'}}}
             with patch.object(runner, 'load_package', return_value=(manifest, task)), patch.object(
@@ -59,7 +59,7 @@ class TrialTests(unittest.TestCase):
                             [{'module': 'fixture', 'distribution': 'fixture', 'version': '1'}])
                     self.assertTrue(frozen['config']['agent']['require_change'])
                     self.assertTrue(frozen['baseline_feedback'])
-                    self.assertEqual(frozen['baseline_feedback_policy'], 'case-errors-v1')
+                    self.assertEqual(frozen['baseline_feedback_policy'], 'case-errors-frames-v2')
                     self.assertNotIn('proposal', frozen['config'])
                     self.assertNotIn('work_items', frozen['config'])
                     self.assertEqual(frozen['config']['budget']['max_model_calls'], 30)

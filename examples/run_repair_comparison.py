@@ -37,7 +37,9 @@ def case_records(execution):
     return {r['case']: r['passed'] for r in records}
 
 
-def prepare(root, output, model_file, cases, seed=42):
+def prepare(root, output, model_file, cases, seed=42, arms=(0, 2)):
+    if not arms or len(arms) != len(set(arms)) or any(type(a) is not int or a not in (0, 2) for a in arms):
+        raise ValueError('Repair arms must be unique values from 0 and 2')
     model = json.loads(model_file.read_text())
     if any(k in model for k in ('api_key', 'token', 'authorization')):
         raise ValueError('Credential environment references only')
@@ -52,7 +54,7 @@ def prepare(root, output, model_file, cases, seed=42):
         if not all(expected.values()):
             raise ValueError('Reference acceptance must pass')
         common = None
-        for rounds in (0, 2):
+        for rounds in arms:
             directory = f"runs/{spec['id']}-repair-{rounds}"
             repo = output/directory/'repo'
             repo.mkdir(parents=True)
@@ -76,6 +78,7 @@ def prepare(root, output, model_file, cases, seed=42):
     random.Random(seed).shuffle(rows)
     plan = {'rows': rows, 'seed': seed, 'implementation': implementation_hashes(root),
             'unique_tasks': len(specs), 'heldout_tasks': 0, 'benchmark_ready': False,
+            'experiment_kind': 'paired' if set(arms) == {0, 2} else 'single-arm diagnostic',
             'scope': 'Previously observed development tasks; no significance or generalization claim'}
     (output/'plan.json').write_text(json.dumps(plan, indent=2))
     (output/'plan.sha256').write_text(file_hash(output/'plan.json'))
@@ -155,19 +158,20 @@ def main():
     parser.add_argument('--model-config', type=Path)
     parser.add_argument('--case', action='append', help='CASE=REPRODUCTION_DIRECTORY')
     parser.add_argument('--execute', action='store_true')
+    parser.add_argument('--repair-arms', type=int, nargs='+', choices=(0, 2), help='Preparation only; default both arms, use 2 for one recovery diagnostic')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     if args.execute:
-        if args.model_config or args.case:
+        if args.model_config or args.case or args.repair_arms:
             parser.error('Execute frozen plan only')
         report = execute(root, args.output)
     else:
         if not args.model_config or not args.case:
             parser.error('Preparation requires model config and cases')
         cases = [(v.split('=', 1)[0], Path(v.split('=', 1)[1])) for v in args.case]
-        plan = prepare(root, args.output, args.model_config, cases)
+        plan = prepare(root, args.output, args.model_config, cases, arms=tuple(args.repair_arms) if args.repair_arms else (0, 2))
         report = {'prepared_only': True, 'runs': len(plan['rows']), 'unique_tasks': plan['unique_tasks'],
-                  'heldout_tasks': 0, 'new_model_calls': 0}
+                  'heldout_tasks': 0, 'new_model_calls': 0, 'experiment_kind': plan['experiment_kind']}
     print(json.dumps(report, indent=2))
     return 1 if args.execute and not all(r['passed'] for r in report['records']) else 0
 

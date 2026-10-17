@@ -27,6 +27,12 @@ class RepairComparisonTests(unittest.TestCase):
             self.assertEqual(pair_key(a['config']), pair_key(b['config']))
             self.assertEqual({a['repair_attempts'], b['repair_attempts']}, {0, 2})
             self.assertEqual(a['source'], b['source'])
+            with patch('examples.run_repair_comparison.real_task', return_value=(spec, 'sha256:'+'a'*64, 'provenance')), \
+                 patch('examples.run_repair_comparison.from_config'):
+                single = prepare(root, root/'single', model, [('fixture', root)], arms=(2,))
+            self.assertEqual(len(single['rows']), 1)
+            self.assertEqual(single['rows'][0]['repair_attempts'], 2)
+            self.assertEqual(single['experiment_kind'], 'single-arm diagnostic')
             (root/'out'/b['directory']/'repo/module.py').write_text('changed')
             with patch('examples.run_repair_comparison.run') as runner:
                 with self.assertRaisesRegex(ValueError, 'Source/path mismatch'):

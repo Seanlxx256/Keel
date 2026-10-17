@@ -1,0 +1,15 @@
+{
+  "schema_version": 3,
+  "repositories": ["pallets/jinja", "sphinx-doc/sphinx", "aio-libs/aiohttp", "django/django"],
+  "dependencies": {"pallets/jinja": "markupsafe", "sphinx-doc/sphinx": "docutils", "aio-libs/aiohttp": "yarl", "django/django": "asgiref"},
+  "query": "dependency-name",
+  "limit_per_repository": 5,
+  "pages": 1,
+  "seed": 20261017,
+  "selected_repositories": 2,
+  "max_changed_python_sources": 3,
+  "missing_commit_policy": "record_exclusion_count_toward_limit",
+  "localization_policy": "Use base source and observed target-environment failures for future model evidence. Never expose gold diff, curator source file lists or gold source to the model.",
+  "attempt_policy": "Freeze runtime before collection. Retain failed candidates and reproductions; do not promote reserves based on model outcomes. No model execution until environment and acceptance gates pass.",
+  "scope": "New metadata-only cohort outside repositories used in recent repair diagnostics. No claim that candidates are unseen to the pretrained model, valid migrations, reproducible, or benchmark ready. No reuse or replacement of previous cohorts."
+}

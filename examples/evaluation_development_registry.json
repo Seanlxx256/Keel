@@ -1,9 +1,40 @@
 {
   "schema_version": 1,
   "tasks": [
-    {"id": "starlette-1936", "repository": "kludex/starlette", "pr": 1936, "reason": "Repeated source, prompt, protocol and model diagnostics"},
-    {"id": "starlette-2526", "repository": "kludex/starlette", "pr": 2526, "reason": "Evidence anchors revised after context overflow; inspected repair"},
-    {"id": "flask-wtf-565", "repository": "pallets-eco/flask-wtf", "pr": 565, "reason": "Inspected failures; feedback and source-window policy revised"}
+    {
+      "id": "starlette-1936",
+      "repository": "kludex/starlette",
+      "pr": 1936,
+      "reason": "Repeated source, prompt, protocol and model diagnostics"
+    },
+    {
+      "id": "starlette-2526",
+      "repository": "kludex/starlette",
+      "pr": 2526,
+      "reason": "Evidence anchors revised after context overflow; inspected repair"
+    },
+    {
+      "id": "flask-wtf-565",
+      "repository": "pallets-eco/flask-wtf",
+      "pr": 565,
+      "reason": "Inspected failures; feedback and source-window policy revised"
+    },
+    {
+      "id": "httpx-1588",
+      "repository": "encode/httpx",
+      "pr": 1588,
+      "reason": "Repeated localization, dependency-contract, context-cap and verification-repair diagnostics; inspected patches and acceptance failures"
+    },
+    {
+      "id": "django-13586",
+      "repository": "django/django",
+      "pr": 13586,
+      "reason": "First model failure inspected; observed traceback handoff revised after missing location evidence. Further runs are development diagnostics."
+    }
   ],
-  "repository_aliases": {"encode/starlette": "kludex/starlette", "wtforms/flask-wtf": "pallets-eco/flask-wtf", "lepture/flask-wtf": "pallets-eco/flask-wtf"}
+  "repository_aliases": {
+    "encode/starlette": "kludex/starlette",
+    "wtforms/flask-wtf": "pallets-eco/flask-wtf",
+    "lepture/flask-wtf": "pallets-eco/flask-wtf"
+  }
 }

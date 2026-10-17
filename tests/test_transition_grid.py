@@ -23,7 +23,7 @@ class GridTests(unittest.TestCase):
         self.model.write_text(json.dumps({'provider': 'ollama', 'name': 'fixture'}))
         self.manifest = {'curator_receipt': {'base_inventory': runner.inventory(source)},
             'acceptance': {'image': 'sha256:'+'a'*64, 'versions': {'httpcore': '0.13.0'}}}
-        self.task = {'id': 'httpx-1588', 'base_commit': 'a'*40, 'goal': 'Repair compatibility'}
+        self.task = {'id': 'httpx-1588', 'repository': 'encode/httpx', 'source_scope': 'httpx/**/*.py', 'base_commit': 'a'*40, 'goal': 'Repair compatibility'}
 
     def prepare(self, output):
         with patch.object(runner, 'load_package', return_value=(self.manifest, self.task)):
