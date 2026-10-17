@@ -60,6 +60,22 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(len(model.calls), 3)
         self.assertIn('return 1', (root/'library.py').read_text())
 
+    def test_protected_test_selection_gets_specific_feedback_without_write_permission(self):
+        root = self.workspace()
+        (root/'tests').mkdir()
+        target = root/'tests/test_library.py'
+        target.write_text('def test_value():\n    assert True\n')
+        before = target.read_bytes()
+        model = self.model([{'files': ['library.py', 'tests/test_library.py']},
+                            {'files': ['library.py']}, {'locations': ['library.py:1']},
+                            self.edit('return 1', 'return 3')])
+        result = run(self.config(), root, root/'.keel/run', model=model)
+        self.assertEqual(result['status'], 'passed')
+        self.assertIn('tests/test_library.py', model.calls[1][1]['content'])
+        self.assertIn('not repair targets', model.calls[1][1]['content'])
+        self.assertIn('read-only evidence', model.calls[1][0]['content'])
+        self.assertEqual(target.read_bytes(), before)
+
     def test_transport_and_permission_errors_do_not_retry(self):
         for error in (ModelError('HTTP 401'), PolicyDenied('blocked')):
             with self.subTest(error=type(error).__name__):

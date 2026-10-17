@@ -64,3 +64,18 @@ class FactoryTaskTests(unittest.TestCase):
                 result = execute(factory, root/'trial', {})
             self.assertTrue(result['passed'])
             self.assertEqual((factory/'base/app.py').read_text(), 'VALUE = 1')
+
+    def test_disabled_arm_has_no_recovery_controller_or_verification_retry(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            factory = self.fixture(root)
+            def solve(config, repo, output, model):
+                self.assertEqual(config['recovery'], {'max_actions': 0})
+                self.assertEqual(config['verification_repair_attempts'], 0)
+                return {'status': 'failed', 'budget': {}}
+            with patch('examples.run_factory_task.from_config'), \
+                 patch('examples.run_factory_task.installed_versions'), \
+                 patch('examples.run_factory_task.probe', return_value={'stdout': 'failure'}), \
+                 patch('examples.run_factory_task.transition_passed', return_value=True), \
+                 patch('examples.run_factory_task.run', side_effect=solve):
+                self.assertFalse(execute(factory, root/'trial', {}, repair_attempts=0)['passed'])

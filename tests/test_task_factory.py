@@ -4,8 +4,8 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
-from keel.core import Budget, Limits
-from keel.task_factory import EnvironmentPlanner, construct, freeze_test_workspaces, transition_passed, validate_recipe
+from keel.core import Budget, Limits, BudgetExceeded
+from keel.task_factory import EnvironmentPlanner, construct, freeze_test_workspaces, transition_passed, validate_recipe, recipe_fingerprint
 from keel.models import Reply
 from examples.run_autonomous_campaign import discover, solver_config
 
@@ -65,6 +65,79 @@ class FactoryTests(unittest.TestCase):
             self.assertTrue(all('do not invent' in row['error'] for row in result['attempts']))
             build.assert_not_called()
 
+    def test_protocol_corrections_leave_build_recovery_available(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, gold = self.snapshots(root)
+            responses = [{**self.recipe(), 'common': ['pytest']}, {'type': 'object'},
+                         self.recipe(), {**self.recipe(), 'python': '3.10'}]
+            requests = []
+            class Model:
+                def complete_json(self, messages, **kwargs):
+                    requests.append(messages)
+                    return Reply(json.dumps(responses[len(requests)-1]), 10)
+            budget = Budget(Limits(max_tokens=100000, max_model_calls=4))
+            planner = EnvironmentPlanner(Model(), root, budget)
+            with patch('keel.task_factory.build_environment', side_effect=[
+                    (None, {'returncode': 1, 'tail': 'Observed packaging runtime failure'}),
+                    ('sha256:'+'a'*64, {}), ('sha256:'+'b'*64, {})]), \
+                 patch('keel.task_factory.installed_versions', return_value={}), \
+                 patch('keel.task_factory.probe', side_effect=[self.cell(True), self.cell(False), self.cell(True)]):
+                result, _ = construct({'title': 'Compatibility'}, base, gold, root/'factory', planner, attempts=2)
+            self.assertEqual(result['status'], 'transition_verified')
+            self.assertEqual(len(result['attempts']), 2)
+            self.assertEqual(budget.model_calls, 4)
+            self.assertIn('Observed packaging runtime failure', requests[3][1]['content'])
+
+    def test_protocol_correction_cannot_bypass_global_model_budget(self):
+        with tempfile.TemporaryDirectory() as temp:
+            model = Mock()
+            model.complete_json.return_value = Reply('{"type":"object"}', 1)
+            budget = Budget(Limits(max_model_calls=1, max_tokens=100000))
+            planner = EnvironmentPlanner(model, Path(temp), budget)
+            with self.assertRaises(BudgetExceeded):
+                planner.plan({}, None)
+            self.assertEqual(model.complete_json.call_count, 1)
+
+    def test_failed_recipe_reordered_by_model_is_corrected_before_another_build(self):
+        with tempfile.TemporaryDirectory() as temp:
+            old = self.recipe()
+            old['common'] = ['pytest==7.4.4', 'pip==22.3.1']
+            corrected = {**old, 'common': ['pytest==7.4.4', 'pip==24.0']}
+            responses = [{**old, 'common': list(reversed(old['common']))}, corrected]
+            requests = []
+            class Model:
+                def complete_json(self, messages, **kwargs):
+                    requests.append(messages)
+                    return Reply(json.dumps(responses[len(requests)-1]), 10)
+            planner = EnvironmentPlanner(Model(), Path(temp), Budget(Limits(max_tokens=100000)))
+            result = planner.plan({}, {'previous_recipe': old, 'builds': {'new': {'tail': 'pip check crashed'}}})
+            self.assertEqual(result['common'], corrected['common'])
+            self.assertIn('exact recipe already failed', requests[1][1]['content'])
+            self.assertIn('pip check crashed', requests[1][1]['content'])
+            self.assertEqual(recipe_fingerprint(old), recipe_fingerprint(responses[0]))
+
+    def test_resolved_python_inventory_is_frozen_before_acceptance_and_reused_by_solver(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, gold = self.snapshots(root)
+            recipe = {'kind': 'python', 'python': '3.12', 'old': '3.11', 'new': '3.12',
+                      'common': ['pytest==7.4.4', 'pip==24.0', 'setuptools==68.2.2', 'wheel==0.41.3'],
+                      'resolve_dependencies': True}
+            pins = dict(pin.split('==') for pin in recipe['common'])
+            pins['indirect'] = '1.0'
+            planner = Mock()
+            planner.budget = Budget(Limits())
+            planner.plan.return_value = recipe
+            with patch('keel.task_factory.build_environment', return_value=('sha256:'+'a'*64, {})), \
+                 patch('keel.task_factory.installed_versions', return_value={'inventory': pins}), \
+                 patch('keel.task_factory.probe', side_effect=[self.cell(True), self.cell(False), self.cell(True)]):
+                result, _ = construct({'title': 'Python 3.12 compatibility'}, base, gold, root/'factory', planner)
+            self.assertEqual(result['status'], 'transition_verified')
+            self.assertIn('indirect==1.0', result['recipe']['common'])
+            self.assertNotIn('resolve_dependencies', result['recipe'])
+            self.assertTrue((root/'factory/attempt-1/resolved-recipe.json').exists())
+
     def test_target_distribution_cannot_be_duplicated_in_common(self):
         with self.assertRaisesRegex(ValueError, 'only in old/new'):
             validate_recipe({**self.recipe(), 'common': ['pytest==7.4.4', 'dependency==1.0']})
@@ -104,6 +177,21 @@ class FactoryTests(unittest.TestCase):
                              (workspaces['gold']/'tests/test_removed.py').read_bytes())
             self.assertEqual(tests, ['tests'])
             self.assertIn('tests/test_lib.py', frozen)
+
+    def test_removed_upstream_tests_require_review_before_any_model_or_build(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, gold = self.snapshots(root)
+            (base/'tests/obsolete_test.py').write_text('import removed_module')
+            planner = Mock()
+            with patch('keel.task_factory.build_environment') as build:
+                result, workspaces = construct({'title': 'Compatibility'}, base, gold, root/'factory', planner)
+            self.assertEqual(result['status'], 'acceptance_review_required')
+            self.assertEqual(result['acceptance_preflight']['removed_upstream_tests'], ['tests/obsolete_test.py'])
+            self.assertEqual(workspaces, {})
+            planner.plan.assert_not_called()
+            build.assert_not_called()
+            self.assertTrue((base/'tests/obsolete_test.py').exists())
 
     def test_build_failure_is_observed_and_replanned_while_acceptance_stays_frozen(self):
         with tempfile.TemporaryDirectory() as temp:

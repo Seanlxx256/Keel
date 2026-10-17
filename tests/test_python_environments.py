@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from keel.task_factory import build_environment, construct, environment_spec, installed_versions, unsupported_transition, validate_recipe
+from keel.task_factory import build_environment, construct, environment_spec, installed_versions, unsupported_transition, validate_recipe, lock_python_recipe
 from keel.core import Budget, Limits
 from examples.run_autonomous_campaign import solver_config
 
@@ -83,3 +83,32 @@ class PythonEnvironmentTests(unittest.TestCase):
                    'images': {'new': 'image'}, 'attempts': [{'cells': {'base_new': {'stdout': 'observed error'}}}]}
         config = solver_config({}, factory, ['tests'], Budget(Limits()), 24000)
         self.assertIn('Restore compatibility with Python 3.12', config['goal'])
+
+    def test_resolver_build_and_inventory_lock_preserve_python_only_axis(self):
+        recipe = {**self.recipe(), 'resolve_dependencies': True}
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            def build(argv, directory, timeout, log):
+                (directory/'image.id').write_text('sha256:'+'a'*64)
+                return {'returncode': 0, 'timeout': False}
+            with patch('keel.task_factory.command', side_effect=build):
+                build_environment(recipe, 'new', root/'image', 10)
+            self.assertNotIn('--no-deps', (root/'image/Dockerfile').read_text())
+        pins = dict(pin.split('==') for pin in recipe['common'])
+        pins['transitive-package'] = '1.2.3'
+        locked = lock_python_recipe(recipe, {'old': {'inventory': pins}, 'new': {'inventory': pins}})
+        self.assertIn('transitive-package==1.2.3', locked['common'])
+        self.assertNotIn('resolve_dependencies', locked)
+        with self.assertRaisesRegex(ValueError, 'differ in dependencies'):
+            lock_python_recipe(recipe, {'old': {'inventory': pins},
+                                        'new': {'inventory': {**pins, 'transitive-package': '2.0'}}})
+
+    def test_resolver_inventory_allows_transitives_but_still_checks_direct_pins_and_python(self):
+        recipe = {**self.recipe(), 'resolve_dependencies': True}
+        with tempfile.TemporaryDirectory() as temp:
+            with patch('keel.task_factory.CommandRunner.run', side_effect=self.execute_inventory_script((3, 12), extra=True)):
+                actual = installed_versions('image', recipe, 'new', Path(temp), 5)
+            self.assertIn('unexpected', actual['inventory'])
+            with patch('keel.task_factory.CommandRunner.run', side_effect=self.execute_inventory_script((3, 11), extra=True)):
+                with self.assertRaises(ValueError):
+                    installed_versions('image', recipe, 'new', Path(temp), 5)

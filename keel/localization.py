@@ -148,9 +148,14 @@ def localize(model, workspace, goal, settings, *, allowed_files=None):
         files.append(name)
         workspace.budget.check()
     selected = select(model, workspace, goal, settings, stage='file-selection', data={'paths': files}, keys=('files',),
-        instruction='Select 1..8 existing Python source paths most relevant to the task. Return files only.')['files']
+        instruction='Select 1..8 existing Python source paths ONLY from the supplied paths catalog. '
+                    'The catalog contains writable source targets. Test paths shown in verification failures are '
+                    'read-only evidence, not writable targets; never select them unless present in this catalog. Return files only.')['files']
     if not set(selected) <= set(files):
-        raise InvalidSelection('Invalid localization: missing or protected source file')
+        invalid = [name for name in selected if name not in files]
+        raise InvalidSelection('Invalid localization: selected paths outside the writable source catalog: '+
+                               json.dumps(invalid)[:1200]+'. Return only paths from the supplied catalog; '
+                               'test/config/protected paths from failure logs are not repair targets.')
     structure, source = [], {}
     for name in selected:
         source[name] = workspace.read(name, role='scout')['value']

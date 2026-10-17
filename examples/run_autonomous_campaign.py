@@ -17,7 +17,7 @@ from examples.mine_upgradebench import GitHub, collect
 from keel.core import Budget, BudgetExceeded, Limits, ModelError
 from keel.models import from_config
 from keel.runtime import run
-from keel.task_factory import EnvironmentPlanner, construct, inventory, has_upstream_test_change, unsupported_transition
+from keel.task_factory import EnvironmentPlanner, construct, inventory, automatic_acceptance_supported, unsupported_transition
 from keel.evaluation_protocol import implementation_hashes
 from keel.campaign_reporting import FrozenModel, trajectory
 
@@ -68,7 +68,14 @@ def solver_config(model_config, factory, tests, budget, cap):
 
 
 def campaign(root, output, model_config, *, repositories=None, repository_limit=2, candidates_per_repo=2,
-             environment_attempts=3, cap=24000, limits=None):
+             environment_attempts=3, cap=24000, limits=None, reuse_candidate=None):
+    archived = None
+    if reuse_candidate is not None:
+        reuse_candidate = reuse_candidate.resolve()
+        if repositories is not None or output.resolve().is_relative_to(reuse_candidate):
+            raise ValueError('Reuse requires no repository filter and an output outside the archived candidate')
+        archived = json.loads((reuse_candidate/'factory/factory.json').read_text(encoding='utf-8'))
+        repositories = [archived['candidate']['repository']]
     output.mkdir(parents=True, exist_ok=False)
     model = from_config(model_config)
     budget = Budget(limits or Limits(max_wallclock=1800, max_model_calls=30, max_tokens=300000, max_tool_calls=100))
@@ -77,6 +84,11 @@ def campaign(root, output, model_config, *, repositories=None, repository_limit=
               'scope': 'Exploratory automatic collection; repository overlap/selection bias not independently reviewed.'}
     report['settings'] = {'repository_limit': repository_limit, 'candidates_per_repo': candidates_per_repo,
                           'environment_attempts': environment_attempts, 'max_context_bytes': cap}
+    if archived is not None:
+        from keel.evaluation_protocol import file_hash
+        report['retry_from'] = {'directory': str(reuse_candidate),
+                                'factory_sha256': file_hash(reuse_candidate/'factory/factory.json'),
+                                'scope': 'New attempt with fresh budget; previous attempt retained, not a first-attempt score'}
     def check_frozen():
         if implementation_hashes(root) != report['implementation']:
             raise ModelError('Frozen campaign implementation changed; start a new campaign, original records retained')
@@ -106,9 +118,10 @@ def campaign(root, output, model_config, *, repositories=None, repository_limit=
         report['repositories'] = []
         report['repository_results'] = []
         admitted = 0
+        runnable_repositories = set()
         save()
         for repo_index, repository in enumerate(repositories, 1):
-            if not explicit_repositories and admitted >= repository_limit:
+            if not explicit_repositories and len(runnable_repositories) >= repository_limit:
                 break
             check_frozen()
             budget.check()
@@ -126,18 +139,32 @@ def campaign(root, output, model_config, *, repositories=None, repository_limit=
                     budget.charge_tool()
                     return api.get(route)
                 candidates = []
+                excluded_numbers = set()
                 def retain(candidate):
                     candidates.append(candidate)
                     with (output/f'collected-repo-{repo_index}.jsonl').open('a', encoding='utf-8') as stream:
                         stream.write(json.dumps(candidate) + '\n')
                 def skip(row):
+                    if row['number'] in excluded_numbers:
+                        return
+                    excluded_numbers.add(row['number'])
                     repo_record['excluded_prerequisites'] += 1
                     with (output/f'exclusions-repo-{repo_index}.jsonl').open('a', encoding='utf-8') as stream:
                         stream.write(json.dumps(row) + '\n')
-                collect(repository, fetch, limit=candidates_per_repo, pages=1, discovery='search', query='compatibility',
-                        record_missing_commits=True, on_candidate=retain, on_skip=skip,
-                        file_predicate=has_upstream_test_change,
-                        candidate_predicate=lambda pr: unsupported_transition(pr['title']) is None)
+                if archived is not None:
+                    retain(archived['candidate'])
+                else:
+                    seen_numbers = set()
+                    repo_record['queries'] = []
+                    for query in ('compatibility', 'migration', 'upgrade'):
+                        if len(candidates) >= candidates_per_repo:
+                            break
+                        repo_record['queries'].append(query)
+                        collect(repository, fetch, limit=candidates_per_repo-len(candidates), pages=1,
+                                discovery='search', query=query, seen_numbers=seen_numbers,
+                                record_missing_commits=True, on_candidate=retain, on_skip=skip,
+                                file_predicate=automatic_acceptance_supported,
+                                candidate_predicate=lambda pr: unsupported_transition(pr['title']) is None)
                 repo_record.update(status='eligible_candidates' if candidates else 'no_eligible_candidates', eligible_candidates=len(candidates))
                 if candidates:
                     admitted += 1
@@ -169,21 +196,31 @@ def campaign(root, output, model_config, *, repositories=None, repository_limit=
                     snapshots = {}
                     for phase, commit in [('base', candidate['base_commit']), ('gold', candidate['gold_commit'])]:
                         budget.charge_tool()
-                        snapshots[phase] = prepare_snapshot(candidate['repository'], commit, directory/('snapshot-'+phase),
-                                                            timeout=min(120, budget.remaining))
+                        snapshot_path = (reuse_candidate if archived is not None else directory)/('snapshot-'+phase)
+                        snapshots[phase] = prepare_snapshot(candidate['repository'], commit, snapshot_path,
+                                                            offline=archived is not None, timeout=min(120, budget.remaining))
                     planner = EnvironmentPlanner(model, directory, budget)
+                    initial = None
+                    if archived is not None and archived.get('attempts'):
+                        last = archived['attempts'][-1]
+                        initial = {'previous_recipe': last.get('recipe'), 'error': last.get('error'),
+                                   'builds': {phase: {'returncode': build.get('returncode'),
+                                                      'tail': build.get('tail', '')[-3000:]}
+                                              for phase, build in last.get('builds', {}).items()},
+                                   'scope': 'Observed prior attempt; correct failures without changing acceptance'}
                     factory, workspaces = construct(candidate, snapshots['base'], snapshots['gold'], directory/'factory',
-                                                     planner, attempts=environment_attempts)
+                                                     planner, attempts=environment_attempts, initial_observation=initial)
                     record['factory_status'] = factory['status']
                     record['environment_attempts'] = [{key: attempt.get(key) for key in ('attempt', 'stage', 'status', 'error', 'reason')}
                                                       for attempt in factory.get('attempts', [])]
                     if factory['status'] != 'transition_verified':
-                        record['status'] = factory['status'] if factory['status'] == 'unsupported_transition' else 'environment_unresolved'
+                        record['status'] = factory['status'] if factory['status'] in {'unsupported_transition', 'acceptance_review_required'} else 'environment_unresolved'
                         if factory.get('reason'):
                             record['reason'] = factory['reason']
                         continue
                     if budget.model_calls >= budget.limits.max_model_calls:
                         raise BudgetExceeded('Campaign model-call budget exhausted before solver')
+                    runnable_repositories.add(repository)
                     config = solver_config(model_config, factory, factory['test_roots'], budget, cap)
                     # Solver only sees a separate base workspace with frozen tests.
                     shutil.copytree(workspaces['base'], directory/'solver-repo')
@@ -214,6 +251,7 @@ def campaign(root, output, model_config, *, repositories=None, repository_limit=
         report['status'] = 'completed' if completed_solvers else 'no_runnable_tasks'
         report['collection_finished'] = True
         report['eligible_repositories'] = admitted
+        report['runnable_repositories'] = sorted(runnable_repositories)
     except (BudgetExceeded, ModelError, OSError, ValueError) as error:
         report.update(status='stopped', error=f'{type(error).__name__}: {error}')
     finally:
@@ -227,12 +265,15 @@ def main():
     parser.add_argument('--model-config', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--repository', action='append', help='Optional restriction; otherwise discover Python repos automatically')
+    parser.add_argument('--reuse-candidate', type=Path, help='Retry an archived candidate using clean local snapshots and previous failure evidence')
     parser.add_argument('--repository-limit', type=int, default=2)
     parser.add_argument('--candidates-per-repo', type=int, default=2)
     parser.add_argument('--environment-attempts', type=int, default=3)
     parser.add_argument('--max-context-bytes', type=int, default=24000)
     parser.add_argument('--execute', action='store_true', help='Run network discovery, Docker builds and metered model calls')
     args = parser.parse_args()
+    if args.reuse_candidate and args.repository:
+        parser.error('--reuse-candidate cannot be combined with --repository')
     if not 1 <= args.repository_limit <= 5 or not 1 <= args.candidates_per_repo <= 5 or not 1 <= args.environment_attempts <= 3:
         parser.error('repository/candidate limits 1..5 and environment attempts 1..3 required')
     if not 4000 <= args.max_context_bytes <= 128000:
@@ -245,6 +286,7 @@ def main():
     from_config(config)
     if not args.execute:
         print(json.dumps({'status': 'plan_only', 'repositories': repositories or 'automatic GitHub discovery',
+            'reuse_candidate': str(args.reuse_candidate) if args.reuse_candidate else None,
             'max_candidates': (len(repositories) if repositories else args.repository_limit) * args.candidates_per_repo,
             'environment_attempts': args.environment_attempts, 'max_model_calls': 30, 'max_wallclock': 1800,
             'supported': 'Python/pytest, exact PyPI pins, top-level test directories; no OS/service provisioning',
@@ -256,7 +298,7 @@ def main():
     root = Path(__file__).resolve().parents[1]
     report = campaign(root, args.output.resolve(), config, repositories=repositories, repository_limit=args.repository_limit,
                       candidates_per_repo=args.candidates_per_repo, environment_attempts=args.environment_attempts,
-                      cap=args.max_context_bytes)
+                      cap=args.max_context_bytes, reuse_candidate=args.reuse_candidate)
     # Full immutable implementation inventory remains in campaign.json.
     print(json.dumps({key: value for key, value in report.items() if key != 'implementation'}, indent=2))
     return 0 if report['status'] == 'completed' else 1

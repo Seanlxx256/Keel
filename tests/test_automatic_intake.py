@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 
 from examples.mine_upgradebench import collect
 from examples.run_autonomous_campaign import campaign
-from keel.task_factory import has_upstream_test_change
+from keel.task_factory import has_upstream_test_change, automatic_acceptance_supported
 
 
 class IntakeTests(unittest.TestCase):
@@ -39,6 +39,52 @@ class IntakeTests(unittest.TestCase):
                         [{'filename': 'source/tests/test_lib.py'}], [{'filename': 'tests/conftest.py'}]):
             self.assertFalse(has_upstream_test_change(entries))
         self.assertTrue(has_upstream_test_change([{'filename': 'tests/test_lib.py', 'status': 'added'}]))
+
+    def test_removed_test_module_rejects_candidate_even_with_other_modified_tests(self):
+        entries = [{'filename': 'src/lib.py', 'status': 'modified'},
+                   {'filename': 'tests/new_test.py', 'status': 'modified'},
+                   {'filename': 'tests/old_test.py', 'status': 'removed'}]
+        self.assertFalse(automatic_acceptance_supported(entries))
+        self.assertTrue(automatic_acceptance_supported(entries[:2]))
+
+    def test_queries_share_seen_numbers_before_fetching_pr_metadata(self):
+        seen, calls = set(), []
+        def fetch(route):
+            calls.append(route)
+            if route == '/repos/org/lib':
+                return {'full_name': 'org/lib'}
+            if route.startswith('/search/issues?'):
+                return {'incomplete_results': False, 'items': [{'number': 1}]}
+            if route.endswith('/pulls/1'):
+                return {'merged': True, 'changed_files': 1, 'title': 'Compatibility'}
+            if '/pulls/1/files?' in route:
+                return [{'filename': 'src/lib.py'}]
+            raise AssertionError(route)
+        for query in ('compatibility', 'migration', 'upgrade'):
+            collect('org/lib', fetch, discovery='search', query=query,
+                    file_predicate=automatic_acceptance_supported, seen_numbers=seen)
+        self.assertEqual(sum(route.endswith('/pulls/1') for route in calls), 1)
+
+    def test_environment_unresolved_repository_does_not_fill_runnable_pool(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            api = Mock()
+            api.receipts = []
+            def rows(repository, fetch, **kwargs):
+                kwargs['on_candidate']({'repository': repository, 'number': 1, 'title': 'Compatibility',
+                                        'base_commit': 'a'*40, 'gold_commit': 'b'*40})
+            with patch('examples.run_autonomous_campaign.GitHub', return_value=api), \
+                 patch('examples.run_autonomous_campaign.from_config'), \
+                 patch('examples.run_autonomous_campaign.implementation_hashes', return_value={}), \
+                 patch('keel.evaluation_protocol.registry', return_value={'tasks': []}), \
+                 patch('examples.run_autonomous_campaign.discover', return_value=['org/first', 'org/second']), \
+                 patch('examples.run_autonomous_campaign.collect', side_effect=rows), \
+                 patch('examples.run_autonomous_campaign.prepare_snapshot', return_value=root), \
+                 patch('examples.run_autonomous_campaign.construct', return_value=({'status': 'environment_unresolved'}, {})):
+                report = campaign(root, root/'campaign', {}, repository_limit=1, candidates_per_repo=1)
+            self.assertEqual(report['repositories'], ['org/first', 'org/second'])
+            self.assertEqual(report['runnable_repositories'], [])
+            self.assertEqual(report['eligible_repositories'], 2)
 
     def test_automatic_pool_continues_past_repository_without_eligible_prs(self):
         with tempfile.TemporaryDirectory() as temp:

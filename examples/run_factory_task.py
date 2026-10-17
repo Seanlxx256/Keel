@@ -42,14 +42,21 @@ def load_factory(directory):
     return factory
 
 
-def execute(directory, output, model_config, cap=24000):
+def execute(directory, output, model_config, cap=24000, *, repair_attempts=3, check_frozen=None):
+    if type(repair_attempts) is not int or not 0 <= repair_attempts <= 3:
+        raise ValueError('repair_attempts must be 0..3')
     if output.resolve().is_relative_to(directory.resolve()):
         raise ValueError('Trial output must be outside the factory directory')
     factory = load_factory(directory)
     model = from_config(model_config)
+    if check_frozen:
+        from keel.campaign_reporting import FrozenModel
+        check_frozen()
+        model = FrozenModel(model, check_frozen)
     output.mkdir(parents=True, exist_ok=False)
     budget = Budget(Limits(max_wallclock=900, max_model_calls=30, max_tokens=180000, max_tool_calls=80))
     report = {'status': 'preflight', 'passed': False, 'benchmark_ready': False,
+              'repair_attempts': repair_attempts,
               'scope': 'Exploratory repair of a factory artifact; no held-out or production claim.'}
     try:
         # Recheck actual images and all three cells before spending model calls.
@@ -67,10 +74,15 @@ def execute(directory, output, model_config, cap=24000):
         # Only observed base failure and base source cross the solver boundary.
         factory['attempts'] = [{'cells': {'base_new': cells['base_new']}}]
         config = solver_config(model_config, factory, factory['test_roots'], budget, cap)
+        config['verification_repair_attempts'] = repair_attempts
+        if repair_attempts == 0:
+            config['recovery'] = {'max_actions': 0}
         shutil.copytree(directory/'base', output/'solver-repo')
         before = inventory(output/'solver-repo')
         (output/'input-receipt.json').write_text(json.dumps(before, indent=2), encoding='utf-8')
         result = run(config, output/'solver-repo', output/'solver-run', model=model)
+        if check_frozen:
+            check_frozen()
         after = inventory(output/'solver-repo')
         changed = sorted(name for name in before.keys() | after.keys() if before.get(name) != after.get(name))
         intact = all(after.get(name) == sha for name, sha in factory['frozen_tests'].items())
@@ -94,6 +106,7 @@ def main():
     parser.add_argument('--model-config', required=True, type=Path)
     parser.add_argument('--max-context-bytes', default=24000, type=int)
     parser.add_argument('--execute', action='store_true')
+    parser.add_argument('--repair-attempts', type=int, choices=range(4), default=3)
     args = parser.parse_args()
     if not 4000 <= args.max_context_bytes <= 128000:
         parser.error('max-context-bytes must be 4000..128000')
@@ -106,7 +119,8 @@ def main():
     if not shutil.which('docker') and (docker/'docker.exe').is_file():
         os.environ['PATH'] = str(docker) + os.pathsep + os.environ.get('PATH', '')
     report = execute(args.factory.resolve(), args.output.resolve(),
-                     json.loads(args.model_config.read_text(encoding='utf-8')), args.max_context_bytes)
+                     json.loads(args.model_config.read_text(encoding='utf-8')), args.max_context_bytes,
+                     repair_attempts=args.repair_attempts)
     print(json.dumps(report, indent=2))
     return 0 if report['passed'] else 1
 

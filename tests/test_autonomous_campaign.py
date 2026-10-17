@@ -56,3 +56,32 @@ class CampaignTests(unittest.TestCase):
         budget.model_calls = 1
         with self.assertRaises(BudgetExceeded):
             solver_config({}, {}, [], budget, 24000)
+
+    def test_archived_retry_skips_github_and_carries_build_error(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            archive = root/'archive'
+            (archive/'factory').mkdir(parents=True)
+            candidate = {'repository': 'org/library', 'number': 1, 'title': 'Compatibility',
+                         'base_commit': 'a'*40, 'gold_commit': 'b'*40}
+            (archive/'factory/factory.json').write_text(json.dumps({'candidate': candidate,
+                'attempts': [{'recipe': {'old': '3.11', 'new': '3.12'},
+                              'error': 'ImpImporter unavailable',
+                              'builds': {'new': {'returncode': 1, 'tail': 'observed packaging error'}}}]}))
+            api = Mock()
+            api.receipts = []
+            with patch('examples.run_autonomous_campaign.GitHub', return_value=api), \
+                 patch('examples.run_autonomous_campaign.from_config'), \
+                 patch('examples.run_autonomous_campaign.implementation_hashes', return_value={}), \
+                 patch('examples.run_autonomous_campaign.collect') as collect, \
+                 patch('examples.run_autonomous_campaign.prepare_snapshot', return_value=root/'snapshot') as snapshot, \
+                 patch('examples.run_autonomous_campaign.construct', return_value=(
+                     {'status': 'environment_unresolved', 'attempts': []}, {})) as construct:
+                result = campaign(root, root/'retry', {}, reuse_candidate=archive)
+            collect.assert_not_called()
+            api.get.assert_not_called()
+            self.assertTrue(all(call.kwargs['offline'] for call in snapshot.call_args_list))
+            observation = construct.call_args.kwargs['initial_observation']
+            self.assertIn('ImpImporter', observation['error'])
+            self.assertEqual(result['records'][0]['status'], 'environment_unresolved')
+            self.assertIn('fresh budget', result['retry_from']['scope'])

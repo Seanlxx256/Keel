@@ -1,0 +1,2 @@
+# Classic frozen Verified records; harness 5.x requires a different task schema.
+swebench==3.0.0

@@ -144,7 +144,7 @@ def unique_file_paths(rows, expected):
 
 def collect(repository, fetch, *, limit=5, pages=1, on_candidate=None,
             discovery='recent', query='migration', on_skip=None, record_missing_commits=False, dependency=None,
-            file_predicate=None, candidate_predicate=None):
+            file_predicate=None, candidate_predicate=None, seen_numbers=None):
     repository = canonical_repository_id(repository)
     if discovery == 'search':
         metadata = fetch('/repos/' + repository)
@@ -153,7 +153,7 @@ def collect(repository, fetch, *, limit=5, pages=1, on_candidate=None,
             print(f'[UpgradeBench] repository resolved: {repository} -> {resolved}', file=sys.stderr, flush=True)
         repository = resolved
     prefix = '/repos/' + repository
-    selected, seen = [], set()
+    selected, seen = [], seen_numbers if seen_numbers is not None else set()
     for page in range(1, pages + 1):
         if discovery == 'search':
             params = urlencode({'q': f'repo:{repository} is:pr is:merged {query} in:title',
@@ -193,7 +193,10 @@ def collect(repository, fetch, *, limit=5, pages=1, on_candidate=None,
                 continue
             if file_predicate is not None and not file_predicate(file_entries):
                 if on_skip is not None:
-                    on_skip({'number': row['number'], 'reason': 'automatic_acceptance_prerequisite_missing'})
+                    on_skip({'number': row['number'], 'reason': 'automatic_acceptance_prerequisite_missing',
+                             'removed_test_modules': [entry['filename'] for entry in file_entries
+                                if entry.get('status') == 'removed' and entry['filename'].endswith('.py')
+                                and (entry['filename'].split('/')[-1].startswith('test_') or entry['filename'].endswith('_test.py'))]})
                 continue
             if discovery == 'search' and not any(source_file(path) for path in files):
                 if on_skip is not None:
