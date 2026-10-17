@@ -143,7 +143,8 @@ def unique_file_paths(rows, expected):
 
 
 def collect(repository, fetch, *, limit=5, pages=1, on_candidate=None,
-            discovery='recent', query='migration', on_skip=None, record_missing_commits=False, dependency=None):
+            discovery='recent', query='migration', on_skip=None, record_missing_commits=False, dependency=None,
+            file_predicate=None, candidate_predicate=None):
     repository = canonical_repository_id(repository)
     if discovery == 'search':
         metadata = fetch('/repos/' + repository)
@@ -186,6 +187,14 @@ def collect(repository, fetch, *, limit=5, pages=1, on_candidate=None,
                     raise ValueError('Invalid PR file listing')
                 file_entries.extend(file_rows)
             files, file_operations = unique_file_paths(file_entries, count)
+            if candidate_predicate is not None and not candidate_predicate(pr):
+                if on_skip is not None:
+                    on_skip({'number': row['number'], 'reason': 'unsupported_transition_kind', 'title': pr['title']})
+                continue
+            if file_predicate is not None and not file_predicate(file_entries):
+                if on_skip is not None:
+                    on_skip({'number': row['number'], 'reason': 'automatic_acceptance_prerequisite_missing'})
+                continue
             if discovery == 'search' and not any(source_file(path) for path in files):
                 if on_skip is not None:
                     on_skip({'number': row['number'], 'reason': 'no_non_test_source_change'})

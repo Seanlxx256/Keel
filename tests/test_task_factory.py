@@ -5,7 +5,8 @@ import unittest
 from unittest.mock import Mock, patch
 
 from keel.core import Budget, Limits
-from keel.task_factory import construct, freeze_test_workspaces, transition_passed, validate_recipe
+from keel.task_factory import EnvironmentPlanner, construct, freeze_test_workspaces, transition_passed, validate_recipe
+from keel.models import Reply
 from examples.run_autonomous_campaign import discover, solver_config
 
 
@@ -24,6 +25,49 @@ class FactoryTests(unittest.TestCase):
                         {'new': 'other==2'}, {'python': '3.11\nRUN command'}):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 validate_recipe({**self.recipe(), **changes})
+
+    def test_schema_confusion_and_bad_pins_receive_specific_feedback_then_build(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, gold = self.snapshots(root)
+            invalid = {**self.recipe(), 'common': ['pytest']}
+            schema_confusion = {'type': 'object', 'properties': self.recipe()}
+            responses = [invalid, schema_confusion, self.recipe()]
+            messages = []
+            class Model:
+                def complete_json(self, request, **kwargs):
+                    messages.append(request)
+                    return Reply(json.dumps(responses[len(messages)-1]), 10)
+            budget = Budget(Limits(max_wallclock=100, max_tokens=100000, max_model_calls=3))
+            planner = EnvironmentPlanner(Model(), root, budget)
+            with patch('keel.task_factory.build_environment', return_value=('sha256:'+'a'*64, {'returncode': 0})) as build, \
+                 patch('keel.task_factory.installed_versions', return_value={}), \
+                 patch('keel.task_factory.probe', side_effect=[self.cell(True), self.cell(False), self.cell(True)]):
+                result, _ = construct({'title': 'Dependency compatibility'}, base, gold, root/'factory', planner)
+            self.assertEqual(result['status'], 'transition_verified')
+            self.assertEqual(budget.model_calls, 3)
+            self.assertEqual(build.call_count, 2)
+            feedback = json.loads(messages[1][1]['content'])['observation']
+            self.assertIn("'pytest'", feedback['error'])
+            self.assertEqual(json.loads(feedback['previous_response']), invalid)
+            self.assertIn('INSTANCE', json.loads(messages[2][1]['content'])['observation']['error'])
+
+    def test_runtime_transition_is_not_invented_as_a_package_upgrade(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, gold = self.snapshots(root)
+            planner = Mock()
+            planner.budget = Budget(Limits())
+            planner.plan.return_value = self.recipe()
+            with patch('keel.task_factory.build_environment') as build:
+                result, _ = construct({'title': 'Python 3.12 compatibility'}, base, gold, root/'factory', planner)
+            self.assertEqual(result['status'], 'environment_unresolved')
+            self.assertTrue(all('do not invent' in row['error'] for row in result['attempts']))
+            build.assert_not_called()
+
+    def test_target_distribution_cannot_be_duplicated_in_common(self):
+        with self.assertRaisesRegex(ValueError, 'only in old/new'):
+            validate_recipe({**self.recipe(), 'common': ['pytest==7.4.4', 'dependency==1.0']})
 
     def test_gate_requires_real_fail_to_pass_and_identical_nonempty_test_ids(self):
         cells = {'base_old': self.cell(True), 'base_new': self.cell(False), 'gold_new': self.cell(True)}
@@ -95,6 +139,23 @@ class FactoryTests(unittest.TestCase):
                 result, _ = construct({'title': 'Compatibility'}, base, gold, root/'factory', planner)
             self.assertEqual(build.call_count, 1)
             self.assertEqual(result['attempts'][-1]['status'], 'stopped')
+
+    def test_pytest_stdout_failure_reaches_environment_replanning(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, gold = self.snapshots(root)
+            planner = Mock()
+            planner.budget = Budget(Limits(max_wallclock=100, max_tokens=100000, max_model_calls=10))
+            planner.plan.side_effect = [self.recipe(), {**self.recipe(), 'python': '3.10'}]
+            failed = {**self.cell(False), 'stdout': 'ImportError: missing_fixture_dependency', 'stderr': ''}
+            with patch('keel.task_factory.build_environment', return_value=('sha256:'+'a'*64, {'returncode': 0})), \
+                 patch('keel.task_factory.installed_versions', return_value={}), \
+                 patch('keel.task_factory.probe', side_effect=[failed, failed, failed,
+                       self.cell(True), self.cell(False), self.cell(True)]):
+                result, _ = construct({'title': 'Compatibility'}, base, gold, root/'factory', planner)
+            observation = planner.plan.call_args_list[1].args[1]
+            self.assertIn('missing_fixture_dependency', observation['tests']['base_old']['stdout_tail'])
+            self.assertEqual(result['status'], 'transition_verified')
 
     def test_repository_discovery_rejects_partial_results(self):
         with self.assertRaises(ValueError):

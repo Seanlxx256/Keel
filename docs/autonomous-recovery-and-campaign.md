@@ -14,8 +14,8 @@ Intermediate JUnit failures supply repair evidence while test deletion, missing 
 
 `examples/run_autonomous_campaign.py` supports this sequence without per-PR scripts:
 
-1. Discover bounded public Python repositories through GitHub search, excluding repositories in the existing development registry, or use explicit repositories. This is a bounded search page, not representative or exhaustive sampling; explicit repository overrides can include development data.
-2. Collect merged compatibility PRs, receipts and exact first-parent/gold snapshots through the existing collector.
+1. Discover public Python libraries (`topic:python-library`, descending stars), excluding repositories in the existing development registry, or use explicit repositories. Automatic discovery considers a bounded pool of `max(6, 3 * repository_limit)` repositories, capped at 20, continuing past repositories without eligible candidates until the requested metadata-eligible repository count or search/API budget is reached. This is not representative or exhaustive sampling; explicit overrides can include development data.
+2. Collect merged compatibility PRs, receipts and exact first-parent/gold snapshots through the existing collector. Before commit/tree lookup or checkout, require a non-removed Python test-file change under a supported test directory. Excluded PRs are logged and do not consume the eligible-candidate quota. This is only a metadata prerequisite; snapshots and the actual three-cell transition still require verification.
 3. Freeze upstream gold test directories on both snapshots, preserving base-only tests/fixtures in the identical union on both sides. Base test configuration is used on both sides. No generated assertions or acceptance modifications are permitted during environment retries.
 4. Ask the environment planner for Python and exact dependency pins; generate a fixed Dockerfile on the host. No model-provided shell commands, Dockerfiles, URLs or OS packages execute. Only requirements enter the build context; model/GitHub credentials do not.
 5. Build old/new dependency images, verify installed pins, observe errors and replan for at most three attempts. Duplicate recipes stop. Images are recorded by immutable ID.
@@ -24,7 +24,19 @@ Intermediate JUnit failures supply repair evidence while test deletion, missing 
 
 The first supported scope is Python/pytest with top-level `tests`, `test` or `testing` directories, regression-test changes, PyPI dependencies and no external services. Native libraries, system packages, editable installs, complex build systems and service/database provisioning are not automated yet. Unsupported candidates are logged and the campaign continues; this does not establish that their bugs are unsolvable. Tests are copied into container tmpfs and run offline with the normal verifier restrictions; large repositories can exceed that tmpfs limit.
 
+The recipe now supports two separate transition axes: `kind: dependency` varies one external dependency under fixed Python; `kind: python` varies CPython while keeping all pinned dependencies identical. Python titles within the supported 3.9..3.13 image range are admitted again. Explicit PyPy transitions and Python versions outside that range remain unsupported. A title hint is not complete semantic classification; the three-cell test gate still supplies the actual evidence. See [Python transition environments](python-transition-environments.md).
+
+Recipe corrections distinguish data instances from JSON Schema documents, report invalid pin entries/duplicate distributions/target conflicts and include the previous rejected response as bounded untrusted feedback. Campaign rows expose each environment attempt's stage (`recipe_validation`, `image_build`, `installed_version_check`, `transition_probe`) so malformed replies are not mistaken for Docker failures.
+
 A campaign has 30 model calls, 300,000 charged tokens, 100 tool operations and 1,800 seconds by default, shared across environment planning and solver runs. GitHub client internal bounded HTTP retries and Docker internal build work are not individual tool-counter entries. Exact token usage is provider reported when available; byte estimates remain conservative admission checks. Full build logs, recipes, test executions and model responses are retained. A completed campaign can have zero successful tasks: consult `counts` and individual statuses.
+
+Implementation hashes are checked before repository/candidate work and before/after provider calls. If source changes during a campaign, execution stops rather than mixing results from different implementations; known token usage from an in-flight call remains charged. Environment replanning receives bounded stdout/stderr test tails, not only exit codes. Full logs remain in each attempt directory.
+
+The `trajectories` summary distinguishes first-verification passes, pre-verification corrections, failed-verification recovery and recovery involving a revised plan. A passed task with missing trajectory evidence is unclassified, not automatically credited as recovery. These are observed paths, not causal improvement estimates; environment failures remain separate from completed solver failures.
+
+`repository_results` includes repositories with zero eligible PRs and prerequisite exclusion counts. `completed` means at least one solver ran and the scan ended, not that a repair passed. If no solver ran, status is `no_runnable_tasks` and the CLI exits nonzero. The console omits the long implementation hash inventory, which remains intact in `campaign.json`.
+
+Each repository gets at most 16 metadata requests, within the campaign's existing 100 tool-operation limit. A repository that reaches this local limit is marked `search_limit`; already collected eligible candidates are retained, and automatic discovery may continue with the next repository. This prevents a long list of unsuitable PRs from consuming the entire search budget on one project. This bounded partial search is not exhaustive collection.
 
 Plan without network or model calls:
 

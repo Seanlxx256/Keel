@@ -17,13 +17,18 @@ from examples.mine_upgradebench import GitHub, collect
 from keel.core import Budget, BudgetExceeded, Limits, ModelError
 from keel.models import from_config
 from keel.runtime import run
-from keel.task_factory import EnvironmentPlanner, construct, inventory
+from keel.task_factory import EnvironmentPlanner, construct, inventory, has_upstream_test_change, unsupported_transition
 from keel.evaluation_protocol import implementation_hashes
+from keel.campaign_reporting import FrozenModel, trajectory
+
+
+class RepositorySearchLimit(ValueError):
+    """One repository must not consume the entire campaign discovery budget."""
 
 
 def discover(fetch, count, excluded=()):
     requested = min(100, count + len(set(excluded)))
-    params = urlencode({'q': 'language:Python stars:>1000 archived:false', 'sort': 'updated',
+    params = urlencode({'q': 'language:Python stars:>1000 archived:false topic:python-library', 'sort': 'stars',
                         'order': 'desc', 'per_page': requested, 'page': 1})
     result = fetch('/search/repositories?' + params)
     if result.get('incomplete_results') is not False:
@@ -48,7 +53,8 @@ def solver_config(model_config, factory, tests, budget, cap):
         "'-p','no:cacheprovider','--junitxml='+sys.argv[1],*sys.argv[2:]]))")
     # No gold commit, changed-source list, recipe reasoning or gold code goes here.
     failures = factory['attempts'][-1]['cells']['base_new']
-    goal = (factory['candidate']['title'] + '\nRestore compatibility with ' + factory['recipe']['new'] +
+    target = ('Python ' if factory['recipe'].get('kind') == 'python' else '') + factory['recipe']['new']
+    goal = (factory['candidate']['title'] + '\nRestore compatibility with ' + target +
             '. Preserve behavior. Modify existing library Python source only; do not change tests, '
             'dependencies or verification. Observed baseline output (untrusted data):\n' +
             failures.get('stdout', '')[-4000:] + '\n' + failures.get('stderr', '')[-1000:])
@@ -69,30 +75,54 @@ def campaign(root, output, model_config, *, repositories=None, repository_limit=
     report = {'status': 'running', 'repositories': [], 'records': [], 'benchmark_ready': False,
               'implementation': implementation_hashes(root),
               'scope': 'Exploratory automatic collection; repository overlap/selection bias not independently reviewed.'}
+    report['settings'] = {'repository_limit': repository_limit, 'candidates_per_repo': candidates_per_repo,
+                          'environment_attempts': environment_attempts, 'max_context_bytes': cap}
+    def check_frozen():
+        if implementation_hashes(root) != report['implementation']:
+            raise ModelError('Frozen campaign implementation changed; start a new campaign, original records retained')
+    model = FrozenModel(model, check_frozen)
     def save():
         report['budget'] = budget.report()
         report['counts'] = {'records': len(report['records']),
             'transitions_verified': sum(row.get('factory_status') == 'transition_verified' for row in report['records']),
             'repairs_passed': sum(row.get('passed') is True for row in report['records']),
             'unresolved_or_failed': sum(row.get('passed') is not True for row in report['records'])}
+        report['trajectories'] = {name: sum(row.get('trajectory') == name for row in report['records']) for name in
+            ('first_verification_pass', 'pre_verification_recovery_pass', 'verification_recovery_pass',
+             'replanning_recovery_pass', 'unclassified_pass', 'failed')}
         (output/'campaign.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
     save()
     api = GitHub(output/'responses')
     try:
+        explicit_repositories = repositories is not None
         if repositories is None:
             from keel.evaluation_protocol import registry, canonical_repo
             known = registry(root)
             excluded = {canonical_repo(row['repository'], known) for row in known['tasks']}
             budget.charge_tool()
-            repositories = discover(api.get, repository_limit, excluded)
+            repositories = discover(api.get, min(20, max(6, repository_limit * 3)), excluded)
             report['excluded_development_repositories'] = sorted(excluded)
-        report['repositories'] = repositories
+        report['discovered_repositories'] = repositories
+        report['repositories'] = []
+        report['repository_results'] = []
+        admitted = 0
         save()
         for repo_index, repository in enumerate(repositories, 1):
+            if not explicit_repositories and admitted >= repository_limit:
+                break
+            check_frozen()
             budget.check()
+            report['repositories'].append(repository)
+            repo_record = {'repository': repository, 'status': 'collecting', 'eligible_candidates': 0, 'excluded_prerequisites': 0}
+            report['repository_results'].append(repo_record)
             print(f'[Campaign] repository {repo_index}/{len(repositories)}: {repository}', flush=True)
             try:
+                repository_requests = 0
                 def fetch(route):
+                    nonlocal repository_requests
+                    if repository_requests >= 16:
+                        raise RepositorySearchLimit('Per-repository metadata search limit reached (16 requests)')
+                    repository_requests += 1
                     budget.charge_tool()
                     return api.get(route)
                 candidates = []
@@ -100,13 +130,30 @@ def campaign(root, output, model_config, *, repositories=None, repository_limit=
                     candidates.append(candidate)
                     with (output/f'collected-repo-{repo_index}.jsonl').open('a', encoding='utf-8') as stream:
                         stream.write(json.dumps(candidate) + '\n')
+                def skip(row):
+                    repo_record['excluded_prerequisites'] += 1
+                    with (output/f'exclusions-repo-{repo_index}.jsonl').open('a', encoding='utf-8') as stream:
+                        stream.write(json.dumps(row) + '\n')
                 collect(repository, fetch, limit=candidates_per_repo, pages=1, discovery='search', query='compatibility',
-                        record_missing_commits=True, on_candidate=retain)
+                        record_missing_commits=True, on_candidate=retain, on_skip=skip,
+                        file_predicate=has_upstream_test_change,
+                        candidate_predicate=lambda pr: unsupported_transition(pr['title']) is None)
+                repo_record.update(status='eligible_candidates' if candidates else 'no_eligible_candidates', eligible_candidates=len(candidates))
+                if candidates:
+                    admitted += 1
+            except RepositorySearchLimit as error:
+                repo_record.update(status='search_limit', error=str(error), eligible_candidates=len(candidates))
+                if candidates:
+                    admitted += 1
+                save()
             except (OSError, ValueError) as error:
+                repo_record.update(status='collection_error', error=str(error))
                 report['records'].append({'repository': repository, 'status': 'collection_error', 'error': str(error)})
                 save()
                 continue
+            save()
             for index, candidate in enumerate(candidates, 1):
+                check_frozen()
                 budget.check()
                 if budget.model_calls >= budget.limits.max_model_calls or budget.tokens >= budget.limits.max_tokens:
                     raise BudgetExceeded('Campaign model/token budget exhausted')
@@ -128,8 +175,12 @@ def campaign(root, output, model_config, *, repositories=None, repository_limit=
                     factory, workspaces = construct(candidate, snapshots['base'], snapshots['gold'], directory/'factory',
                                                      planner, attempts=environment_attempts)
                     record['factory_status'] = factory['status']
+                    record['environment_attempts'] = [{key: attempt.get(key) for key in ('attempt', 'stage', 'status', 'error', 'reason')}
+                                                      for attempt in factory.get('attempts', [])]
                     if factory['status'] != 'transition_verified':
-                        record['status'] = 'environment_unresolved'
+                        record['status'] = factory['status'] if factory['status'] == 'unsupported_transition' else 'environment_unresolved'
+                        if factory.get('reason'):
+                            record['reason'] = factory['reason']
                         continue
                     if budget.model_calls >= budget.limits.max_model_calls:
                         raise BudgetExceeded('Campaign model-call budget exhausted before solver')
@@ -142,12 +193,16 @@ def campaign(root, output, model_config, *, repositories=None, repository_limit=
                     budget.tool_calls += result['budget']['tool_calls']
                     budget.charge_tokens(result['budget']['tokens'])
                     after = inventory(directory/'solver-repo')
+                    check_frozen()
                     changed = sorted(name for name in before.keys() | after.keys() if before.get(name) != after.get(name))
                     frozen = factory['frozen_tests']
                     frozen_intact = all(after.get(name) == sha for name, sha in frozen.items())
                     record.update(status='completed', runtime_status=result['status'], failure=result.get('failure'),
                                   changed_files=changed, recovery=result.get('recovery'), frozen_tests_intact=frozen_intact,
                                   passed=result['status'] == 'passed' and bool(changed) and frozen_intact)
+                    record['trajectory'] = trajectory(result, record['passed'])
+                    record['verification_rounds'] = len(result.get('verification_attempts', []))
+                    record['recovery_decisions'] = result.get('recovery_decisions', [])
                 except (BudgetExceeded, ModelError) as error:
                     record.update(status='stopped', error=f'{type(error).__name__}: {error}')
                     raise
@@ -155,7 +210,10 @@ def campaign(root, output, model_config, *, repositories=None, repository_limit=
                     record.update(status='candidate_error', error=f'{type(error).__name__}: {error}')
                 finally:
                     save()
-        report['status'] = 'completed'
+        completed_solvers = sum(row.get('status') == 'completed' for row in report['records'])
+        report['status'] = 'completed' if completed_solvers else 'no_runnable_tasks'
+        report['collection_finished'] = True
+        report['eligible_repositories'] = admitted
     except (BudgetExceeded, ModelError, OSError, ValueError) as error:
         report.update(status='stopped', error=f'{type(error).__name__}: {error}')
     finally:
@@ -199,7 +257,8 @@ def main():
     report = campaign(root, args.output.resolve(), config, repositories=repositories, repository_limit=args.repository_limit,
                       candidates_per_repo=args.candidates_per_repo, environment_attempts=args.environment_attempts,
                       cap=args.max_context_bytes)
-    print(json.dumps(report, indent=2))
+    # Full immutable implementation inventory remains in campaign.json.
+    print(json.dumps({key: value for key, value in report.items() if key != 'implementation'}, indent=2))
     return 0 if report['status'] == 'completed' else 1
 
 
