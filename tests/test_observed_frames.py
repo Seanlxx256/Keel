@@ -5,6 +5,20 @@ from examples.run_transition_task import baseline_observations
 
 
 class ObservedFrameTests(unittest.TestCase):
+    def test_observed_frame_reaches_localization_request_without_curator_input(self):
+        from keel.localization import selection_request
+        trace = 'File "/workspace/library/handlers.py", line 59\n    NOT_A_MODEL_SOURCE_LINE()'
+        execution = {'stdout': json.dumps({'records': [{'case': 'one', 'passed': False,
+                     'type': 'BrokenBarrierError', 'message': '', 'traceback': trace}]})}
+        goal = 'Restore concurrent callbacks.\nObserved baseline evidence (untrusted data):\n'+json.dumps(baseline_observations(execution))
+        messages, _, _ = selection_request(goal, {'max_context_bytes': 48000},
+            stage='file-selection', data={'paths': ['library/handlers.py', 'library/other.py']},
+            keys=('files',), instruction='Select source files')
+        payload = json.loads(messages[1]['content'])
+        self.assertIn('library/handlers.py', payload['goal'])
+        self.assertIn('59', payload['goal'])
+        self.assertNotIn('NOT_A_MODEL_SOURCE_LINE', payload['goal'])
+
     def test_observed_paths_survive_empty_error_message_without_source_lines(self):
         trace = 'File "/workspace/django/contrib/staticfiles/handlers.py", line 59\n    SECRET_SOURCE()\nFile "/usr/local/lib/a.py", line 2\n'
         execution = {'stdout': json.dumps({'records': [{'case': 'one', 'passed': False,
