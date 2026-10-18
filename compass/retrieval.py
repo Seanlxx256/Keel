@@ -127,6 +127,16 @@ def rank_code_evidence(query, rows):
                                           -row["score"], row["id"]))
 
 
+def reserve_t1_candidates(baseline, selected, count, limit):
+    """Shared online/replay policy; never consult relevance labels."""
+    reserved = baseline[:min(count, limit)]
+    reserved_ids = {row['id'] for row in reserved}
+    selected_ids = {row['id'] for row in selected}
+    return ([{**row, 'selection_source': 't1_reserved', 't2_selected': row['id'] in selected_ids}
+             for row in reserved] +
+            [{**row, 'selection_source': 't2_selected'} for row in selected if row['id'] not in reserved_ids])
+
+
 class Retriever:
     def __init__(self, index, *, routing=None, model=None, budget=None, record=None):
         self.index = index
@@ -229,11 +239,7 @@ class Retriever:
                 rows, status = self.explore(query, rows, trace)
                 if self.routing.t2_preserve_top:
                     reserved = baseline[:min(self.routing.t2_preserve_top, limit)]
-                    reserved_ids = {row['id'] for row in reserved}
-                    selected_ids = {row['id'] for row in rows}
-                    rows = [{**row, 'selection_source': 't1_reserved',
-                             't2_selected': row['id'] in selected_ids} for row in reserved] + [
-                        {**row, 'selection_source': 't2_selected'} for row in rows if row['id'] not in reserved_ids]
+                    rows = reserve_t1_candidates(baseline, rows, self.routing.t2_preserve_top, limit)
                     trace.append({'tier': 'T2', 'action': 'preserve_baseline',
                         'ids': [row['id'] for row in reserved],
                         'scope': 'Reserved T1 evidence is not a claim that the model read or selected it.'})
