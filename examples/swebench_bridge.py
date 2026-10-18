@@ -18,7 +18,11 @@ from keel.swebench import prepare, verify_task, export_prediction, grading_outco
 def run_harness(command, *, cwd, log_path, timeout, heartbeat=10):
     """Tee unbuffered child output and report liveness even during quiet phases."""
     started = time.monotonic()
-    environment = {**os.environ, 'PYTHONUNBUFFERED': '1', 'PYTHONIOENCODING': 'utf-8'}
+    # IOENCODING covers stdio only. UTF8 also covers harness open(..., 'w') logs.
+    environment = {**os.environ, 'PYTHONUNBUFFERED': '1', 'PYTHONIOENCODING': 'utf-8', 'PYTHONUTF8': '1'}
+    environment.pop('KEEL_HARNESS_ENV_OVERLAY', None)
+    if (cwd/'environment-overlay.json').is_file():
+        environment['KEEL_HARNESS_ENV_OVERLAY'] = str((cwd/'environment-overlay.json').resolve())
     print(f'[SWE-bench] starting; log: {log_path}', flush=True)
     with log_path.open('wb') as stream:
         process = subprocess.Popen(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -60,21 +64,30 @@ def run_harness(command, *, cwd, log_path, timeout, heartbeat=10):
                                                                'returncode': process.returncode}), encoding='utf-8')
 
 
-def grade(task_dir, export_dir, output, *, python=sys.executable, timeout=1800):
+def grade(task_dir, export_dir, output, *, python=sys.executable, timeout=1800, environment_overlay=None):
     task = verify_task(task_dir)
     receipt = json.loads((export_dir/'export-receipt.json').read_text(encoding='utf-8'))
     if (receipt['predictions_sha256'] != file_hash(export_dir/'predictions.jsonl') or
             receipt['task_receipt_sha256'] != file_hash(task_dir/'task-receipt.json')):
         raise ValueError('Export inputs changed')
     output.mkdir(parents=True, exist_ok=False)
+    if environment_overlay is not None:
+        from keel.harness_environment import validate_overlay
+        validate_overlay(environment_overlay)
+        (output/'environment-overlay.json').write_text(json.dumps(environment_overlay, indent=2), encoding='utf-8')
     run_id = 'keel-'+uuid.uuid4().hex
     command = [python, '-u', str(Path(__file__).with_name('swebench_harness_entry.py').resolve()),
                '--dataset_name', str((output/'grader-input.json').resolve()),
                '--predictions_path', str((export_dir/'predictions.jsonl').resolve()),
                '--instance_ids', task['instance_id'], '--max_workers', '1', '--run_id', run_id]
+    if environment_overlay is not None:
+        command.extend(['--cache_level', 'instance'])
     result = {'status': 'running', 'official_resolved': None, 'runtime_status': receipt['runtime_status'],
               'command': command, 'run_id': run_id, 'benchmark_ready': False,
               'transport_adapter': 'LF-only shell/diff/patch writes on Windows; official harness via runpy'}
+    if environment_overlay is not None:
+        result['environment_scope'] = 'reconstructed packaging overlay; not unchanged official environment'
+        result['environment_overlay_sha256'] = file_hash(output/'environment-overlay.json')
     try:
         result['harness_version'] = (importlib.metadata.version('swebench') if python == sys.executable else
             subprocess.run([python, '-c', 'import importlib.metadata; print(importlib.metadata.version("swebench"))'],

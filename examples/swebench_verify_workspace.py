@@ -24,7 +24,7 @@ def workspace_patch(repo, task):
     return git('diff', '--no-ext-diff', '--no-textconv', '--binary', 'HEAD', '--')
 
 
-def verify(repo, task_dir, output, harness_python, timeout=600):
+def verify(repo, task_dir, output, harness_python, timeout=600, environment_overlay=None):
     task = verify_task(task_dir)
     patch = workspace_patch(repo, task)
     output.mkdir(parents=True, exist_ok=False)
@@ -39,7 +39,8 @@ def verify(repo, task_dir, output, harness_python, timeout=600):
     if not patch.strip():
         return {'official_resolved': False, 'reason': 'No source patch; inspect issue and modify source', 'empty_patch': True}
     with (output/'launcher.log').open('w', encoding='utf-8') as stream, contextlib.redirect_stdout(stream):
-        result = grade(task_dir, export, output/'grading', python=harness_python, timeout=timeout)
+        kwargs = {'environment_overlay': environment_overlay} if environment_overlay is not None else {}
+        result = grade(task_dir, export, output/'grading', python=harness_python, timeout=timeout, **kwargs)
     feedback = {'official_resolved': result['official_resolved'], 'grading_status': result['status'],
                 'error': result.get('error')}
     feedback['failure_kind'] = ('none' if result['official_resolved'] is True else
@@ -67,9 +68,12 @@ def main():
     parser.add_argument('--task', required=True, type=Path)
     parser.add_argument('--output-root', required=True, type=Path)
     parser.add_argument('--harness-python', required=True)
+    parser.add_argument('--environment-overlay', type=Path)
     args = parser.parse_args()
     try:
-        feedback = verify(Path.cwd(), args.task.resolve(), args.output_root.resolve()/uuid.uuid4().hex, args.harness_python)
+        overlay = json.loads(args.environment_overlay.read_text(encoding='utf-8')) if args.environment_overlay else None
+        feedback = verify(Path.cwd(), args.task.resolve(), args.output_root.resolve()/uuid.uuid4().hex,
+                          args.harness_python, environment_overlay=overlay)
         print(json.dumps(feedback))
         return 0 if feedback['official_resolved'] is True else (2 if feedback['official_resolved'] is None else 1)
     except Exception as error:

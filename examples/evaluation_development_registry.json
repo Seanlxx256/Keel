@@ -2,6 +2,24 @@
   "schema_version": 1,
   "tasks": [
     {
+      "id": "astropy__astropy-14539",
+      "repository": "astropy/astropy",
+      "pr": 14539,
+      "reason": "First fixed batch failed; inspected logs and source changes; development rerun passed."
+    },
+    {
+      "id": "astropy__astropy-14508",
+      "repository": "astropy/astropy",
+      "pr": 14508,
+      "reason": "Repeated failed runs inspected; feedback and recovery diagnosis revised; development rerun passed after four verifications."
+    },
+    {
+      "id": "scikit-learn__scikit-learn-14629",
+      "repository": "scikit-learn/scikit-learn",
+      "pr": 14629,
+      "reason": "First fixed batch resolved after recovery; trajectory inspected as a development example."
+    },
+    {
       "id": "sympy__sympy-16450",
       "repository": "sympy/sympy",
       "pr": 16450,

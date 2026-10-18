@@ -83,6 +83,8 @@ class ToolGateway:
             if tool in excluded:
                 continue
             arguments = {'type': 'object'}
+            if tool.startswith('mcp__'):
+                arguments = self.ws.mcp_tools.policy(tool).get('input_schema',arguments)
             if tool in LOCAL_CONTRACTS:
                 required, optional = LOCAL_CONTRACTS[tool]
                 arguments.update(properties={key: {'type': 'string' if kind is str else 'integer'}
@@ -105,7 +107,9 @@ class ToolGateway:
         status = "failed"
         error_type = None
         self.ws.trace.emit(self.role, "gateway_call_started", call_id=call_id,
-                           tool=tool if isinstance(tool, str) else "<invalid>", transport="mcp_stdio" if isinstance(tool, str) and tool.startswith("mcp__") else "local")
+                           tool=tool if isinstance(tool, str) else "<invalid>", transport=(
+                               'mcp_'+self.ws.mcp_tools.transport(tool).replace('-','_')
+                               if isinstance(tool,str) and tool in self.catalog() and tool.startswith('mcp__') else 'local'))
         try:
             if not isinstance(tool, str) or tool not in self.catalog():
                 raise PolicyDenied(f"Tool unavailable to {self.role}: {tool}")

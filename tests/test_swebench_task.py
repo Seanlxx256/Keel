@@ -13,6 +13,25 @@ from keel.runtime import validate
 
 
 class SwebenchTaskTests(unittest.TestCase):
+    def test_reconstructed_overlay_is_bound_to_reference_and_propagated(self):
+        from tests.test_harness_environment import plan
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            row = self.task(root)
+            reference = root/'reference'
+            reference.mkdir()
+            (reference/'environment-overlay.json').write_text(json.dumps(plan()))
+            (reference/'grader-input.json').write_text(json.dumps([row]))
+            result = {'status':'graded','official_resolved':True,'runtime_status':'reference_only',
+                'harness_version':'3.0.0','grader_input_sha256':file_hash(reference/'grader-input.json'),
+                'environment_overlay_sha256':file_hash(reference/'environment-overlay.json')}
+            (reference/'grading.json').write_text(json.dumps(result))
+            self.assertEqual(check_reference(root/'task',reference),plan())
+            config = config_for(row,root/'task',root/'trial',{},'python',reference/'environment-overlay.json')
+            self.assertIn('--environment-overlay',config['acceptance'][0])
+            (reference/'environment-overlay.json').write_text('{}')
+            with self.assertRaisesRegex(ValueError,'overlay changed'):
+                check_reference(root/'task',reference)
     def task(self, root):
         row = {'instance_id': 'org__lib-1', 'repo': 'org/lib', 'base_commit': 'a'*40,
                'problem_statement': 'Repair API behavior', 'patch': 'SECRET_GOLD', 'test_patch': 'SECRET_TEST'}

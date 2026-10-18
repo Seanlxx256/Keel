@@ -9,6 +9,10 @@ from keel.swebench_transport import linux_artifact_writes
 
 
 if __name__ == '__main__':
+    if os.environ.get('KEEL_HARNESS_ENV_OVERLAY'):
+        import json
+        from keel.harness_environment import install_overlay
+        install_overlay(json.loads(Path(os.environ['KEEL_HARNESS_ENV_OVERLAY']).read_text(encoding='utf-8')))
     if os.name == 'nt':
         with linux_artifact_writes():
             runpy.run_module('swebench.harness.run_evaluation', run_name='__main__', alter_sys=True)

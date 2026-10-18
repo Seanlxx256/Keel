@@ -14,6 +14,14 @@ from keel.swebench_transport import linux_artifact_writes
 
 
 class SwebenchBridgeTests(unittest.TestCase):
+    def test_harness_default_file_encoding_is_utf8_even_if_parent_disables_it(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            command = [sys.executable, '-c', "from pathlib import Path; Path('unicode.txt').write_text(chr(0x263a)); print('done')"]
+            with patch.dict('os.environ', {'PYTHONUTF8': '0'}), contextlib.redirect_stdout(io.StringIO()):
+                result = run_harness(command, cwd=root, log_path=root/'harness.log', timeout=5)
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual((root/'unicode.txt').read_bytes(), '\u263a'.encode('utf-8'))
     def test_linux_artifacts_disable_windows_translation_and_restore_writer(self):
         original = Path.write_text
         calls = []

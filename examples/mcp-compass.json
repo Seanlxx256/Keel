@@ -1,0 +1,20 @@
+{
+  "compass": {
+    "command": "python",
+    "args": ["-m", "compass", "serve", "--repo", ".", "--auto-update"],
+    "timeout": 60,
+    "tools": {
+      "find_symbol": {
+        "roles": ["scout"],
+        "read_only": true,
+        "description": "Find a symbol in the current repository by name.",
+        "input_schema": {
+          "type": "object",
+          "properties": {"name": {"type": "string"}},
+          "required": ["name"],
+          "additionalProperties": false
+        }
+      }
+    }
+  }
+}

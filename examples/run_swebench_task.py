@@ -28,11 +28,18 @@ def check_reference(task_dir, reference_dir):
     actual = json.loads((reference_dir/'grader-input.json').read_text(encoding='utf-8'))
     if actual != [expected] or file_hash(reference_dir/'grader-input.json') != result['grader_input_sha256']:
         raise ValueError('Reference preflight belongs to different task data')
+    if result.get('environment_overlay_sha256'):
+        from keel.harness_environment import validate_overlay
+        overlay_path = reference_dir/'environment-overlay.json'
+        if file_hash(overlay_path) != result['environment_overlay_sha256']:
+            raise ValueError('Reference environment overlay changed')
+        return validate_overlay(json.loads(overlay_path.read_text(encoding='utf-8')))
+    return None
 
 
-def config_for(task, task_dir, output, model_config, harness_python):
+def config_for(task, task_dir, output, model_config, harness_python, environment_overlay_path=None):
     verifier = Path(__file__).with_name('swebench_verify_workspace.py').resolve()
-    return {'mode': 'localized-proposal', 'goal': task['problem_statement'], 'model': model_config,
+    config = {'mode': 'localized-proposal', 'goal': task['problem_statement'], 'model': model_config,
             'agent': {'max_steps': 12, 'max_context_bytes': 48000, 'max_output': 4096, 'require_change': True},
             'recovery': {'strategy': 'adaptive', 'max_actions': 6, 'repeat_limit': 2, 'write_roots': ['.']},
             'verification_repair_attempts': 3,
@@ -41,10 +48,13 @@ def config_for(task, task_dir, output, model_config, harness_python):
             'acceptance': [[sys.executable, str(verifier), '--task', str(task_dir.resolve()),
                             '--output-root', str((output/'verifications').resolve()),
                             '--harness-python', str(Path(harness_python).resolve())]]}
+    if environment_overlay_path is not None:
+        config['acceptance'][0].extend(['--environment-overlay', str(environment_overlay_path.resolve())])
+    return config
 
 
 def execute(root, task_dir, reference_dir, model_config, harness_python, output):
-    check_reference(task_dir, reference_dir)
+    overlay = check_reference(task_dir, reference_dir)
     task = verify_task(task_dir)
     version = subprocess.run([harness_python, '-c', 'import importlib.metadata; print(importlib.metadata.version("swebench"))'],
                              check=True, capture_output=True, text=True, timeout=20).stdout.strip()
@@ -59,10 +69,20 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output)
         if implementation_hashes(root) != hashes or file_hash(task_dir/'task-receipt.json') != task_receipt:
             raise ValueError('Implementation or task changed during execution')
         verify_task(task_dir)
+        if check_reference(task_dir, reference_dir) != overlay:
+            raise ValueError('Reference environment changed during execution')
+        if overlay is not None and file_hash(output/'environment-overlay.json') != report['environment_overlay_sha256']:
+            raise ValueError('Trial environment overlay changed during execution')
     model = FrozenModel(from_config(model_config), frozen)
     report = {'status': 'preparing', 'instance_id': task['instance_id'], 'official_resolved': None,
               'benchmark_ready': False, 'implementation': hashes,
               'scope': 'Exploratory public task; prior exposure unverified. Host agent and verifier launcher; official Docker harness executes tests.'}
+    overlay_path = None
+    if overlay is not None:
+        overlay_path = output/'environment-overlay.json'
+        overlay_path.write_text(json.dumps(overlay, indent=2), encoding='utf-8')
+        report['environment_scope'] = 'reconstructed packaging overlay; not original-condition score'
+        report['environment_overlay_sha256'] = file_hash(overlay_path)
     def save():
         (output/'trial.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
     save()
@@ -74,7 +94,7 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output)
     thread.start()
     try:
         repo = prepare_snapshot(task['repo'], task['base_commit'], output/'repo', timeout=180)
-        config = config_for(task, task_dir, output, model_config, harness_python)
+        config = config_for(task, task_dir, output, model_config, harness_python, overlay_path)
         (output/'input-receipt.json').write_text(json.dumps({'task_receipt_sha256': task_receipt,
             'base_commit': task['base_commit'], 'goal': task['problem_statement']}, indent=2), encoding='utf-8')
         report['status'] = 'agent_running'
@@ -86,7 +106,8 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output)
         export_prediction(task_dir, output/'run', output/'prediction', 'keel')
         report['status'] = 'final_grading'
         save()
-        final = grade(task_dir, output/'prediction', output/'final-grade', python=harness_python)
+        kwargs = {'environment_overlay': overlay} if overlay is not None else {}
+        final = grade(task_dir, output/'prediction', output/'final-grade', python=harness_python, **kwargs)
         report.update(status='completed' if final['status'] == 'graded' else 'grading_error',
                       official_resolved=final['official_resolved'], grading_error=final.get('error'))
     except Exception as error:

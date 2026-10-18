@@ -4,6 +4,7 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
+import time
 import urllib.parse
 
 from .benchmarks import canonical_repository_id, check_snapshot, file_digest, relative_path
@@ -222,5 +223,26 @@ def prepare_snapshot(repository_id, commit, directory, *, offline=False, timeout
     git("fetch", "--depth", "1", "--no-tags", source or f"https://github.com/{repository_id}.git", commit)
     git("checkout", "--detach", commit)
     check_snapshot(staging, commit)
-    staging.rename(directory)
+    publish_snapshot(staging, directory, commit)
     return directory
+
+
+def publish_snapshot(staging, directory, commit, *, attempts=4, delay=0.5):
+    """Retry transient sharing violations, never delete or replace a destination."""
+    events = []
+    receipt = directory.parent / (directory.name + '.publication.json')
+    for attempt in range(1, attempts + 1):
+        if directory.exists() or directory.is_symlink():
+            raise FileExistsError(f'Snapshot destination appeared during publication: {directory}')
+        try:
+            staging.rename(directory)
+            check_snapshot(directory, commit)
+            events.append({'attempt': attempt, 'status': 'published'})
+            receipt.write_text(json.dumps({'events': events}, indent=2), encoding='utf-8')
+            return
+        except PermissionError as error:
+            events.append({'attempt': attempt, 'status': 'permission_error', 'error': str(error)})
+            receipt.write_text(json.dumps({'events': events, 'staging_preserved': staging.exists()}, indent=2), encoding='utf-8')
+            if attempt == attempts or not staging.is_dir() or directory.exists():
+                raise
+            time.sleep(delay * attempt)

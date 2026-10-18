@@ -5,6 +5,9 @@ import asyncio
 import json
 import math
 import re
+import os
+from contextlib import asynccontextmanager
+from urllib.parse import urlsplit
 
 from .core import PolicyDenied
 
@@ -19,10 +22,27 @@ def validate_servers(servers):
     for name, spec in servers.items():
         if not isinstance(name, str) or (not re.fullmatch(r'[A-Za-z0-9_-]+', name) or '__' in name):
             raise ValueError('MCP server names must contain letters, digits, underscores or hyphens')
-        if not isinstance(spec, dict) or set(spec) - {'command', 'args', 'tools', 'timeout'}:
+        if not isinstance(spec, dict) or set(spec) - {'transport', 'command', 'args', 'tools', 'timeout', 'url', 'headers_env', 'env'}:
             raise ValueError('Invalid MCP server configuration')
-        if not isinstance(spec.get('command'), str) or not spec['command'].strip():
+        transport = spec.get('transport', 'stdio')
+        if transport not in ('stdio','streamable-http'):
+            raise ValueError('MCP transport must be stdio or streamable-http')
+        if transport == 'stdio' and (not isinstance(spec.get('command'), str) or not spec['command'].strip()):
             raise ValueError('MCP server requires an executable command')
+        if transport == 'stdio' and set(spec) & {'url','headers_env'}:
+            raise ValueError('HTTP fields cannot be used for stdio')
+        if transport == 'streamable-http':
+            parsed = urlsplit(spec.get('url',''))
+            if (parsed.scheme not in ('http','https') or not parsed.hostname or parsed.username or parsed.password or parsed.fragment or
+                    (parsed.scheme=='http' and parsed.hostname not in ('localhost','127.0.0.1','::1'))):
+                raise ValueError('Remote MCP requires HTTPS; HTTP allowed only on loopback; no URL credentials')
+            if set(spec) & {'command','args','env'}:
+                raise ValueError('Stdio fields cannot be used for HTTP')
+        for field in ('env','headers_env'):
+            mapping=spec.get(field,{})
+            if not isinstance(mapping,dict) or any(not isinstance(k,str) or not re.fullmatch(r'[A-Za-z0-9_-]+',k) or
+                not isinstance(v,str) or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*',v) for k,v in mapping.items()):
+                raise ValueError('MCP credentials must reference environment variable names')
         if not isinstance(spec.get('args', []), list) or any(not isinstance(a, str) for a in spec.get('args', [])):
             raise ValueError('MCP args must be a string array')
         timeout = spec.get('timeout', 30)
@@ -33,8 +53,12 @@ def validate_servers(servers):
         for tool, policy in spec['tools'].items():
             if not isinstance(tool, str) or not re.fullmatch(r'[A-Za-z0-9_.-]+', tool):
                 raise ValueError('Invalid MCP tool name')
-            if not isinstance(policy, dict) or set(policy) != {'roles', 'description'}:
+            if not isinstance(policy, dict) or not {'roles','description'}<=policy.keys() or set(policy)-{'roles','description','input_schema','read_only'}:
                 raise ValueError('Each MCP tool requires roles and description')
+            if 'input_schema' in policy and (not isinstance(policy['input_schema'],dict) or policy['input_schema'].get('type')!='object'):
+                raise ValueError('MCP input_schema must describe an object')
+            if 'read_only' in policy and type(policy['read_only']) is not bool:
+                raise ValueError('MCP read_only must be boolean')
             roles = policy['roles']
             if not isinstance(roles, list) or not roles or any(not isinstance(r, str) or r not in {'scout', 'planner', 'implementer'} for r in roles):
                 raise ValueError('Invalid MCP tool roles')
@@ -51,6 +75,44 @@ class McpTools:
         return {f'mcp__{server}__{tool}': policy['description']
                 for server, spec in self.servers.items() for tool, policy in spec['tools'].items()
                 if role in policy['roles']}
+
+    def policy(self, alias):
+        for server,spec in self.servers.items():
+            for tool,policy in spec['tools'].items():
+                if alias == f'mcp__{server}__{tool}':
+                    return policy
+        raise PolicyDenied('Unknown MCP tool alias')
+
+    def transport(self, alias):
+        for server,spec in self.servers.items():
+            if any(alias==f'mcp__{server}__{tool}' for tool in spec['tools']):
+                return spec.get('transport','stdio')
+        raise PolicyDenied('Unknown MCP tool alias')
+
+    @staticmethod
+    def _environment(mapping):
+        values={}
+        for key,name in mapping.items():
+            value=os.environ.get(name)
+            if not value:
+                raise McpToolError('Required MCP credential environment variable is missing: '+name)
+            values[key]=value
+        return values
+
+    @asynccontextmanager
+    async def _connection(self,spec,stderr):
+        if spec.get('transport','stdio')=='streamable-http':
+            from mcp.client.streamable_http import streamablehttp_client
+            async with streamablehttp_client(spec['url'],headers=self._environment(spec.get('headers_env',{})),
+                                             timeout=spec.get('timeout',30)) as (reader,writer,_):
+                yield reader,writer
+        else:
+            from mcp import StdioServerParameters
+            from mcp.client.stdio import stdio_client
+            parameters=StdioServerParameters(command=spec['command'],args=spec.get('args',[]),
+                cwd=str(self.ws.root),env=self._environment(spec.get('env',{})) or None)
+            async with stdio_client(parameters,errlog=stderr) as streams:
+                yield streams
 
     def call(self, role, alias, arguments):
         if alias not in self.catalog(role):
@@ -82,9 +144,7 @@ class McpTools:
             from jsonschema import Draft202012Validator
         except ImportError:
             raise McpToolError('MCP client requires pip install -e ".[mcp]"') from None
-        parameters = StdioServerParameters(command=spec['command'], args=spec.get('args', []),
-                                           cwd=str(self.ws.root))
-        async with stdio_client(parameters, errlog=stderr) as (reader, writer):
+        async with self._connection(spec,stderr) as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
                 tools, cursor, seen = [], None, set()
@@ -105,9 +165,18 @@ class McpTools:
                 validator = Draft202012Validator(found[0].inputSchema)
                 if not validator.is_valid(arguments):
                     raise McpToolError('MCP arguments do not match the server input schema')
+                policy=spec['tools'][tool]
+                if 'input_schema' in policy and not Draft202012Validator(policy['input_schema']).is_valid(arguments):
+                    raise McpToolError('MCP arguments do not match the operator input schema')
                 result = await session.call_tool(tool, arguments=arguments)
                 if result.isError:
-                    raise McpToolError('MCP server returned a tool error')
+                    # Preserve untrusted error evidence without echoing potential secrets.
+                    artifact=self.ws.trace.path.parent/'mcp-tool-error.json'
+                    payload=result.model_dump(mode='json',by_alias=True,exclude_none=True) if hasattr(result,'model_dump') else {'isError':True}
+                    text=json.dumps(payload,ensure_ascii=False)
+                    if len(text.encode('utf-8'))<=1_000_000:
+                        artifact.write_text(text,encoding='utf-8')
+                    raise McpToolError('MCP server returned a tool error; inspect mcp-tool-error.json if present (untrusted server output)')
                 value = result.model_dump(mode='json', by_alias=True, exclude_none=True)
                 if len(json.dumps(value, ensure_ascii=False).encode('utf-8')) > 1_000_000:
                     raise McpToolError('MCP result exceeds 1 MB')

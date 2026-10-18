@@ -8,6 +8,12 @@ from examples.run_swebench_batch import select, prepare, execute, verify_plan
 
 
 class SwebenchBatchTests(unittest.TestCase):
+    def test_configurable_five_repository_selection(self):
+        rows = [{'instance_id': f'r{i}__lib-1', 'repo': f'r{i}/lib'} for i in range(6)]
+        chosen = select(rows, set(), set(), count=5, repositories=5)
+        self.assertEqual(len(chosen), 5)
+        self.assertEqual(len({row['repo'] for row in chosen}), 5)
+
     def rows(self):
         return [{'instance_id': f'{repo}__lib-{number}', 'repo': f'{repo}/lib',
                  'base_commit': 'a'*40, 'problem_statement': 'Issue', 'patch': 'gold', 'test_patch': 'tests'}

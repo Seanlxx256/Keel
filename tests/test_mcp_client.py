@@ -66,6 +66,43 @@ class McpClientTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 validate_servers(servers)
 
+    def test_remote_transport_and_operator_schema_are_exposed_without_secrets(self):
+        policy={**self.servers['repo']['tools']['find_symbol'], 'input_schema':{
+            'type':'object','properties':{'name':{'type':'string'}},'required':['name'],'additionalProperties':False}}
+        servers={'remote':{'transport':'streamable-http','url':'https://example.invalid/mcp',
+            'headers_env':{'Authorization':'KEEL_TEST_MCP_AUTH'},'tools':{'find_symbol':policy}}}
+        validate_servers(servers)
+        self.ws.mcp_tools=McpTools(servers,self.ws)
+        schema=ToolGateway('scout',self.ws).action_schema()
+        branch=next(b for b in schema['oneOf'] if b['properties']['tool']['enum']==['mcp__remote__find_symbol'])
+        self.assertEqual(branch['properties']['arguments'],policy['input_schema'])
+        self.assertNotIn('KEEL_TEST_MCP_AUTH',json.dumps(schema))
+        with self.assertRaisesRegex(McpToolError,'missing'):
+            McpTools._environment({'Authorization':'KEEL_NONEXISTENT_TEST_CREDENTIAL'})
+        for url in ('http://remote.invalid/mcp','https://user:pass@example.invalid/mcp'):
+            with self.assertRaises(ValueError):
+                validate_servers({'remote':{**servers['remote'],'url':url}})
+
+    @unittest.skipUnless(importlib.util.find_spec('mcp'), 'Official MCP SDK is not installed')
+    def test_http_uses_official_sdk_session_and_resolves_credentials_at_execution(self):
+        @asynccontextmanager
+        async def transport(url,**kwargs):
+            self.assertEqual(kwargs['headers'],{'Authorization':'Bearer test-only'})
+            yield object(),object(),lambda:None
+        session=AsyncMock()
+        session.list_tools.return_value=SimpleNamespace(tools=[SimpleNamespace(name='lookup',inputSchema={'type':'object'})],nextCursor=None)
+        session.call_tool.return_value=SimpleNamespace(isError=False,model_dump=lambda **kwargs:{'content':[]})
+        context=AsyncMock();context.__aenter__.return_value=session
+        self.ws.mcp_tools=McpTools({'remote':{'transport':'streamable-http','url':'https://example.invalid/mcp',
+            'headers_env':{'Authorization':'KEEL_TEST_MCP_AUTH'},
+            'tools':{'lookup':{'roles':['scout'],'description':'lookup'}}}},self.ws)
+        with patch.dict('os.environ',{'KEEL_TEST_MCP_AUTH':'Bearer test-only'}), \
+             patch('mcp.client.streamable_http.streamablehttp_client',transport),patch('mcp.ClientSession',return_value=context):
+            result=ToolGateway('scout',self.ws).call('mcp__remote__lookup',{})
+        self.assertIn('fact_id',result)
+        self.assertEqual(session.initialize.await_count,1)
+        self.assertEqual(context.__aexit__.await_count,1)
+
     @unittest.skipUnless(importlib.util.find_spec('mcp'), 'Official MCP SDK is not installed')
     def test_sdk_boundary_validates_schema_and_server_errors(self):
         @asynccontextmanager
@@ -86,6 +123,7 @@ class McpClientTests(unittest.TestCase):
             session.call_tool.assert_not_called()
             with self.assertRaisesRegex(McpToolError, 'tool error'):
                 gateway.call('mcp__repo__find_symbol', {'name': 'fetch'})
+            self.assertTrue((self.root/'mcp-tool-error.json').is_file())
         self.assertEqual(context.__aexit__.await_count, 2)
 
     @unittest.skipUnless(importlib.util.find_spec('mcp'), 'Official MCP SDK is not installed')

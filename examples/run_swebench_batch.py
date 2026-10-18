@@ -67,7 +67,9 @@ def select(rows, excluded_ids, excluded_repos, seed=42, count=3, repositories=2)
     return chosen
 
 
-def prepare(root, dataset, model_file, harness_python, output, seed=42):
+def prepare(root, dataset, model_file, harness_python, output, seed=42, count=3, repositories=2, recover_environment=False):
+    if not 1 <= repositories <= count <= 20:
+        raise ValueError('Require 1 <= repositories <= tasks <= 20')
     if dataset.suffix == '.parquet':
         import pyarrow.parquet as pq
         rows = pq.read_table(dataset).to_pylist()
@@ -78,7 +80,7 @@ def prepare(root, dataset, model_file, harness_python, output, seed=42):
     known = registry(root)
     excluded_repos = {canonical_repo(row['repository'], known) for row in known['tasks']}
     seen.update(row['id'] for row in known['tasks'])
-    chosen = select(rows, seen, excluded_repos, seed)
+    chosen = select(rows, seen, excluded_repos, seed, count=count, repositories=repositories)
     output.mkdir(parents=True, exist_ok=False)
     tasks = []
     for index, row in enumerate(chosen, 1):
@@ -99,7 +101,10 @@ def prepare(root, dataset, model_file, harness_python, output, seed=42):
                'excluded_ids': sorted(seen), 'excluded_repositories': sorted(excluded_repos),
                'exposure_scan_omissions': omitted, 'benchmark_ready': False, 'heldout_tasks': 0,
                'scope': 'Fixed exploratory new-task list; excludes IDs found in bounded local artifacts, not proof of unseen tasks. No replacement after results.',
-               'limits': {'tasks': 3, 'repositories': 2, 'max_model_calls_per_task': 30, 'max_model_calls_batch': 90}}
+               'limits': {'tasks': count, 'repositories': repositories, 'max_model_calls_per_task': 30, 'max_model_calls_batch': 30*count}}
+    if recover_environment:
+        payload['environment_recovery'] = {'attempts': 3, 'max_steps':9, 'max_model_calls_batch': 9*count,
+                                           'scope': 'packaging tools only; reconstructed conditions reported separately'}
     plan = {**payload, 'plan_sha256': digest(payload)}
     (output/'plan.json').write_text(json.dumps(plan, indent=2), encoding='utf-8')
     return plan
@@ -139,6 +144,10 @@ def execute(root, output):
             'resolved': sum(row['official_resolved'] is True for row in records),
             'reference_failed_or_error': sum(row['status'] == 'reference_failed_or_error' for row in records),
             'not_started': sum(row['status'] == 'not_started' for row in records)}
+        report['counts']['resolved_original_environment'] = sum(
+            row['official_resolved'] is True and not row.get('environment_scope') for row in records)
+        report['counts']['resolved_reconstructed_environment'] = sum(
+            row['official_resolved'] is True and bool(row.get('environment_scope')) for row in records)
         (output/'results.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
     save()
     try:
@@ -150,6 +159,19 @@ def execute(root, output):
             print(f"[Batch] reference preflight {row['instance_id']}", flush=True)
             try:
                 reference = grade(directory/'task', directory/'reference', directory/'reference-grade', python=plan['harness_python'])
+                reference_dir = directory/'reference-grade'
+                if reference['status'] == 'grading_error' and plan.get('environment_recovery'):
+                    from examples.recover_swebench_environment import recover
+                    from keel.models import from_config
+                    recovery = recover(directory/'task', directory/'reference', reference_dir,
+                        directory/'environment-recovery', from_config(model), plan['harness_python'],
+                        attempts=plan['environment_recovery']['attempts'],
+                        max_steps=plan['environment_recovery'].get('max_steps',plan['environment_recovery']['attempts']))
+                    row['environment_recovery'] = recovery
+                    if recovery['status'] == 'reference_verified_reconstructed':
+                        reference_dir = directory/'environment-recovery'/recovery['successful_grade']
+                        reference = json.loads((reference_dir/'grading.json').read_text(encoding='utf-8'))
+                        row['environment_scope'] = 'reconstructed packaging overlay'
                 row['reference_resolved'] = reference['official_resolved']
                 if reference['status'] != 'graded' or reference['official_resolved'] is not True:
                     row.update(status='reference_failed_or_error', error=reference.get('error'))
@@ -158,7 +180,7 @@ def execute(root, output):
                 row['status'] = 'agent_running'
                 save()
                 print(f"[Batch] Keel repair {row['instance_id']}", flush=True)
-                trial = run_task(root, directory/'task', directory/'reference-grade', model, plan['harness_python'], directory/'trial')
+                trial = run_task(root, directory/'task', reference_dir, model, plan['harness_python'], directory/'trial')
                 row.update(status=trial['status'], agent_executed='runtime_status' in trial,
                            official_resolved=trial['official_resolved'], runtime_status=trial.get('runtime_status'),
                            failure=trial.get('failure'), budget=trial.get('budget'), recovery=trial.get('recovery'),
@@ -189,11 +211,14 @@ def main():
     parser.add_argument('--model-config', type=Path)
     parser.add_argument('--harness-python', type=Path)
     parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--tasks', type=int, default=None)
+    parser.add_argument('--repositories', type=int, default=None)
+    parser.add_argument('--recover-environment', action='store_true')
     parser.add_argument('--execute', action='store_true')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     if args.execute:
-        if args.dataset or args.model_config or args.harness_python:
+        if args.dataset or args.model_config or args.harness_python or args.tasks is not None or args.repositories is not None or args.recover_environment:
             parser.error('Execute frozen output only')
         docker = Path('D:/Docker/Desktop/resources/bin')
         if not shutil.which('docker') and (docker/'docker.exe').is_file():
@@ -203,7 +228,10 @@ def main():
     else:
         if not args.dataset or not args.model_config or not args.harness_python:
             parser.error('Preparation requires dataset, model config, harness python')
-        plan = prepare(root, args.dataset.resolve(), args.model_config.resolve(), args.harness_python.resolve(), args.output.resolve(), args.seed)
+        plan = prepare(root, args.dataset.resolve(), args.model_config.resolve(), args.harness_python.resolve(), args.output.resolve(), args.seed,
+                       count=args.tasks if args.tasks is not None else 3,
+                       repositories=args.repositories if args.repositories is not None else 2,
+                       recover_environment=args.recover_environment)
         print(json.dumps({'status': 'prepared_only', 'tasks': [{key: row[key] for key in ('instance_id', 'repo')} for row in plan['tasks']],
                           'limits': plan['limits'], 'benchmark_ready': False}, indent=2))
     return 0
