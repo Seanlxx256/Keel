@@ -21,6 +21,7 @@ LOCAL_CONTRACTS = {
     'list_files': ({}, {}), 'read_file': ({'path': str}, {}),
     'search_code': ({'query': str}, {}), 'find_symbol': ({'name': str}, {}),
     'get_context': ({'file': str, 'line': int}, {}),
+    'get_symbols_overview': ({'file': str}, {'depth': int, 'offset': int, 'limit': int, 'max_bytes': int}),
     'replace': ({'path': str, 'old': str, 'new': str}, {}),
     'recall': ({'fact_id': int}, {'offset': int}),
     'read_lines': ({'path': str, 'start_line': int, 'end_line': int}, {}),
@@ -69,6 +70,7 @@ class ToolGateway:
     def catalog(self):
         tools = dict(TOOLS)
         if self.ws.compass_enabled:
+            tools['get_symbols_overview'] = '{"file":"relative/file.py","depth":1,"offset":0} -> compact paged file outline; follow next_offset, then read selected source'
             tools.update(find_symbol='{"name": "symbol name"} -> exact symbol matches',
                          get_context='{"file": "relative/path.py", "line": 1} -> containing symbol and graph neighbors')
         if self.role == "implementer":
@@ -230,6 +232,9 @@ class ToolGateway:
         elif tool == "get_context":
             value = self.ws.get_context(args["file"], args["line"], role=self.role)
             kind = "symbol"
+        elif tool == 'get_symbols_overview':
+            value = self.ws.get_symbols_overview(**args, role=self.role)
+            kind = 'symbol'
         else:
             raise PolicyDenied(f"Unknown tool: {tool}")
         fact_id = self.ws.ledger.add(kind, self.role, tool + " evidence", value)

@@ -71,6 +71,16 @@ class Workspace:
         self.trace.emit(role, "tool_call", tool="get_context", file=file, line=line)
         return result
 
+    def get_symbols_overview(self, file, *, depth=1, limit=20, offset=0, max_bytes=12000, role='scout'):
+        if not self.compass_enabled:
+            raise ValueError('Compass retrieval is not enabled')
+        self.path(file)  # Preserve host path/protected-metadata read policy.
+        self.budget.charge_tool()
+        with self._compass_index(role) as index:
+            result = index.overview(file, depth=depth, limit=limit, offset=offset, max_bytes=max_bytes)
+        self.trace.emit(role, 'tool_call', tool='get_symbols_overview', file=file, offset=offset)
+        return result
+
     def path(self, relative: str, write=False) -> Path:
         candidate = Path(relative)
         if candidate.is_absolute() or candidate.drive or ".." in candidate.parts:

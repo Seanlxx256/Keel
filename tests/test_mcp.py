@@ -39,7 +39,7 @@ class McpTests(unittest.TestCase):
         self.assertEqual(result["serverInfo"]["name"], "repo-intel")
         self.assertIn("tools", result["capabilities"])
         tools = self.request("tools/list")["result"]["tools"]
-        self.assertEqual({tool["name"] for tool in tools}, {"find_symbol", "search_code", "impact_analysis", "get_context"})
+        self.assertEqual({tool["name"] for tool in tools}, {"find_symbol", "search_code", "impact_analysis", "get_context", "get_symbols_overview"})
 
     def test_tools_unavailable_until_initialized_notification(self):
         self.assertIn("error", self.request("tools/list"))

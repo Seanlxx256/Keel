@@ -4,6 +4,33 @@
     "args": ["-m", "compass", "serve", "--repo", ".", "--auto-update"],
     "timeout": 60,
     "tools": {
+      "search_code": {
+        "roles": ["scout"], "read_only": true,
+        "description": "Find relevant code from a problem description using Compass exact/hybrid retrieval; inspect candidate identities before reading full source.",
+        "input_schema": {"type": "object", "properties": {"query": {"type": "string"},
+          "limit": {"type": "integer", "minimum": 1, "maximum": 100}},
+          "required": ["query"], "additionalProperties": false}
+      },
+      "get_context": {
+        "roles": ["scout"], "read_only": true,
+        "description": "Inspect the containing Python symbol and resolved static callers/callees at a selected file and line; larger than a file outline.",
+        "input_schema": {"type": "object", "properties": {"file": {"type": "string"},
+          "line": {"type": "integer", "minimum": 1}, "limit": {"type": "integer", "minimum": 1, "maximum": 100}},
+          "required": ["file", "line"], "additionalProperties": false}
+      },
+      "get_symbols_overview": {
+        "roles": ["scout"],
+        "read_only": true,
+        "description": "Inspect a Python file's class/function outline without reading full bodies; follow next_offset when truncated.",
+        "input_schema": {
+          "type": "object",
+          "properties": {"file": {"type": "string"}, "depth": {"type": "integer", "minimum": 0, "maximum": 8},
+            "offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+            "max_bytes": {"type": "integer", "minimum": 1024, "maximum": 64000}},
+          "required": ["file"],
+          "additionalProperties": false
+        }
+      },
       "find_symbol": {
         "roles": ["scout"],
         "read_only": true,

@@ -328,6 +328,45 @@ class RepositoryIndex:
                                         for identifier in sorted(neighbors)],
                              truncated=len(outgoing) > limit or len(incoming) > limit)
 
+    def overview(self, path, *, depth=1, limit=50, offset=0, max_bytes=12000):
+        """Paged static symbol identities, without source bodies or docstrings."""
+        self.require_fresh()
+        self._limit(limit)
+        if type(depth) is not int or not 0 <= depth <= 8 or type(offset) is not int or offset < 0:
+            raise ValueError('depth must be 0..8 and offset a nonnegative integer')
+        if type(max_bytes) is not int or not 1024 <= max_bytes <= 64000:
+            raise ValueError('max_bytes must be an integer from 1024 to 64000')
+        if not isinstance(path, str) or not path.strip():
+            raise ValueError('File path must be nonempty')
+        path = path.replace('\\', '/')
+        file = self.db.execute('SELECT content_hash,status FROM files WHERE path=?', (path,)).fetchone()
+        if file is None:
+            raise ValueError('File is not present in the index')
+        rows = self.db.execute('''WITH RECURSIVE outline AS (
+            SELECT id,parent_id,name,qualname,kind,start_line,end_line,0 AS depth
+            FROM symbols WHERE path=? AND parent_id IS NULL
+            UNION ALL
+            SELECT s.id,s.parent_id,s.name,s.qualname,s.kind,s.start_line,s.end_line,o.depth+1
+            FROM symbols s JOIN outline o ON s.parent_id=o.id WHERE s.path=? AND o.depth<?)
+            SELECT * FROM outline ORDER BY start_line,end_line DESC,id LIMIT ? OFFSET ?''',
+            (path, path, depth, limit+1, offset)).fetchall()
+        result = self.envelope([], path=path,
+            source_sha256=file['content_hash'], parse_status=file['status'], depth=depth,
+            offset=offset, next_offset=None, truncated=False, max_bytes=max_bytes,
+            scope='Indexed Python definitions only; not LSP type resolution or reference analysis.')
+        for row in rows[:limit]:
+            candidate = {**result, 'results': [*result['results'], dict(row)]}
+            more = len(rows) > len(candidate['results'])
+            candidate.update(truncated=more, next_offset=offset+len(candidate['results']) if more else None)
+            if len(json.dumps(candidate, ensure_ascii=False).encode('utf-8')) > max_bytes:
+                if not result['results']:
+                    raise ValueError('One outline entry exceeds max_bytes; increase the explicit byte budget')
+                break
+            result = candidate
+        if len(json.dumps(result, ensure_ascii=False).encode('utf-8')) > max_bytes:
+            raise ValueError('Outline metadata exceeds max_bytes')
+        return result
+
     def search_vector(self, query, limit=10, *, timeout=None):
         self.require_fresh()
         self._limit(limit)

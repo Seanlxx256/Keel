@@ -89,7 +89,7 @@ def main(argv=None):
     sweep.add_argument("--max-model-calls", type=int, default=8)
     sweep.add_argument("--max-tool-calls", type=int, default=100)
     sweep.add_argument("--max-wallclock", type=float, default=120)
-    for name in ("symbol", "context", "search", "status"):
+    for name in ("symbol", "context", "search", "status", "overview"):
         command = sub.add_parser(name)
         command.add_argument("--repo", type=Path, required=True)
         if name in {"symbol", "search"}:
@@ -97,6 +97,11 @@ def main(argv=None):
         if name == "context":
             command.add_argument("file")
             command.add_argument("line", type=int)
+        if name == 'overview':
+            command.add_argument('file')
+            command.add_argument('--depth', type=int, default=1)
+            command.add_argument('--offset', type=int, default=0)
+            command.add_argument('--max-bytes', type=int, default=12000)
         if name != "status":
             command.add_argument("--limit", type=int, default=10)
     for name in ("retrieve", "evaluate", "serve"):
@@ -229,6 +234,8 @@ def main(argv=None):
                     result = index.search_vector(args.query, args.limit)
                 elif args.command == "context":
                     result = index.context(args.file, args.line, args.limit)
+                elif args.command == 'overview':
+                    result = index.overview(args.file, depth=args.depth, offset=args.offset, limit=args.limit, max_bytes=args.max_bytes)
                 else:
                     result = {**index.metadata, "stale": index.stale}
         print(json.dumps(result, ensure_ascii=False, indent=2))

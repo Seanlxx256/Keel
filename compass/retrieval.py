@@ -24,8 +24,11 @@ class Routing:
     max_nodes: int = 40
     graph_hops: int = 2
     max_output: int = 512
+    t2_preserve_top: int = 0
 
     def __post_init__(self):
+        if type(self.t2_preserve_top) is not int or not 0 <= self.t2_preserve_top <= 100:
+            raise ValueError('t2_preserve_top must be an integer from 0 to 100')
         if self.evidence_policy not in ("preview", "read"):
             raise ValueError("evidence_policy must be preview or read")
         if not isinstance(self.ranking, str) or self.ranking not in {"rrf", "code-aware"}:
@@ -148,6 +151,13 @@ class Retriever:
 
     def exact(self, query, limit):
         self.budget.charge_tool()
+        location = re.fullmatch(r'([\w./\\-]+\.py)(?::([1-9]\d*)(?::[1-9]\d*)?|#L([1-9]\d*))', query)
+        if location:
+            path = location[1].replace('\\', '/')
+            line = int(location[2] or location[3])
+            row = self.index.db.execute('SELECT * FROM symbols WHERE path=? AND start_line<=? AND end_line>=? '
+                'ORDER BY end_line-start_line,start_line,id LIMIT 1', (path, line, line)).fetchone()
+            return [{**dict(row), 'location_evidence': {'path': path, 'line': line}}] if row else []
         if re.fullmatch(r"[^\W\d]\w*(?:\.[^\W\d]\w*)*", query, flags=re.UNICODE):
             result = self.index.find_symbol(query, limit)
             if len(result["results"]) == 1 and not result["truncated"]:
@@ -215,7 +225,18 @@ class Retriever:
                 status = "model_unconfigured"
             else:
                 tier = "T2"
+                baseline = rows
                 rows, status = self.explore(query, rows, trace)
+                if self.routing.t2_preserve_top:
+                    reserved = baseline[:min(self.routing.t2_preserve_top, limit)]
+                    reserved_ids = {row['id'] for row in reserved}
+                    selected_ids = {row['id'] for row in rows}
+                    rows = [{**row, 'selection_source': 't1_reserved',
+                             't2_selected': row['id'] in selected_ids} for row in reserved] + [
+                        {**row, 'selection_source': 't2_selected'} for row in rows if row['id'] not in reserved_ids]
+                    trace.append({'tier': 'T2', 'action': 'preserve_baseline',
+                        'ids': [row['id'] for row in reserved],
+                        'scope': 'Reserved T1 evidence is not a claim that the model read or selected it.'})
         return self._result(rows, tier, trace, signals, reasons, status, started, before, limit)
 
     def _result(self, rows, tier, trace, signals, reasons, status, started, before, limit):
@@ -226,6 +247,8 @@ class Retriever:
         result = self.index.envelope(rows[:limit], tier=tier, signals=signals,
                                      routing={"mode_status": status, "upgrade_reasons": reasons, "trace": trace,
                                               "evidence_policy": self.routing.evidence_policy},
+                                     selection_policy={"t2_preserve_top": self.routing.t2_preserve_top,
+                                         "reserved_rows_may_be_unread": tier == 'T2' and self.routing.t2_preserve_top > 0},
                                      usage=usage, elapsed_seconds=round(time.perf_counter() - started, 6),
                                      truncated=len(rows) > limit, reranker=self.routing.ranking if tier != "T0" else None,
                                      confidence_calibrated=False, token_scope="chat calls only; embedding token usage is not available")

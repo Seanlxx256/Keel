@@ -18,6 +18,10 @@ def _tool(name, description, properties, required):
 STRING = {"type": "string", "minLength": 1, "maxLength": 8000}
 LIMIT = {"type": "integer", "minimum": 1, "maximum": 100, "default": 10}
 TOOLS = [
+    _tool('get_symbols_overview', 'Read a compact paged Python file outline without source bodies; use get_context to inspect a chosen symbol.',
+          {'file': STRING, 'depth': {'type': 'integer', 'minimum': 0, 'maximum': 8},
+           'offset': {'type': 'integer', 'minimum': 0}, 'limit': LIMIT,
+           'max_bytes': {'type': 'integer', 'minimum': 1024, 'maximum': 64000}}, ['file']),
     _tool("find_symbol", "Find exact Python symbols, retaining ambiguity and index identity.",
           {"name": STRING, "limit": LIMIT}, ["name"]),
     _tool("search_code", "Adaptive T0/T1/T2 repository retrieval with route evidence and bounded exploration.",
@@ -62,6 +66,11 @@ class CompassService:
             if name == "find_symbol":
                 budget.charge_tool()
                 result = index.find_symbol(arguments["name"], limit)
+            elif name == 'get_symbols_overview':
+                budget.charge_tool()
+                result = index.overview(arguments['file'], depth=arguments.get('depth', 1),
+                                        offset=arguments.get('offset', 0), limit=limit,
+                                        max_bytes=arguments.get('max_bytes', 12000))
             elif name == "get_context":
                 budget.charge_tool()
                 result = index.context(arguments["file"], arguments["line"], limit)
