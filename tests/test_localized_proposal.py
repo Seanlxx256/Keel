@@ -20,6 +20,103 @@ class Model:
 
 
 class LocalizedProposalTests(unittest.TestCase):
+    def test_external_validation_success_is_reported_and_missing_tools_rejected(self):
+        for config in ({'localization_require_external': True},
+                       {'localization_require_external': True, 'localization_tool_steps': 2}):
+            with self.assertRaises(ValueError):
+                run({**self.config, **config}, self.root, self.root/'.keel/rejected-external')
+        class ExternalFirst(Model):
+            def complete_json(self, messages, **kwargs):
+                if not self.messages:
+                    self.messages.append(messages)
+                    # On the first turn the schema must exclude local tools/final.
+                    aliases = [row['properties']['tool']['enum'][0] for row in kwargs['schema']['oneOf']]
+                    self.asserted_aliases = aliases
+                    return Reply(json.dumps({'tool': 'mcp__external__find', 'arguments': {}}), 100)
+                saved = self.messages.pop(0)
+                try:
+                    return super().complete_json(messages, **kwargs)
+                finally:
+                    self.messages.insert(0, saved)
+        model = ExternalFirst({'files': ['module.py'], 'locations': ['module.py:1']})
+        config = {**self.config, 'localization_tool_steps': 1, 'localization_require_external': True,
+            'budget': {**self.config['budget'], 'max_model_calls': 4},
+            'mcp_servers': {'external': {'command': 'unused', 'tools': {'find': {
+                'roles': ['scout'], 'read_only': True, 'description': 'Find symbols'}}}}}
+        with patch('keel.mcp_client.McpTools.call', return_value={'content': [{'type': 'text', 'text': 'module.py:1'}]}):
+            result = run(config, self.root, self.root/'.keel/external-success', model=model)
+        self.assertEqual(model.asserted_aliases, ['mcp__external__find'])
+        self.assertEqual(result['status'], 'passed')
+        self.assertEqual(result['external_tool_validation'],
+                         {'required': True, 'attempted': True, 'successful_requests': 1})
+
+    def test_exploration_rejects_invalid_limits_and_non_readonly_mcp_tools(self):
+        for value in (True, -1, 13):
+            with self.assertRaises(ValueError):
+                run({**self.config, 'localization_tool_steps': value}, self.root,
+                    self.root/'.keel/rejected')
+        with self.assertRaisesRegex(ValueError, 'read_only'):
+            run({**self.config, 'localization_tool_steps': 2, 'mcp_servers': {
+                'external': {'command': 'unused', 'tools': {'edit': {
+                    'roles': ['scout'], 'description': 'unreviewed tool'}}}}},
+                self.root, self.root/'.keel/rejected')
+
+    def test_tool_exploration_recovers_mcp_failure_and_hands_evidence_to_selection(self):
+        class Exploring:
+            def __init__(self):
+                self.messages = []
+                self.actions = iter([
+                    {'tool': 'read_file', 'arguments': {'path': 'module.py'}},
+                    {'tool': 'mcp__external__find', 'arguments': {}},
+                    {'tool': 'read_file', 'arguments': {'path': 'module.py'}},
+                    {'final': {'summary': 'version returns 1', 'files': ['module.py']}},
+                    {'locations': ['module.py:1']},
+                    {'edits': [{'path': 'module.py', 'old': 'return 1', 'new': 'return 2'}], 'summary': 'Updated'}])
+            def complete_json(self, messages, **kwargs):
+                import copy
+                self.messages.append(copy.deepcopy(messages))
+                return Reply(json.dumps(next(self.actions)), 100)
+        from keel.mcp_client import McpToolError
+        model = Exploring()
+        config = {**self.config, 'localization_tool_steps': 4, 'localization_require_external': True,
+            'budget': {**self.config['budget'], 'max_model_calls': 6},
+            'mcp_servers': {'external': {'command': 'unused', 'tools': {'find': {
+                'roles': ['scout'], 'read_only': True, 'description': 'Find symbols'}}}}}
+        with patch('keel.mcp_client.McpTools.call', side_effect=McpToolError('Server unavailable')):
+            result = run(config, self.root, self.root/'.keel/exploring', model=model)
+        self.assertEqual(result['status'], 'passed')
+        self.assertIn('requires an authorized MCP', model.messages[1][-1]['content'])
+        self.assertIn('Server unavailable', model.messages[2][-1]['content'])
+        handed = json.loads(json.loads(model.messages[4][1]['content'])['goal'])
+        self.assertIn('return 1', handed['untrusted_tool_evidence'][0]['preview'])
+        self.assertEqual(result['budget']['model_calls'], 6)
+        self.assertEqual(result['external_tool_calls']['mcp__external__find'],
+                         {'completed': 0, 'failed': 1, 'denied': 0})
+        self.assertEqual(result['external_tool_validation'],
+                         {'required': True, 'attempted': True, 'successful_requests': 0})
+
+    def test_tool_exploration_local_limit_falls_back_but_global_budget_does_not(self):
+        class Exploring(Model):
+            def complete_json(self, messages, **kwargs):
+                if not self.messages:
+                    self.messages.append(messages)
+                    return Reply(json.dumps({'tool': 'read_file', 'arguments': {'path': 'module.py'}}), 100)
+                # Base selector expects its first selection as call 1.
+                saved = self.messages.pop(0)
+                try:
+                    return super().complete_json(messages, **kwargs)
+                finally:
+                    self.messages.insert(0, saved)
+        for limit, expected in ((4, 'passed'), (1, 'failed')):
+            model = Exploring({'files': ['module.py'], 'locations': ['module.py:1']})
+            result = run({**self.config, 'localization_tool_steps': 1,
+                'budget': {**self.config['budget'], 'max_model_calls': limit}},
+                self.root, self.root/f'.keel/explore-limit-{limit}', model=model)
+            self.assertEqual(result['status'], expected)
+            if limit == 1:
+                self.assertEqual(result['failure']['category'], 'budget_exhausted')
+            (self.root/'module.py').write_bytes(b'def version():\n    return 1\n')
+
     def test_contract_selection_rejects_unknown_id_before_patch_and_obeys_budget(self):
         class InvalidSelection(Model):
             def complete_json(self, messages, **kwargs):

@@ -53,7 +53,9 @@ def config_for(task, task_dir, output, model_config, harness_python, environment
     return config
 
 
-def execute(root, task_dir, reference_dir, model_config, harness_python, output):
+def execute(root, task_dir, reference_dir, model_config, harness_python, output, *, mcp_config=None, localization_tool_steps=6, require_external_tool=False):
+    if require_external_tool and not mcp_config:
+        raise ValueError('--require-external-tool requires --mcp-config')
     overlay = check_reference(task_dir, reference_dir)
     task = verify_task(task_dir)
     version = subprocess.run([harness_python, '-c', 'import importlib.metadata; print(importlib.metadata.version("swebench"))'],
@@ -64,8 +66,15 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output)
         raise ValueError('Trial output must be outside private task directory')
     output.mkdir(parents=True, exist_ok=False)
     hashes = implementation_hashes(root)
+    tools = json.loads(mcp_config.read_text(encoding='utf-8')) if mcp_config else None
+    tools_hash = file_hash(mcp_config) if mcp_config else None
+    if tools is not None:
+        from keel.mcp_client import validate_servers
+        validate_servers(tools)
     task_receipt = file_hash(task_dir/'task-receipt.json')
     def frozen():
+        if mcp_config and file_hash(mcp_config) != tools_hash:
+            raise ValueError('External tool configuration changed during execution')
         if implementation_hashes(root) != hashes or file_hash(task_dir/'task-receipt.json') != task_receipt:
             raise ValueError('Implementation or task changed during execution')
         verify_task(task_dir)
@@ -95,12 +104,21 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output)
     try:
         repo = prepare_snapshot(task['repo'], task['base_commit'], output/'repo', timeout=180)
         config = config_for(task, task_dir, output, model_config, harness_python, overlay_path)
+        if tools is not None:
+            config['mcp_servers'] = tools
+            config['localization_tool_steps'] = localization_tool_steps
+            config['localization_require_external'] = require_external_tool
+            report['external_tools'] = {'config_sha256': tools_hash,
+                                        'require_external_tool': require_external_tool,
+                                        'localization_tool_steps': localization_tool_steps}
         (output/'input-receipt.json').write_text(json.dumps({'task_receipt_sha256': task_receipt,
             'base_commit': task['base_commit'], 'goal': task['problem_statement']}, indent=2), encoding='utf-8')
         report['status'] = 'agent_running'
         save()
         result = run(config, repo, output/'run', model=model)
         report.update(runtime_status=result['status'], failure=result.get('failure'), budget=result['budget'],
+                      external_tool_calls=result.get('external_tool_calls', {}),
+                      external_tool_validation=result.get('external_tool_validation', {}),
                       recovery=result.get('recovery'), verification_rounds=len(result.get('verification_attempts', [])))
         frozen()
         export_prediction(task_dir, output/'run', output/'prediction', 'keel')
@@ -128,7 +146,12 @@ def main():
     parser.add_argument('--harness-python', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--execute', action='store_true')
+    parser.add_argument('--mcp-config', type=Path, help='Explicit authorized tools; servers must target the trial workspace, not another repository')
+    parser.add_argument('--localization-tool-steps', type=int, choices=range(1, 13), default=6)
+    parser.add_argument('--require-external-tool', action='store_true', help='Integration validation: require an authorized MCP attempt before local fallback')
     args = parser.parse_args()
+    if args.require_external_tool and not args.mcp_config:
+        parser.error('--require-external-tool requires --mcp-config')
     check_reference(args.task, args.reference_grade)
     if not args.execute:
         print(json.dumps({'status': 'plan_only', 'instance_id': verify_task(args.task)['instance_id'], 'max_model_calls': 30,
@@ -138,7 +161,9 @@ def main():
     if not shutil.which('docker') and (docker/'docker.exe').is_file():
         os.environ['PATH'] = str(docker) + os.pathsep + os.environ.get('PATH', '')
     report = execute(Path(__file__).resolve().parents[1], args.task.resolve(), args.reference_grade.resolve(),
-                     json.loads(args.model_config.read_text(encoding='utf-8')), str(args.harness_python.resolve()), args.output.resolve())
+                     json.loads(args.model_config.read_text(encoding='utf-8')), str(args.harness_python.resolve()), args.output.resolve(),
+                     mcp_config=args.mcp_config.resolve() if args.mcp_config else None,
+                     localization_tool_steps=args.localization_tool_steps, require_external_tool=args.require_external_tool)
     print(json.dumps({key: value for key, value in report.items() if key != 'implementation'}, indent=2))
     return 0 if report['official_resolved'] is True else 1
 

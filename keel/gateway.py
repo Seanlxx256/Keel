@@ -127,6 +127,11 @@ class ToolGateway:
             status = "denied" if isinstance(error, PolicyDenied) else "failed"
             raise
         finally:
+            if isinstance(tool, str) and tool.startswith('mcp__'):
+                metrics = getattr(self.ws, 'external_tool_metrics', {})
+                counts = metrics.setdefault(tool, {'completed': 0, 'failed': 0, 'denied': 0})
+                counts[status] += 1
+                self.ws.external_tool_metrics = metrics
             self.ws.trace.emit(self.role, "gateway_call_finished", call_id=call_id,
                                status=status, error_type=error_type,
                                seconds=max(0, time.monotonic() - started))

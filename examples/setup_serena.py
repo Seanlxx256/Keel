@@ -12,18 +12,22 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 
 
 def launch_config(root, python, executable, help_text):
-    args=['start-mcp-server','--transport','stdio','--project',str(root)]
+    # Keel sets stdio cwd to the active Workspace. Never query the setup repository
+    # when the same profile is reused for a different repair task.
+    args=['start-mcp-server','--transport','stdio','--project','.']
     if '--agent-interface' in help_text:
         args+=['--agent-interface','tools']
     for flag in ('--enable-web-dashboard','--open-web-dashboard','--enable-gui-log-window'):
         if flag in help_text:
             args += [flag,'false']
-    # This launcher only supplies a documented data directory and invokes Serena.
-    home=root/'.keel/tools/serena-home'
+    # Use Serena's supported relocation setting; no metadata is written into
+    # audited source. The wrapper runs under Serena's isolated interpreter.
+    home=root/'.keel/tools/serena-workspaces'
     launcher=root/'.keel/tools/launch-serena.py'
     launcher.parent.mkdir(parents=True,exist_ok=True)
-    launcher.write_text('import os\n'+f"os.environ['SERENA_HOME'] = {str(home)!r}\n"+
-        f'os.execv({str(executable)!r}, {([str(executable)]+args)!r})\n',encoding='utf-8')
+    launcher.write_text('import sys\n'+f'sys.path.insert(0, {str(root / "examples")!r})\n'+
+        'from launch_serena import launch\n'+
+        f'launch({str(executable)!r}, {str(home)!r}, {args!r})\n',encoding='utf-8')
     return {'serena':{'command':str(python),'args':[str(launcher)],'timeout':120,'tools':{}}}
 
 

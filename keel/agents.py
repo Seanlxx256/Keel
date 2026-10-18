@@ -19,11 +19,18 @@ def normalize_scout_envelope(action, *, role, ready):
 class AgentSession:
     """One bounded history per role/item; no implicit transfer of other histories."""
 
-    def __init__(self, role, model, workspace, *, allowed_files=(), max_steps=12, max_output=1024, require_evidence=False, max_work_items=20, max_context_bytes=None, require_change=False):
+    def __init__(self, role, model, workspace, *, allowed_files=(), max_steps=12, max_output=1024, require_evidence=False, max_work_items=20, max_context_bytes=None, require_change=False, require_external_tool=False):
         self.role, self.model, self.ws = role, model, workspace
         self.allowed_files = set(allowed_files)
         self.max_steps, self.max_output = max_steps, max_output
         self.require_evidence = require_evidence
+        self.require_external_tool = require_external_tool
+        self.external_attempted = False
+        if type(require_external_tool) is not bool:
+            raise ValueError('require_external_tool must be boolean')
+        if require_external_tool and (role != 'scout' or not getattr(workspace, 'mcp_tools', None)
+                                     or not workspace.mcp_tools.catalog(role)):
+            raise ValueError('External-tool validation requires Scout with authorized MCP tools')
         if type(require_change) is not bool:
             raise ValueError('require_change must be boolean')
         self.require_change = require_change
@@ -64,7 +71,13 @@ class AgentSession:
              "read_lines returns at most 80 lines per call; larger requests return a partial page. Check truncated and next_line rather than assuming the whole requested range was read. Use search_code to locate relevant lines first. "
              + (f"Planner must return 1..{self.max_work_items} work items. Include necessary inspection within implementation items; do not create a separate inspection item. " if self.role == 'planner' else '') +
              ('This repair item requires a real net source change. A final without a successful edit, or after reverting all edits, is incomplete. ' if self.role == 'implementer' and self.require_change else '') +
-             "Final VALUE contract: " + final_contract},
+             ("Integration validation: before local tools or a final answer, attempt an authorized MCP tool. "
+              "Choose relevant arguments from the task. After a failed MCP attempt, local fallback is allowed. "
+              if self.require_external_tool else '') +
+             "Final VALUE contract (only after inspecting evidence): " + final_contract +
+             (" Your first response in this session MUST be a tool action with tool and arguments keys, "
+              "not a summary or final answer. The final contract is deferred until an observation is available."
+              if self.role == 'scout' and self.require_evidence else '')},
             {"role": "user", "content": json.dumps(task, ensure_ascii=False)},
         ]
         def archive(payload):
@@ -90,8 +103,11 @@ class AgentSession:
             }[self.role]
             final_action = {"type": "object", "properties": {"final": final_schema},
                             "required": ["final"], "additionalProperties": False}
-            tool_action = self.gateway.action_schema(excluded=self.paused_tools)
+            external_pending = self.require_external_tool and not self.external_attempted
+            excluded = self.paused_tools | ({name for name in tools if not name.startswith('mcp__')} if external_pending else set())
+            tool_action = self.gateway.action_schema(excluded=excluded)
             ready = not self.require_evidence or self.role == "planner" or bool(self.gateway.observed_facts)
+            ready = ready and not external_pending
             # The last turn may still perform real work. Exhausting turns must
             # report budget failure, not coerce a prose completion.
             schema = {"oneOf": [tool_action, final_action]} if ready else tool_action
@@ -159,7 +175,14 @@ class AgentSession:
                         + ('Repository evidence must be inspected before final.' if not ready else ''))
                 if action['tool'] in self.paused_tools:
                     raise ValueError('Repeated unchanged file reads are paused. Use search_code or read_lines to inspect new evidence.')
-                evidence = self.dispatch(action["tool"], action["arguments"])
+                if external_pending and action['tool'] not in {name for name in tools if name.startswith('mcp__')}:
+                    raise ValueError('Integration validation requires an authorized MCP tool attempt before local fallback')
+                try:
+                    evidence = self.dispatch(action["tool"], action["arguments"])
+                finally:
+                    if action['tool'] in tools and action['tool'].startswith('mcp__'):
+                        self.external_attempted = True
+                        self.ws.localization_external_attempted = True
                 observation = {"ok": True, "result": evidence}
                 if action['tool'] == 'read_file' and evidence.get('unchanged') is True:
                     self.paused_tools.add('read_file')
@@ -196,6 +219,7 @@ class AgentSession:
 
     def dispatch(self, tool, args):
         return self.gateway.call(tool, args)
+
 
 
 def inspect_repository(config, model, workspace):

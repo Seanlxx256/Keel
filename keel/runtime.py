@@ -61,6 +61,20 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
         raise ValueError("mutation_samples must be an integer from 0 to 20")
     agent_mode = config.get("mode", "explicit") == "agent"
     localized_mode = config.get('mode') == 'localized-proposal'
+    scout_steps = config.get('localization_tool_steps', 0)
+    require_external = config.get('localization_require_external', False)
+    if type(require_external) is not bool or (require_external and not scout_steps):
+        raise ValueError('localization_require_external requires enabled localization_tool_steps')
+    if require_external and not any('scout' in policy['roles']
+            for spec in config.get('mcp_servers', {}).values() for policy in spec['tools'].values()):
+        raise ValueError('External-tool validation requires authorized Scout MCP tools')
+    if type(scout_steps) is not int or not 0 <= scout_steps <= 12 or (scout_steps and not localized_mode):
+        raise ValueError('localization_tool_steps requires localized-proposal mode and integer 0..12')
+    if scout_steps:
+        for spec in config.get('mcp_servers', {}).values():
+            for policy in spec.get('tools', {}).values():
+                if 'scout' in policy['roles'] and policy.get('read_only') is not True:
+                    raise ValueError('Localization MCP tools must be explicitly declared read_only')
     proposal_mode = config.get('mode') in {'proposal', 'localized-proposal'}
     if config.get("mode", "explicit") not in {"explicit", "agent", "proposal", "localized-proposal"}:
         raise ValueError("mode must be explicit, agent, proposal or localized-proposal")
@@ -124,6 +138,8 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
                           retrieval=config.get("retrieval"), retrieval_model=model, memoization=config.get("memoization", True))
     from .mcp_client import McpTools
     workspace.mcp_tools = McpTools(config.get("mcp_servers", {}), workspace)
+    workspace.localization_tool_steps = scout_steps
+    workspace.localization_require_external = require_external
     recovery = RecoveryController(recovery_config, workspace) if recovery_config.get('max_actions', 0) else None
     result = {"run_id": output.name, "goal": config["goal"], "mode": config.get('mode', 'explicit'), "status": "running",
               "work_items": [], "baseline_verification": [], "verification": [], "failure": None}
@@ -557,6 +573,10 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
                 patch.append(line if line.endswith("\n") else line + "\n\\ No newline at end of file\n")
         (output / "changes.patch").write_text("".join(patch), encoding="utf-8")
         result["budget"] = budget.report()
+        result['external_tool_calls'] = getattr(workspace, 'external_tool_metrics', {})
+        result['external_tool_validation'] = {'required': require_external,
+            'attempted': getattr(workspace, 'localization_external_attempted', False),
+            'successful_requests': sum(row['completed'] for row in result['external_tool_calls'].values())}
         if recovery:
             result['recovery'] = recovery.report()
         result["facts"] = ledger.summaries()

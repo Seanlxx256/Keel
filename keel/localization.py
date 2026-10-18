@@ -134,7 +134,61 @@ def select(model, workspace, goal, settings, *, stage, data, keys, instruction, 
         raise InvalidSelection('Invalid localization: '+str(error)) from None
 
 
+def explore_for_localization(model, workspace, goal, settings, steps):
+    """Optional bounded tool loop; tool evidence never expands writable scope."""
+    from .agents import AgentSession
+    snapshot = workspace.snapshot()
+    investigation_goal = goal.split('\nHost selection error (untrusted data): ', 1)[0]
+    previous = getattr(workspace, '_localization_exploration', None)
+    if previous and previous['snapshot'] == snapshot and previous['goal'] == investigation_goal:
+        workspace.trace.emit('scout', 'localization_exploration_reused',
+                             evidence_ids=[row['fact_id'] for row in previous['evidence']])
+        return previous
+    if previous:
+        # Source changed: old evidence is stale. Reinspect, using only file names
+        # as navigation hints, rather than replaying old source or conclusions.
+        steps = min(steps, 3)
+    session = AgentSession('scout', model, workspace, max_steps=steps,
+        require_external_tool=getattr(workspace, 'localization_require_external', False)
+            and not getattr(workspace, 'localization_external_attempted', False),
+        max_output=settings.get('max_output', 1024), require_evidence=True,
+        max_context_bytes=settings.get('max_context_bytes', 12000))
+    try:
+        summary = session.execute({'goal': goal,
+            'previous_candidate_files': previous['summary'].get('files', []) if previous and previous['summary'] else [],
+            'instruction':
+            'Investigate affected source using authorized tools. Prefer symbol and reference tools '
+            'when useful. If a tool fails or finds nothing, inspect the observation and change '
+            'the query or use local search/read tools. Do not repeat an unchanged failed call. '
+            'Return candidate source files and an evidence-based summary; no edits.'},
+            '{"summary":"evidence-based findings","files":["relative/source.py"]}')
+        status = 'completed'
+    except BudgetExceeded as error:
+        # A local exploration turn limit can fall back to catalog ranking. Global
+        # model/tool/token/time limits still propagate and are never reset.
+        if str(error) != f'scout exceeded its {steps}-turn limit':
+            raise
+        if session.require_external_tool and not session.external_attempted:
+            raise ModelError('Required external-tool attempt was not made within the exploration turn limit') from error
+        summary, status = None, 'turn_limit'
+    evidence = []
+    for fact_id in sorted(session.gateway.observed_facts)[-4:]:
+        evidence.append({'fact_id': fact_id, 'preview':
+            json.dumps(workspace.ledger.recall(fact_id), ensure_ascii=False)[:1200]})
+    workspace.trace.emit('scout', 'localization_tool_exploration', status=status,
+        evidence_ids=[row['fact_id'] for row in evidence])
+    result = {'snapshot': snapshot, 'goal': investigation_goal, 'summary': summary, 'evidence': evidence}
+    workspace._localization_exploration = result
+    return result
+
+
 def localize(model, workspace, goal, settings, *, allowed_files=None):
+    steps = getattr(workspace, 'localization_tool_steps', 0)
+    exploration = None
+    if steps:
+        exploration = explore_for_localization(model, workspace, goal, settings, steps)
+        goal = json.dumps({'original_goal': goal, 'untrusted_scout_summary': exploration['summary'],
+                          'untrusted_tool_evidence': exploration['evidence']}, ensure_ascii=False)
     files = []
     for name in workspace.list_files(role='scout')['files']:
         if allowed_files is not None and name not in allowed_files:
@@ -147,7 +201,14 @@ def localize(model, workspace, goal, settings, *, allowed_files=None):
             continue
         files.append(name)
         workspace.budget.check()
-    selected = select(model, workspace, goal, settings, stage='file-selection', data={'paths': files}, keys=('files',),
+    candidates = exploration['summary'].get('files') if exploration and exploration['summary'] else None
+    if (isinstance(candidates, list) and 1 <= len(candidates) <= 8 and
+            all(isinstance(name, str) and name in files for name in candidates) and
+            len(set(candidates)) == len(candidates) and exploration['evidence']):
+        selected = candidates
+        workspace.trace.emit('scout', 'localization_candidate_files_accepted', files=selected)
+    else:
+        selected = select(model, workspace, goal, settings, stage='file-selection', data={'paths': files}, keys=('files',),
         instruction='Select 1..8 existing Python source paths ONLY from the supplied paths catalog. '
                     'The catalog contains writable source targets. Test paths shown in verification failures are '
                     'read-only evidence, not writable targets; never select them unless present in this catalog. Return files only.')['files']

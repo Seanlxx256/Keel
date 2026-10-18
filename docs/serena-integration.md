@@ -61,6 +61,87 @@ does not establish that an LSP is configured or usable.
 python examples/check_external_tool.py --config .keel/tool-checks/serena-readonly.json --repo D:\keel --tool mcp__serena__find_symbol --arguments-file examples/mcp-serena-symbol-query.json --output .keel/tool-checks/serena-query-v1
 ```
 
+## Optional tool-assisted localization
+
+Localized-proposal mode now accepts `localization_tool_steps` (0 by default,
+1–12 when enabled). It runs the ordinary Scout AgentSession before catalog/anchor
+selection. Authorized MCP tools and local search/read tools share the run's existing
+budgets. Tool errors return as observations; the model can change its query or use
+local tools. A local exploration turn limit falls back to catalog selection; global
+budget failures propagate. Final summaries and up to four bounded evidence previews
+are untrusted inputs, and writable catalog/AST checks remain authoritative.
+
+Every MCP tool authorized for Scout must explicitly declare read_only when this
+option is enabled. This is an operator declaration, not an OS sandbox. Tool use is
+model-selected, not forced. The trace records `localization_tool_exploration` and
+normal gateway calls; absence of an MCP call means no external-tool benefit was tested.
+
+`run_swebench_task.py` accepts `--mcp-config <authorized-profile.json>` and
+`--localization-tool-steps 6`, records the profile hash and checks it during execution.
+Without the flag the previous workflow remains unchanged. These extra calls consume
+the same 30-model-call/80-tool-call limits, rather than receiving an additional budget.
+
+Serena's generated launcher now uses `--project .`: the MCP client's cwd is the
+active repair workspace. Old launchers must be regenerated with setup_serena.py
+`--no-install --no-discover` before reuse across repositories. Each target still
+needs a functioning Serena language-server configuration. Failure is observable and
+local search remains available; this change does not prove all target LSPs work.
+
+Validation: scripted integration tests cover an MCP failure followed by local source
+inspection, evidence reaching catalog selection, actual patch/acceptance completion,
+local turn-limit fallback, global budget enforcement and read-only policy rejection.
+Real Serena-assisted repair effectiveness and paired performance remain unmeasured.
+
+The astropy-14508-serena-v1 exploratory run failed: official_resolved=false,
+29 model calls and 157106 tokens. Its eight gateway requests were all local tools;
+there was no Serena call, so it is not a measurement of Serena retrieval quality.
+Scout consumed 23 calls / 132964 tokens. Repeated exploration plus full catalog
+selection was an observed cost, not proof of the sole cause of repair failure.
+
+After this diagnosis, exploration is reused only for an unchanged source snapshot
+and investigation goal (host selection-error retries do not restart it). New source
+or a new diagnostic goal triggers fresh inspection capped at three turns, carrying
+only previous candidate file names, not old evidence. Valid nonempty Scout candidate
+paths with observed evidence bypass the redundant file-selection call; writable
+catalog membership and fresh AST anchor validation still apply. Invalid candidates
+fall back to catalog selection. Reports now expose `external_tool_calls` per alias
+as completed/failed/denied gateway requests, not server-internal execution counts.
+No requests means no external-tool effectiveness claim. Real rerun pending.
+
+For an explicit integration test, add `--require-external-tool` alongside
+`--mcp-config`. Runtime config uses `localization_require_external: true`.
+This opt-in mode requires at least one authorized Scout MCP gateway attempt before
+local fallback; the first response schema excludes local tools and final answers,
+and host checks enforce this even with an unstructured provider. A failed attempt
+unlocks local fallback, but does not count as success. Exhausting exploration turns
+without an attempt reports a failure instead of silently claiming validation.
+Replanning does not force the same requirement repeatedly once attempted in the run.
+
+`external_tool_validation` records required/attempted/successful_requests. These
+are host gateway outcomes; schema errors, connection failures and empty server
+results still require inspection before claiming a useful LSP query. This mode
+changes tool selection policy, so compare it separately from automatic selection;
+it does not establish a retrieval or repair success-rate improvement.
+
+The astropy-14508-serena-required-v1 run completed one get_symbols_overview request;
+its ledger contains Card and _format_float among the real returned symbols. The run
+failed with policy_denied because Serena created .serena config/cache files inside
+the source checkout. Official resolved remained false; this is not a repair success.
+
+The launcher now prepares a per-workspace SERENA_HOME under
+`.keel/tools/serena-workspaces/<sha256-of-absolute-workspace>/`, and sets installed
+Serena's `project_serena_folder_location` to its external project-data directory.
+That directory is created before project loading, preventing Serena's fallback to
+an existing repository .serena folder. The generated external project config is
+read-only, and language detection completes synchronously. Source audit exclusions
+are unchanged. Existing repository .serena files are neither removed nor modified.
+The installed config API must honor relocation or startup fails explicitly.
+
+Real Serena 2.0 config/project initialization tests verify external metadata writes,
+unchanged source trees (including existing .serena config), repeat startup and
+distinct state for identically named workspace folders. A fresh-process launcher is
+necessary because SerenaPaths caches its home. Actual post-fix MCP/LSP trial pending.
+
 Primary references:
 - https://github.com/oraios/serena
 - https://github.com/oraios/serena/blob/main/pyproject.toml
