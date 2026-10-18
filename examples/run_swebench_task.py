@@ -53,7 +53,7 @@ def config_for(task, task_dir, output, model_config, harness_python, environment
     return config
 
 
-def execute(root, task_dir, reference_dir, model_config, harness_python, output, *, mcp_config=None, localization_tool_steps=6, require_external_tool=False):
+def execute(root, task_dir, reference_dir, model_config, harness_python, output, *, mcp_config=None, localization_tool_steps=6, require_external_tool=False, local_exploration=False):
     if require_external_tool and not mcp_config:
         raise ValueError('--require-external-tool requires --mcp-config')
     overlay = check_reference(task_dir, reference_dir)
@@ -104,6 +104,8 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
     try:
         repo = prepare_snapshot(task['repo'], task['base_commit'], output/'repo', timeout=180)
         config = config_for(task, task_dir, output, model_config, harness_python, overlay_path)
+        if local_exploration:
+            config['localization_tool_steps'] = localization_tool_steps
         if tools is not None:
             config['mcp_servers'] = tools
             config['localization_tool_steps'] = localization_tool_steps
