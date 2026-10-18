@@ -10,10 +10,23 @@ from contextlib import asynccontextmanager
 from urllib.parse import urlsplit
 
 from .core import PolicyDenied
+from .async_process_lifecycle import run_request
 
 
 class McpToolError(ValueError):
     pass
+
+
+def nested_tool_error(error):
+    """Recover only host-generated diagnostics from SDK task groups, never raw server exceptions."""
+    if isinstance(error,McpToolError):
+        return error
+    if isinstance(error,BaseExceptionGroup):
+        for child in error.exceptions:
+            found=nested_tool_error(child)
+            if found is not None:
+                return found
+    return None
 
 
 def validate_servers(servers, *, discovery=False):
@@ -139,10 +152,13 @@ class McpTools:
         log = self.ws.trace.path.parent / f'mcp-{server}.stderr.log'
         try:
             with log.open('a', encoding='utf-8') as stderr:
-                return asyncio.run(asyncio.wait_for(self._invoke(spec, tool, arguments, stderr), timeout))
+                return run_request(lambda: asyncio.wait_for(self._invoke(spec, tool, arguments, stderr), timeout))
         except (PolicyDenied, McpToolError):
             raise
         except Exception as error:
+            host_error=nested_tool_error(error)
+            if host_error is not None:
+                raise host_error from None
             # Server error strings may contain environment values or credentials.
             raise McpToolError(f'MCP request failed ({type(error).__name__}); inspect server stderr log') from None
 

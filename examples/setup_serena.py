@@ -27,13 +27,14 @@ def launch_config(root, python, executable, help_text):
     return {'serena':{'command':str(python),'args':[str(launcher)],'timeout':120,'tools':{}}}
 
 
-def setup(root,output,version=None,install=True,discover=True):
+def setup(root,output,version=None,install=True,discover=True,language_server=None):
     if version and not re.fullmatch(r'[0-9][A-Za-z0-9.]*',version):
         raise ValueError('Version must be an exact release version')
     output.mkdir(parents=True,exist_ok=False)
     report={'status':'preparing','model_calls':0,'tools_authorized':0}
     env={**os.environ,'UV_CACHE_DIR':str(root/'.keel/tools/uv-cache'),
-         'UV_PYTHON_INSTALL_DIR':str(root/'.keel/tools/python'),'UV_HTTP_RETRIES':'0'}
+         'UV_PYTHON_INSTALL_DIR':str(root/'.keel/tools/python'),'UV_HTTP_RETRIES':'0',
+         'SERENA_HOME':str(root/'.keel/tools/serena-home')}
     uv=shutil.which('uv')
     target=root/'.keel/tools/serena-venv'
     bin_dir=target/('Scripts' if os.name=='nt' else 'bin')
@@ -66,6 +67,18 @@ def setup(root,output,version=None,install=True,discover=True):
         help_result=subprocess.run([str(executable),'start-mcp-server','--help'],env=env,capture_output=True,text=True,
             encoding='utf-8',errors='replace',timeout=45,check=True)
         (output/'server-help.txt').write_text(help_result.stdout,encoding='utf-8')
+        if language_server is None and (root/'pyproject.toml').is_file():
+            tracked=subprocess.run(['git','-c','safe.directory='+str(root),'-C',str(root),'ls-files','--','*.py'],
+                capture_output=True,text=True,timeout=15)
+            if tracked.returncode==0 and tracked.stdout.strip():
+                language_server='python'
+        if language_server:
+            if not (root/'.serena/project.yml').is_file():
+                command([str(executable),'project','create',str(root),'--language',language_server],
+                        'project-create.log',120)
+            command([str(python),str(root/'examples/configure_serena_project.py'),'--project',str(root),
+                '--language-server',language_server,'--output',str(output/'project-config')],'project-config.log',45)
+            report['project_configuration']='read-only; language-server list checked'
         config=launch_config(root,python,executable,help_result.stdout)
         config_path=output/'discovery-config.json'
         config_path.write_text(json.dumps(config,indent=2),encoding='utf-8')
@@ -90,9 +103,10 @@ def main():
     parser.add_argument('--version')
     parser.add_argument('--no-install',action='store_true')
     parser.add_argument('--no-discover',action='store_true')
+    parser.add_argument('--language-server')
     args=parser.parse_args()
     result=setup(Path(__file__).resolve().parents[1],args.output.resolve(),args.version,
-                 install=not args.no_install,discover=not args.no_discover)
+                 install=not args.no_install,discover=not args.no_discover,language_server=args.language_server)
     print(json.dumps(result,indent=2))
     return 0 if result['status'] in ('discovered','installed_discovery_pending') else 1
 

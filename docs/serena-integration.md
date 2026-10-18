@@ -37,11 +37,29 @@ read-only just from its name: operator review and server containment remain nece
 Use `check_external_tool.py --tool ... --arguments-file ...` to verify a selected tool
 before exposing it in a real Agent task. Do not open shell/edit/REPL tools for this trial.
 
-Status: local profile-generation/launcher tests pass. uv is available and the isolated
-environment was created, but installation in the current tool host failed connecting
-to PyPI. Serena is not yet installed or verified end-to-end. Run setup in the user's
-network-enabled terminal; retain failed attempts and do not claim interoperability
-until a real server response is archived.
+Status: the user's terminal completed setup with Serena 2.0.0, initializing MCP and
+discovering 29 tools, with no model calls or permissions granted by discovery.
+`.keel/tool-checks/serena-readonly.json` was then generated from that actual catalog,
+allowing only find_symbol, get_symbols_overview and find_referencing_symbols for scout.
+The example query in `examples/mcp-serena-symbol-query.json` validates against the
+discovered schema. The user's serena-query-v2 completed a real symbol query: ledger
+fact 1 contains RecoveryController in keel/recovery.py, lines 62–212. This verifies
+one LSP query, not coding-task improvement. Windows subprocess transport destructor
+errors still appeared after success. The client now explicitly closes transports
+owned by its request loop after SDK shutdown; success/error/timeout cleanup tests
+pass, but a fresh Windows Serena run is required to verify those exit errors disappear.
+
+The first query exposed an empty `language_servers` list in Serena's auto-generated
+project config. Setup now checks Python projects (pyproject plus tracked Python files),
+fills an empty server list via Serena's installed YAML dependency, and sets read_only.
+Explicit existing nonempty server choices are preserved. The previous config and hash
+receipt are archived before modification. Other languages can be selected using
+`--language-server`. Initial LSP startup can download dependencies; discovery alone
+does not establish that an LSP is configured or usable.
+
+```powershell
+python examples/check_external_tool.py --config .keel/tool-checks/serena-readonly.json --repo D:\keel --tool mcp__serena__find_symbol --arguments-file examples/mcp-serena-symbol-query.json --output .keel/tool-checks/serena-query-v1
+```
 
 Primary references:
 - https://github.com/oraios/serena

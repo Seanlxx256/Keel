@@ -101,6 +101,14 @@ class McpClientTests(unittest.TestCase):
                 ToolGateway('scout', self.ws).call('mcp__repo__find_symbol', {})
             invoke.assert_not_called()
 
+    def test_sdk_exception_group_preserves_only_host_diagnostic(self):
+        async def failed(*args):
+            raise ExceptionGroup('potential server text',[McpToolError('MCP server returned a tool error')])
+        with patch.object(McpTools,'_invoke',side_effect=failed):
+            with self.assertRaisesRegex(McpToolError,'returned a tool error') as caught:
+                ToolGateway('scout',self.ws).call('mcp__repo__find_symbol',{'name':'fetch'})
+        self.assertNotIn('potential server text',str(caught.exception))
+
     def test_bad_config_is_rejected_before_starting_process(self):
         for servers in [[], {'bad__name': self.servers['repo']},
                         {'x': {'command': 'python', 'tools': {}}},
