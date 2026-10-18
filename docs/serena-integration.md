@@ -142,6 +142,22 @@ unchanged source trees (including existing .serena config), repeat startup and
 distinct state for identically named workspace folders. A fresh-process launcher is
 necessary because SerenaPaths caches its home. Actual post-fix MCP/LSP trial pending.
 
+The astropy-14508-serena-required-v2 run confirmed one successful Serena overview
+request without the earlier source-metadata policy violation. It remained unresolved:
+after one verification failure the Critic stopped, treating a PASS_TO_PASS failure on
+a different float input as insufficient reason to continue. Budget was not exhausted
+(5 model calls / 16589 tokens). This validates integration, not repair effectiveness.
+
+Recovery now states the complete acceptance contract explicitly: reported behavior
+must be fixed and existing tested behavior preserved. PASS_TO_PASS labels do not
+prove causality or unrelatedness; uncertainty calls for source inspection when useful
+checks remain. When a stop decision coincides with structured preservation-test
+failures and a nonempty current diff, one model reconsideration is permitted under
+the same global budget. Both diagnoses are retained and stop_decision_review is
+traced. A concrete blocker may still stop; the host never rewrites stop into repair.
+Tests cover reconsideration, retained stops, absent diffs and budget enforcement.
+Real repair rerun remains pending.
+
 Primary references:
 - https://github.com/oraios/serena
 - https://github.com/oraios/serena/blob/main/pyproject.toml

@@ -86,7 +86,7 @@ class RecoveryController:
         return {'changes': rows, 'omitted_files': sorted(set(originals)-{row['path'] for row in rows}),
                 'scope': 'Actual base-to-current diff; truncated entries require source inspection, not guessing.'}
 
-    def decide(self, model, goal, plan, verification, settings, *, feedback=None, changes=None):
+    def decide(self, model, goal, plan, verification, settings, *, feedback=None, changes=None, _review_stop=True):
         """Critic selects a route; it cannot edit, invoke tools or grant scope."""
         schema = {'type': 'object', 'properties': {
             'action': {'type': 'string', 'enum': ['repair', 'replan', 'stop']},
@@ -95,7 +95,20 @@ class RecoveryController:
             'next_check': {'type': 'string'}, 'previous_attempt_assessment': {'type': 'string'}},
             'required': ['action', 'reason', 'hypothesis', 'evidence', 'next_check', 'previous_attempt_assessment'],
             'additionalProperties': False}
-        observation = {'goal': goal, 'current_plan': [{'id': item['id'], 'files': item.get('files', []),
+        regressions = []
+        for entry in verification:
+            try:
+                parsed = json.loads(entry.get('stdout', ''))
+            except (ValueError, TypeError):
+                continue
+            if isinstance(parsed, dict) and parsed.get('failure_kind') == 'test_failure':
+                regressions.extend(row for row in parsed.get('failed_tests', [])
+                                   if isinstance(row, dict) and row.get('group') == 'PASS_TO_PASS')
+        observation = {'goal': goal, 'acceptance_contract': {
+                           'requirement': 'Fix the reported issue AND preserve existing tested behavior. All acceptance commands must pass.',
+                           'observed_pass_to_pass_failures': regressions[:10],
+                           'causality': 'A failing preservation test requires investigation; its label alone does not prove patch causality.'},
+                       'current_plan': [{'id': item['id'], 'files': item.get('files', []),
                          'description_brief': item.get('description', '')[:256]} for item in plan],
                        'failed_verification': bounded_verification(verification),
                        'previous_actions': self.actions[-3:],
@@ -108,6 +121,11 @@ class RecoveryController:
             '(cannot proceed safely or meaningfully). Use observed failures, not an assumed answer. '
             'A grading_error or grading_timeout is not evidence of a source-code defect; '
             'stop if no actual test failure is available to guide a safe repair. '
+            'PASS_TO_PASS failures are acceptance failures even when they differ from the issue example. '
+            'Investigate their relationship to the current diff; do not dismiss them as unrelated based on the test group. '
+            'Uncertain causality or missing source evidence normally calls for replan with a concrete inspection. '
+            'Stop only with a specific blocker, unsafe action, or evidence of no meaningful remaining progress; '
+            'a different failing input alone is not such a blocker. '
             'Return a concise evidence-based diagnosis, not private chain-of-thought: hypothesis (tentative cause), '
             'evidence (specific observed input/error and code condition supporting it), next_check '
             '(a concrete code inspection or minimal probe that could refute the hypothesis), '
@@ -149,6 +167,18 @@ class RecoveryController:
         except (ValueError, TypeError) as error:
             raise InvalidSelection('Invalid Critic decision: ' + str(error)) from None
         self.decisions.append(decision)
+        if (_review_stop and decision['action'] == 'stop' and regressions and
+                any(row.get('diff') for row in (changes or {}).get('changes', []))):
+            # One bounded reconsideration, not a forced action rewrite. Genuine
+            # blockers may still stop; all model/token/time budgets remain shared.
+            self.ws.trace.emit('critic', 'stop_decision_review', reason='preservation_failure_with_current_changes')
+            return self.decide(model, goal, plan, verification, settings, changes=changes,
+                feedback='Review your preceding stop decision against the acceptance contract. '
+                         'An observed preservation-test failure and current diff are available. '
+                         'Unproven causality calls for inspection, not an assumption of unrelatedness. '
+                         'Choose replan/repair if a useful permitted check remains; otherwise identify a concrete '
+                         'blocker and retain stop. Do not claim the regression is patch-caused without evidence.',
+                _review_stop=False)
         return decision
 
     def permit(self, kind, error, state):
