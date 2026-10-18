@@ -16,6 +16,49 @@ from keel.workspace import Workspace
 
 
 class McpClientTests(unittest.TestCase):
+    def test_discovery_configuration_does_not_enable_runtime_tools(self):
+        bare={'external':{'command':'operator-installed-server'}}
+        with self.assertRaises(ValueError):
+            validate_servers(bare)
+        tools=McpTools(bare,self.ws,discovery=True)
+        self.assertEqual(tools.catalog('scout'),{})
+        with self.assertRaises(PolicyDenied):
+            tools.call('scout','mcp__external__anything',{})
+
+    @unittest.skipUnless(importlib.util.find_spec('mcp'), 'Official MCP SDK is not installed')
+    def test_real_sdk_discovery_and_call_over_memory_transport(self):
+        import anyio
+        from mcp.server.fastmcp import FastMCP
+        from mcp.shared.memory import create_client_server_memory_streams
+        server=FastMCP('external-fixture')
+        calls=[]
+        @server.tool()
+        def lookup(name: str) -> dict:
+            calls.append(name)
+            return {'name':name,'source':'external fixture'}
+        @asynccontextmanager
+        async def connection(client,spec,stderr):
+            async with create_client_server_memory_streams() as (client_streams,server_streams):
+                async with anyio.create_task_group() as group:
+                    group.start_soon(server._mcp_server.run,*server_streams,server._mcp_server.create_initialization_options())
+                    try:
+                        yield client_streams
+                    finally:
+                        group.cancel_scope.cancel()
+        tools=McpTools({'external':{'command':'not-executed'}},self.ws,discovery=True)
+        with patch.object(McpTools,'_connection',connection):
+            found=tools.discover('external')
+            self.assertEqual(found['tools'][0]['name'],'lookup')
+            self.assertEqual(calls,[])
+            self.assertEqual(tools.catalog('scout'),{})
+            schema=found['tools'][0]['input_schema']
+            tools=McpTools({'external':{'command':'not-executed','tools':{'lookup':{
+                'roles':['scout'],'description':'operator-authorized lookup','input_schema':schema}}}},self.ws)
+            result=tools.call('scout','mcp__external__lookup',{'name':'target'})
+        self.assertEqual(calls,['target'])
+        payload=result.get('structuredContent') or json.loads(result['content'][0]['text'])
+        self.assertEqual(payload['name'],'target')
+
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)

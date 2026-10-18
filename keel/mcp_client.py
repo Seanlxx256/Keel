@@ -16,7 +16,7 @@ class McpToolError(ValueError):
     pass
 
 
-def validate_servers(servers):
+def validate_servers(servers, *, discovery=False):
     if not isinstance(servers, dict):
         raise ValueError('mcp_servers must be an object')
     for name, spec in servers.items():
@@ -48,9 +48,9 @@ def validate_servers(servers):
         timeout = spec.get('timeout', 30)
         if type(timeout) not in {int, float} or not math.isfinite(timeout) or not 0 < timeout <= 300:
             raise ValueError('MCP timeout must be positive and at most 300 seconds')
-        if not isinstance(spec.get('tools'), dict) or not spec['tools']:
+        if not isinstance(spec.get('tools', {}), dict) or (not discovery and not spec.get('tools')):
             raise ValueError('MCP tools require an explicit nonempty allowlist')
-        for tool, policy in spec['tools'].items():
+        for tool, policy in spec.get('tools', {}).items():
             if not isinstance(tool, str) or not re.fullmatch(r'[A-Za-z0-9_.-]+', tool):
                 raise ValueError('Invalid MCP tool name')
             if not isinstance(policy, dict) or not {'roles','description'}<=policy.keys() or set(policy)-{'roles','description','input_schema','read_only'}:
@@ -67,14 +67,20 @@ def validate_servers(servers):
 
 
 class McpTools:
-    def __init__(self, servers, workspace):
-        validate_servers(servers)
+    def __init__(self, servers, workspace, *, discovery=False):
+        validate_servers(servers, discovery=discovery)
         self.servers, self.ws = servers, workspace
 
     def catalog(self, role):
         return {f'mcp__{server}__{tool}': policy['description']
-                for server, spec in self.servers.items() for tool, policy in spec['tools'].items()
+                for server, spec in self.servers.items() for tool, policy in spec.get('tools', {}).items()
                 if role in policy['roles']}
+
+    def discover(self, server):
+        """Operator-only schema discovery; never grants role permissions or calls a tool."""
+        if server not in self.servers:
+            raise ValueError('Unknown configured MCP server')
+        return self._request(server,self.servers[server],None,None)
 
     def policy(self, alias):
         for server,spec in self.servers.items():
@@ -125,6 +131,9 @@ class McpTools:
         if len(matches) != 1:
             raise ValueError('Ambiguous MCP tool alias')
         server, tool, spec = matches[0]
+        return self._request(server,spec,tool,arguments)
+
+    def _request(self, server, spec, tool, arguments):
         self.ws.budget.charge_tool()
         timeout = min(spec.get('timeout', 30), self.ws.budget.remaining)
         log = self.ws.trace.path.parent / f'mcp-{server}.stderr.log'
@@ -159,6 +168,16 @@ class McpTools:
                     seen.add(cursor)
                 else:
                     raise McpToolError('MCP tool discovery exceeded pagination limit')
+                if tool is None:
+                    names=[entry.name for entry in tools]
+                    if len(names)!=len(set(names)):
+                        raise McpToolError('MCP tool discovery returned duplicate names')
+                    value={'tools':[{'name':entry.name,'description':getattr(entry,'description',None),
+                        'input_schema':entry.inputSchema} for entry in tools],
+                        'scope':'Untrusted server metadata; discovery does not authorize any tools'}
+                    if len(json.dumps(value).encode('utf-8'))>1_000_000:
+                        raise McpToolError('MCP discovery result exceeds 1 MB')
+                    return value
                 found = [entry for entry in tools if entry.name == tool]
                 if len(found) != 1:
                     raise McpToolError('Allowlisted MCP tool is missing or duplicated on server')

@@ -68,6 +68,24 @@ servers in independently restricted containers. Generic external evidence proves
 tool returned data, not that a particular target image was inspected or a cause proven.
 For instance-specific conclusions, prefer the built-in image inspection provenance.
 
+## Discover actual contracts before integration
+
+```powershell
+python examples/check_external_tool.py --config examples/mcp-compass.json --repo D:\keel --discover-server compass --output .keel/tool-checks/compass-discovery-v1
+```
+
+This initializes the configured server and uses SDK tools/list (including pagination),
+without tools/call or an LLM. `discovered-tools.json` contains the actual names and
+input schemas. Discovery can use a connection-only server config without a tools
+allowlist; that config cannot execute tools. Inspect the returned contracts and add
+only selected tools and roles to the runtime config. Read-only annotations and server
+descriptions never authorize tools automatically. Discovery itself starts a server or
+opens a remote connection, so use an operator-trusted executable/endpoint.
+
+The schema-discovery lifecycle and subsequent explicitly allowed call are tested with
+a real official SDK client/server over in-memory streams; this tests actual protocol
+behavior without relying on child-process permission or live third-party services.
+
 ## What to reuse next
 
 - Serena: evaluate as a read-only symbol/reference provider alongside Compass. Use

@@ -15,7 +15,9 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config',required=True,type=Path)
     parser.add_argument('--repo',required=True,type=Path)
-    parser.add_argument('--tool',required=True)
+    operation=parser.add_mutually_exclusive_group(required=True)
+    operation.add_argument('--tool')
+    operation.add_argument('--discover-server')
     group=parser.add_mutually_exclusive_group()
     group.add_argument('--arguments',default=None)
     group.add_argument('--arguments-file',type=Path)
@@ -26,10 +28,17 @@ def main():
     report={'status':'failed','model_calls':0,'python':sys.executable}
     try:
         workspace=Workspace(args.repo.resolve(),Budget(Limits(max_tool_calls=3,max_wallclock=120)),ledger,Trace(args.output/'trace.jsonl'))
-        workspace.mcp_tools=McpTools(json.loads(args.config.read_text(encoding='utf-8')),workspace)
-        raw=args.arguments_file.read_text(encoding='utf-8') if args.arguments_file else args.arguments or '{}'
-        result=ToolGateway('scout',workspace).call(args.tool,json.loads(raw))
-        report.update(status='completed',fact_id=result['fact_id'])
+        workspace.mcp_tools=McpTools(json.loads(args.config.read_text(encoding='utf-8')),workspace,
+                                     discovery=bool(args.discover_server))
+        if args.discover_server:
+            value=workspace.mcp_tools.discover(args.discover_server)
+            (args.output/'discovered-tools.json').write_text(json.dumps(value,indent=2),encoding='utf-8')
+            fact=ledger.add('symbol','scout','Operator MCP tool discovery',value)
+            report.update(status='completed',fact_id=fact,tools_discovered=len(value['tools']),tools_authorized=0)
+        else:
+            raw=args.arguments_file.read_text(encoding='utf-8') if args.arguments_file else args.arguments or '{}'
+            result=ToolGateway('scout',workspace).call(args.tool,json.loads(raw))
+            report.update(status='completed',fact_id=result['fact_id'])
     except Exception as error:
         # Avoid printing arbitrary server error text or credentials.
         report['error_type']=type(error).__name__
