@@ -16,6 +16,7 @@ from compass.retrieval import Routing
 from compass.sweep import run_swe_sweep
 from compass.vectors import OllamaEmbedder
 from compass.progress import atomic_json
+from compass.coverage import POLICIES, index_coverage
 from keel.core import Limits
 from examples.compare_retrieval_alternatives import run as compare, score
 from examples.evaluate_retrieval_reranker import evaluate
@@ -89,7 +90,7 @@ def freeze(project, output, *, count=5, seed=20261018):
         Path(__file__).with_name('replay_retrieval_fusion.py'), project/'compass/retrieval.py',
         project/'compass/benchmarks.py', project/'compass/index.py', project/'compass/sweep.py',
         project/'compass/lexical.py', project/'compass/vectors.py', project/'compass/preparation.py',
-        project/'keel/experience.py', project/'compass/progress.py', Path(__file__).with_name('build_validation_index.py')]
+        project/'keel/experience.py', project/'compass/coverage.py', project/'compass/progress.py', Path(__file__).with_name('build_validation_index.py')]
     plan = {'kind': 'frozen new-task retrieval validation', 'tasks': tasks, 'sources': [swe_source, verified_source],
         'seed': seed, 'selection': selection, 'excluded_instance_ids': sorted(excluded),
         'exposure_receipts_sha256': receipts, 'implementation_sha256': {str(p.resolve()): digest(p) for p in implementations},
@@ -124,7 +125,7 @@ def verify_plan(path, *, check_implementation=True):
     return plan
 
 
-def resume_plan(project, parent, previous, output):
+def resume_plan(project, parent, previous, output, *, coverage_policy=None):
     plan = verify_plan(parent, check_implementation=False)
     prior = json.loads((previous/'validation.json').read_text(encoding='utf-8'))
     if prior['plan_sha256'] != digest(parent):
@@ -134,7 +135,8 @@ def resume_plan(project, parent, previous, output):
                Path(__file__).with_name('evaluate_retrieval_reranker.py'),
                Path(__file__).with_name('reranker_worker.py'),
                Path(__file__).with_name('build_validation_index.py'),
-               Path(__file__).with_name('cocoindex_retrieval_worker.py'), project/'keel/experience.py', project/'compass/progress.py'}
+               Path(__file__).with_name('cocoindex_retrieval_worker.py'), project/'keel/experience.py',
+               project/'compass/sweep.py', project/'compass/coverage.py', project/'compass/progress.py'}
     allowed.add(project/'compass/vectors.py')
     changes = {}
     for name, expected in plan['implementation_sha256'].items():
@@ -147,11 +149,22 @@ def resume_plan(project, parent, previous, output):
         'previous_run': str(previous), 'previous_report_sha256': digest(previous/'validation.json'),
         'implementation_changes': changes,
         'scope': 'Explicit infrastructure repair/resume; task data and ranking policy retained. Not an unchanged implementation run.'}
+    if coverage_policy is not None:
+        if coverage_policy not in POLICIES:
+            raise ValueError('Unknown coverage policy')
+        before = plan['policy'].get('index_coverage', 'strict')
+        plan['policy']['index_coverage'] = coverage_policy
+        if before != coverage_policy:
+            plan['resume_revision']['policy_changes'] = {'index_coverage': {'before': before, 'after': coverage_policy}}
+            plan['resume_revision']['scope'] = ('Explicit corpus-coverage protocol amendment; task data and ranking unchanged. '
+                'Not an unchanged strict full-corpus result; original failures retained.')
     plan['implementation_sha256'] = {name: digest(Path(name)) for name in plan['implementation_sha256']}
     worker = Path(__file__).with_name('build_validation_index.py')
     plan['implementation_sha256'][str(worker)] = digest(worker)
     experience = project/'keel/experience.py'
     plan['implementation_sha256'][str(experience)] = digest(experience)
+    coverage = project/'compass/coverage.py'
+    plan['implementation_sha256'][str(coverage)] = digest(coverage)
     helper = project/'compass/progress.py'
     plan['implementation_sha256'][str(helper)] = digest(helper)
     coco = Path(__file__).with_name('cocoindex_retrieval_worker.py')
@@ -183,6 +196,8 @@ def reuse_baseline(project, task, directory, policy):
     saved = passed[0]['result']
     with RepositoryIndex(repo) as index:
         index.require_fresh()
+        if not index_coverage(index, policy.get('index_coverage', 'strict'))['eligible']:
+            raise ValueError('Prior baseline is not eligible under the requested corpus policy')
         if (saved['instance_id'] != task['instance_id'] or saved['base_commit'] != task['base_commit'] or
                 saved['index_ref'] != index.metadata['index_ref'] or
                 index.metadata['embedding']['model'] != policy['compass_embedding'] or
@@ -229,10 +244,10 @@ def bounded_index(repo, directory, model, timeout):
                 raise ValueError(current.get('error', 'Index worker failed; inspect index.log'))
 
 
-def inspect_resume(project, plan_path, previous, output):
+def inspect_resume(project, plan_path, previous, output, *, coverage_policy=None):
     if output.exists():
         raise FileExistsError('Resume-check output must be new')
-    revised = resume_plan(project, plan_path, previous, output/'resume-plan')
+    revised = resume_plan(project, plan_path, previous, output/'resume-plan', coverage_policy=coverage_policy)
     plan = verify_plan(revised)
     prior = json.loads((previous/'validation.json').read_text(encoding='utf-8'))
     old_rows = {r['instance_id']: r for r in prior['records']}
@@ -254,11 +269,13 @@ def inspect_resume(project, plan_path, previous, output):
     return result
 
 
-def execute(project, plan_path, output, *, resume_from=None, index_timeout=1800):
+def execute(project, plan_path, output, *, resume_from=None, index_timeout=1800, coverage_policy=None):
     if resume_from:
         if output.exists():
             raise FileExistsError('Resume output must be a new directory; previous run is retained')
-        plan_path = resume_plan(project, plan_path, resume_from, output/'resume-plan')
+        plan_path = resume_plan(project, plan_path, resume_from, output/'resume-plan', coverage_policy=coverage_policy)
+    elif coverage_policy is not None:
+        raise ValueError('Coverage amendment requires an explicit resume with a derived plan')
     plan = verify_plan(plan_path)
     output.mkdir(parents=True, exist_ok=bool(resume_from))
     report = {'status': 'running', 'plan_sha256': digest(plan_path), 'records': [], 'benchmark_ready': False}
@@ -267,6 +284,7 @@ def execute(project, plan_path, output, *, resume_from=None, index_timeout=1800)
     save()
     source = {'instances': []}
     policy = plan['policy']
+    report['index_coverage_policy'] = policy.get('index_coverage', 'strict')
     previous = json.loads((resume_from/'validation.json').read_text()) if resume_from else {'records': []}
     previous_rows = {r['instance_id']: r for r in previous['records']}
     report['resume_from'] = str(resume_from) if resume_from else None
@@ -308,11 +326,15 @@ def execute(project, plan_path, output, *, resume_from=None, index_timeout=1800)
             row['stage'] = 'compass_t1'
             save()
             with RepositoryIndex(repo) as index:
+                coverage = index_coverage(index, policy.get('index_coverage', 'strict'))
+                row['index_coverage'] = coverage
+                save()
                 sweep = directory/'sweep-code-aware'
                 result = run_swe_sweep(index, instance, sweep, modes=('t1',), line_budgets=(100,), repeats=1,
                     seed=plan['seed'], routing=Routing(ranking='code-aware', evidence_policy='read'),
                     limits=Limits(max_wallclock=300, max_tool_calls=100, max_tokens=30000, max_model_calls=4),
-                    repository_id=task['repository'], symbol_line_cap=32)
+                    repository_id=task['repository'], symbol_line_cap=32,
+                    coverage_policy=policy.get('index_coverage', 'strict'))
                 if not result['all_passed']:
                     raise ValueError('Compass T1 failed; inspect retained sweep')
                 row['embedding_spec'] = index.metadata['embedding']
@@ -371,19 +393,25 @@ if __name__ == '__main__':
     parser.add_argument('--resume-from', type=Path)
     parser.add_argument('--index-timeout', type=int, default=1800)
     parser.add_argument('--check-resume', action='store_true')
+    parser.add_argument('--index-coverage', choices=POLICIES,
+                        help='Explicit derived-plan corpus amendment on resume; strict remains the default')
     args = parser.parse_args()
     project = Path(__file__).resolve().parents[1]
+    if args.index_coverage and not args.resume_from:
+        parser.error('--index-coverage requires --resume-from')
     if args.check_resume:
         if not args.plan or not args.resume_from or args.execute:
             parser.error('--check-resume requires --plan and --resume-from, without --execute')
-        result = inspect_resume(project, args.plan.resolve(), args.resume_from.resolve(), args.output.resolve())
+        result = inspect_resume(project, args.plan.resolve(), args.resume_from.resolve(), args.output.resolve(),
+                                coverage_policy=args.index_coverage)
     elif args.execute:
         if not args.plan:
             parser.error('--execute requires an already frozen --plan')
         if args.index_timeout < 30:
             parser.error('--index-timeout must be at least 30 seconds')
         result = execute(project, args.plan.resolve(), args.output.resolve(),
-            resume_from=args.resume_from.resolve() if args.resume_from else None, index_timeout=args.index_timeout)
+            resume_from=args.resume_from.resolve() if args.resume_from else None, index_timeout=args.index_timeout,
+            coverage_policy=args.index_coverage)
     else:
         if args.plan:
             parser.error('--plan is used with --execute; omit both to freeze a new sample')

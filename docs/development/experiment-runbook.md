@@ -122,3 +122,29 @@ installation action. Other existing entry points have not all migrated.
 Cross-task controlled fault checks: `tests/test_experience.py`. Real Windows sharing
 semantics: `tests/test_atomic_progress.py`.
 
+## Syntax-error fixtures and explicit corpus coverage (2026-10-19)
+
+An index can have every extracted symbol embedded and still be incomplete.
+The Django 14725 run-v6 index retained one parse diagnostic. Upstream
+`test_tag_fail_to_load` deliberately imports the invalid module inside an
+`assertRaises(SyntaxError)` block. This is not a transient embedding failure.
+
+`compass.coverage.index_coverage` retains strict full-corpus behavior by default.
+The explicit `valid-python` evaluation policy only excludes parse-error files
+whose exact indexed bytes are independently rejected by both Python AST and
+tree-sitter. It records path, hash, interpreter, line and checks, without changing
+index metadata or source files. File-size limits, valid-source extraction defects,
+changed files and unclassified diagnostics remain blockers. No path or task-ID
+exception is used, and the policy is evaluated without relevance labels.
+
+`compass.sweep.run_swe_sweep(coverage_policy='valid-python')` records the policy
+and exclusion inventory, keeps `index_complete=false`, and refuses to treat a
+task with unindexed reference source as a successful measurement. A valid-Python
+measurement is not a strict full-corpus success.
+
+Frozen validation accepts `--index-coverage valid-python` only with an explicit
+resume. The derived plan records the corpus-policy amendment, retains original
+failures and task data, and reuses unaffected complete baselines after checking
+eligibility. Never reinterpret a previous failed row in place or edit fixtures to
+make a benchmark pass. Checks: `tests/test_index_coverage.py`, `tests/test_sweep.py`.
+

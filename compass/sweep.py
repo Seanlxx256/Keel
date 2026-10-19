@@ -10,6 +10,7 @@ import statistics
 from keel.core import Budget, BudgetExceeded, Limits, ModelError
 from .benchmarks import canonical_repository_id, evaluate_swe, file_digest
 from .retrieval import Routing
+from .coverage import index_coverage
 
 
 QUALITIES = ("line_recall", "line_precision", "line_f1", "hit_file_rate", "context_efficiency")
@@ -45,7 +46,8 @@ def summarize(records, configurations, repeats):
 
 
 def run_swe_sweep(index, instance, output_dir, *, modes=("t0", "t1", "adaptive"), line_budgets=(100, 300),
-                  repeats=3, seed=0, model=None, routing=None, limits=None, repository_id=None, symbol_line_cap=32):
+                  repeats=3, seed=0, model=None, routing=None, limits=None, repository_id=None, symbol_line_cap=32,
+                  coverage_policy='strict'):
     modes, line_budgets = list(modes), list(line_budgets)
     if type(symbol_line_cap) is not int or not 1 <= symbol_line_cap <= 100000:
         raise ValueError("symbol_line_cap must be between 1 and 100000")
@@ -58,6 +60,7 @@ def run_swe_sweep(index, instance, output_dir, *, modes=("t0", "t1", "adaptive")
     if repository_id is not None:
         repository_id = canonical_repository_id(repository_id)
     routing, limits = routing or Routing(), limits or Limits()
+    coverage = index_coverage(index, coverage_policy)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=False)
     configurations = [(mode, count) for mode in modes for count in line_budgets]
@@ -78,8 +81,10 @@ def run_swe_sweep(index, instance, output_dir, *, modes=("t0", "t1", "adaptive")
                 status = result["routing"]["mode_status"]
                 row["result"] = result
                 row["status"] = "passed"
-                if not result["complete"]:
+                if not coverage['eligible']:
                     row["status"] = "incomplete_index"
+                elif coverage_policy != 'strict' and result.get('unindexed_gold_files'):
+                    row['status'] = 'unindexed_reference_files'
                 elif status == "model_unconfigured":
                     row["status"] = "deferred_escalation"
                 elif status == "step_limit":
@@ -103,6 +108,7 @@ def run_swe_sweep(index, instance, output_dir, *, modes=("t0", "t1", "adaptive")
                         "num_ctx": getattr(model, "num_ctx", None),
                         "keep_alive": 0 if getattr(model, "num_ctx", None) is not None else None},
               "query_embedding_keep_alive": 0,
+              "index_coverage": coverage,
               "seed": seed, "repeats": repeats, "symbol_line_cap": symbol_line_cap,
               "all_passed": all(row["eligible"] for row in rows),
               "summary": rows, "frontiers": frontiers, "public_benchmark_verified": False,
