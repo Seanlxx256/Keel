@@ -1,4 +1,4 @@
-"""Freeze new tasks and compare local exploration with required MCP exploration."""
+"""Freeze new tasks and compare local exploration with optional or required MCP exploration."""
 import argparse
 import json
 import os
@@ -25,7 +25,10 @@ def tool_files(profile):
     return files
 
 
-def prepare(root, dataset, model, harness, profile, output, seed=42):
+def prepare(root, dataset, model, harness, profile, output, seed=42, tool_policy='required'):
+    if tool_policy not in {'required', 'optional'}:
+        raise ValueError('Unknown tool policy')
+    external_arm = 'mcp_' + tool_policy
     tools = json.loads(profile.read_text(encoding='utf-8'))
     validate_servers(tools)
     policies = [p for spec in tools.values() for p in spec['tools'].values() if 'scout' in p['roles']]
@@ -33,10 +36,10 @@ def prepare(root, dataset, model, harness, profile, output, seed=42):
         raise ValueError('Comparison requires explicitly read-only authorized Scout MCP tools')
     plan = prepare_batch(root, dataset, model, harness, output, seed, count=3, repositories=3)
     plan['tool_comparison'] = {'profile': str(profile.resolve()), 'files': tool_files(profile),
-        'steps': 6, 'arms': ['local', 'mcp_required'],
-        'scope': 'Matched local exploration versus MCP-enabled required-attempt policy; not a tool-only causal estimate.'}
+        'steps': 6, 'policy': tool_policy, 'arms': ['local', external_arm],
+        'scope': 'Matched local exploration versus MCP-enabled '+tool_policy+' policy; not a tool-only causal estimate.'}
     for i, row in enumerate(plan['tasks']):
-        row['arm_order'] = ['local', 'mcp_required'] if i % 2 == 0 else ['mcp_required', 'local']
+        row['arm_order'] = ['local', external_arm] if i % 2 == 0 else [external_arm, 'local']
     plan['limits']['max_model_calls_batch'] = 30 * len(plan['tasks']) * 2
     plan['plan_sha256'] = digest({k: v for k, v in plan.items() if k != 'plan_sha256'})
     (output/'plan.json').write_text(json.dumps(plan, indent=2), encoding='utf-8')
@@ -51,16 +54,16 @@ def verify(root, output):
     return plan
 
 
-def summarize(records):
+def summarize(records, external_arm='mcp_required'):
     paired = [r for r in records if all(r.get('arms', {}).get(a, {}).get('status') == 'completed'
-                                     for a in ('local', 'mcp_required'))]
+                                     for a in ('local', external_arm))]
     counts = {'both_passed': 0, 'local_only': 0, 'mcp_only': 0, 'both_failed': 0}
     for row in paired:
-        a, b = [row['arms'][arm].get('official_resolved') is True for arm in ('local', 'mcp_required')]
+        a, b = [row['arms'][arm].get('official_resolved') is True for arm in ('local', external_arm)]
         counts['both_passed' if a and b else 'local_only' if a else 'mcp_only' if b else 'both_failed'] += 1
     return {'planned_tasks': len(records), 'paired_completed': len(paired), 'outcomes': counts,
         'paired_success_rate': {arm: sum(r['arms'][arm].get('official_resolved') is True for r in paired)/len(paired)
-                                if paired else None for arm in ('local', 'mcp_required')},
+                                if paired else None for arm in ('local', external_arm)},
         'unpaired_tasks': [r['instance_id'] for r in records if r not in paired],
         'limitations': 'Three exploratory public tasks, one run per arm; no significance or causal claim. Failures retained; no task replacement.'}
 
@@ -69,10 +72,11 @@ def execute(root, output):
     plan = verify(root, output)
     with (output/'comparison-started.json').open('x', encoding='utf-8') as stream:
         json.dump({'plan_sha256': plan['plan_sha256']}, stream)
+    external_arm = 'mcp_' + plan['tool_comparison'].get('policy', 'required')
     report = {'status': 'running', 'plan_sha256': plan['plan_sha256'], 'benchmark_ready': False,
               'records': [{**row, 'status': 'not_started', 'arms': {}} for row in plan['tasks']]}
     def save():
-        report['summary'] = summarize(report['records'])
+        report['summary'] = summarize(report['records'], external_arm)
         (output/'comparison.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
     save()
     try:
@@ -95,7 +99,7 @@ def execute(root, output):
                         trial = run_task(root, directory/'task', directory/'reference-grade',
                             json.loads(Path(plan['model_file']).read_text(encoding='utf-8')),
                             plan['harness_python'], directory/arm,
-                            mcp_config=Path(plan['tool_comparison']['profile']) if arm == 'mcp_required' else None,
+                            mcp_config=Path(plan['tool_comparison']['profile']) if arm == external_arm else None,
                             localization_tool_steps=plan['tool_comparison']['steps'],
                             require_external_tool=arm == 'mcp_required', local_exploration=True)
                         row['arms'][arm] = {k: trial.get(k) for k in ('status', 'official_resolved', 'runtime_status',
@@ -127,12 +131,13 @@ def main():
     parser.add_argument('--model-config', type=Path)
     parser.add_argument('--harness-python', type=Path)
     parser.add_argument('--mcp-config', type=Path)
+    parser.add_argument('--tool-policy', choices=('required', 'optional'))
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--execute', action='store_true')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     if args.execute:
-        if any((args.dataset, args.model_config, args.harness_python, args.mcp_config)) or args.seed != 42:
+        if any((args.dataset, args.model_config, args.harness_python, args.mcp_config, args.tool_policy)) or args.seed != 42:
             parser.error('Execute frozen output only')
         docker = Path('D:/Docker/Desktop/resources/bin')
         if not shutil.which('docker') and (docker/'docker.exe').is_file():
@@ -143,7 +148,7 @@ def main():
         if not all((args.dataset, args.model_config, args.harness_python, args.mcp_config)):
             parser.error('Preparation requires dataset, model config, harness python and MCP config')
         plan = prepare(root, args.dataset.resolve(), args.model_config.resolve(), args.harness_python.resolve(),
-                       args.mcp_config.resolve(), args.output.resolve(), args.seed)
+                       args.mcp_config.resolve(), args.output.resolve(), args.seed, args.tool_policy or 'required')
         print(json.dumps({'status': 'prepared_only', 'tasks': plan['tasks'], 'limits': plan['limits']}, indent=2))
 
 

@@ -48,6 +48,26 @@ class ComparisonTests(unittest.TestCase):
             self.assertEqual(report['summary']['paired_completed'], 0)
             self.assertIsNone(report['summary']['paired_success_rate']['local'])
 
+    def test_optional_profile_is_available_but_never_required(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            plan = self.plan(root)
+            plan['tool_comparison']['policy'] = 'optional'
+            plan['tasks'][0]['arm_order'] = ['mcp_optional', 'local']
+            with patch('examples.run_swebench_tool_comparison.verify', return_value=plan), \
+                 patch('examples.run_swebench_tool_comparison.check_reference'), \
+                 patch('examples.run_swebench_tool_comparison.grade', return_value={'status': 'graded', 'official_resolved': True}), \
+                 patch('examples.run_swebench_tool_comparison.run_task', return_value={
+                     'status': 'completed', 'official_resolved': True, 'external_tool_calls': {}}) as run:
+                result = execute(root, root)
+            external, local = run.call_args_list
+            self.assertEqual(external.kwargs['mcp_config'], Path('tools.json'))
+            self.assertIsNone(local.kwargs['mcp_config'])
+            self.assertFalse(external.kwargs['require_external_tool'])
+            self.assertFalse(local.kwargs['require_external_tool'])
+            self.assertEqual(result['summary']['paired_success_rate']['mcp_optional'], 1)
+            self.assertEqual(result['records'][0]['arms']['mcp_optional']['external_tool_calls'], {})
+
     def test_completed_model_failure_counts_and_missing_arm_is_explicit(self):
         records = [{'instance_id': 'one', 'arms': {'local': {'status': 'completed', 'official_resolved': False},
                     'mcp_required': {'status': 'completed', 'official_resolved': True}}},

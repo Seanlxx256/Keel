@@ -87,3 +87,13 @@ returned evidence, failures, costs and official repair grading. Include tasks
 where docs/config are unnecessary, so unnecessary calls and displaced context
 remain visible. Current integration tests do not establish autonomous tool-choice
 quality, lower costs or improved repair success.
+
+`run_swebench_tool_comparison.py` now accepts `--tool-policy optional` during
+preparation. It freezes `local` and `mcp_optional` arms and alternates their order.
+Both arms retain local exploration and identical budgets; only the optional arm
+receives the profile, without any required external call. The existing default
+remains `required`, and execution cannot override a frozen policy. Each arm saves
+actual external-call counts, costs and grading results; zero calls is a valid
+optional-policy outcome, not proof that the tool helped. Reference failures gate
+both arms and remain in the report. Task selection does not filter for known
+documentation needs. New task IDs are exploratory, not guaranteed unseen.
