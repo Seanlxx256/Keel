@@ -271,3 +271,15 @@ retrieval: the first five-task fixed interleave regressed on every task. Report
 admission, chunking, ranking and packing interventions separately; do not promote
 a richer corpus or force tool use merely because all files can now be indexed.
 
+## Separate optional text-search MCP capability
+
+`CompassService(enable_text_search=True)` adds `search_text` to that service's
+tool list; default MCP discovery stays unchanged. Keep text retrieval separate
+from automatic code-context mixing. The Scout-only profile is generated with the
+selected interpreter and an absolute launcher while the bound repo follows the
+active workspace. External caches stay outside audited source. Validate row/byte
+caps, source freshness, ledger visibility and role restrictions, not just tool
+discovery. SDK memory interoperability and raw-process stdio are distinct from
+full SDK subprocess validation. Record transport-blocked checks explicitly.
+See `docs/compass-text-search.md` and `tests/test_text_mcp.py`.
+

@@ -63,7 +63,7 @@ class StdioServer:
             elif method == "tools/list":
                 if set(params) - {"_meta"}:
                     raise RpcError(-32602, "No pagination cursor is needed for this fixed tool list")
-                tools = copy.deepcopy(TOOLS)
+                tools = copy.deepcopy(getattr(self.service,'tools',TOOLS))
                 if self.version == "2024-11-05":
                     for tool in tools:
                         tool.pop("outputSchema", None)
@@ -72,7 +72,7 @@ class StdioServer:
             elif method == "tools/call":
                 if set(params) - {"name", "arguments", "_meta"} or not isinstance(params.get("name"), str) or not isinstance(params.get("arguments", {}), dict):
                     raise RpcError(-32602, "Malformed tools/call parameters")
-                if params["name"] not in {tool["name"] for tool in TOOLS}:
+                if params["name"] not in {tool["name"] for tool in getattr(self.service,'tools',TOOLS)}:
                     raise RpcError(-32602, "Unknown tool: " + params["name"])
                 try:
                     with contextlib.redirect_stdout(sys.stderr):

@@ -16,8 +16,11 @@ POLICY = dict(name='tracked_text_fts_v1', extensions=['.py','.md','.rst','.toml'
 
 def inventory(root):
     root=Path(root).resolve(strict=True)
-    listing=subprocess.run(['git','-c','safe.directory='+str(root),'ls-files','--stage','-z'],
-        cwd=root,capture_output=True,check=True,timeout=30).stdout
+    process=subprocess.run(['git','-c','safe.directory='+root.as_posix(),'ls-files','--stage','-z'],
+        cwd=root,capture_output=True,timeout=30)
+    if process.returncode:
+        raise ValueError('Cannot list Git-tracked source files (exit '+str(process.returncode)+'); check repository access')
+    listing=process.stdout
     files=[];omitted=[]
     for raw in listing.split(b'\0'):
         if not raw:continue
@@ -29,7 +32,7 @@ def inventory(root):
         path=root/name
         if mode not in ('100644','100755'):
             omitted.append(dict(path=name,reason='nonregular_git_entry',blob=oid));continue
-        if path.is_symlink() or not path.resolve(strict=True).is_relative_to(root):
+        if any((root/Path(*relative.parts[:i])).is_symlink() for i in range(1,len(relative.parts)+1)) or not path.resolve(strict=True).is_relative_to(root):
             raise ValueError('Source symlink or escape: '+name)
         if path.stat().st_size>POLICY['max_file_bytes']:
             omitted.append(dict(path=name,reason='file_size_limit',blob=oid));continue
@@ -102,7 +105,7 @@ class TextCorpus:
     def indexed_paths(self):
         return {r[0] for r in self.db.execute("SELECT path FROM files WHERE status='indexed'")}
 
-    def search(self,query,kind=None):
+    def require_fresh(self):
         complete=self.db.execute("SELECT value FROM metadata WHERE key='complete'").fetchone()
         if not complete or complete[0]!='true':raise ValueError('Text index is incomplete')
         meta=dict(self.db.execute('SELECT key,value FROM metadata'))
@@ -110,6 +113,10 @@ class TextCorpus:
         current={name:hashlib.sha256(path.read_bytes()).hexdigest() for name,path in files}
         if hashlib.sha256(json.dumps(current,sort_keys=True).encode()).hexdigest()!=meta['manifest']:
             raise ValueError('Text index is stale; rebuild using per-file checkpoints')
+        return meta['manifest']
+
+    def search(self,query,kind=None):
+        self.require_fresh()
         if kind not in (None,'python','text'):raise ValueError('Unknown text corpus kind')
         wanted=list(dict.fromkeys(tokens(query)))[:POLICY['query_terms']]
         if not wanted:return []

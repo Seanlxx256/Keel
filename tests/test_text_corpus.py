@@ -2,10 +2,19 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
 from compass.text_corpus import TextCorpus,chunks
 
 
 class TextCorpusTests(unittest.TestCase):
+    def test_git_inventory_failure_is_an_explicit_tool_error(self):
+        from compass.text_corpus import inventory
+        with tempfile.TemporaryDirectory() as directory:
+            with patch('compass.text_corpus.subprocess.run',return_value=SimpleNamespace(returncode=128,stdout=b'')) as run:
+                with self.assertRaisesRegex(ValueError,'Git-tracked source files'):inventory(Path(directory))
+            self.assertIn('safe.directory='+Path(directory).resolve().as_posix(),run.call_args.args[0])
+
     def test_tracked_types_scope_resume_staleness_and_source_ranges(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);repo=root/'repo';repo.mkdir()

@@ -125,6 +125,8 @@ def main(argv=None):
             command.add_argument("--output", type=Path)
         else:
             command.add_argument("--auto-update", action="store_true", help="Refresh stale indexes between MCP calls")
+            command.add_argument('--enable-text-search',action='store_true',help='Opt in to separate docs/config search_text tool')
+            command.add_argument('--text-index',type=Path,help='Optional text cache path outside source repository')
     args = parser.parse_args(argv)
     try:
         if args.command == "calibrate":
@@ -193,7 +195,8 @@ def main(argv=None):
             model = OllamaModel(args.model, args.model_url) if args.model else None
             limits = Limits(max_tokens=args.max_tokens, max_model_calls=args.max_model_calls,
                             max_tool_calls=args.max_tool_calls, max_wallclock=args.max_wallclock)
-            StdioServer(CompassService(args.repo, auto_update=args.auto_update, routing=routing, model=model, limits=limits)).serve()
+            StdioServer(CompassService(args.repo, auto_update=args.auto_update, routing=routing, model=model, limits=limits,
+                enable_text_search=args.enable_text_search,text_index=args.text_index)).serve()
             return 0
         elif args.command == "update":
             result = update_index(args.repo)
