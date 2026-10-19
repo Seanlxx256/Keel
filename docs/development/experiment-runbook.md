@@ -259,3 +259,15 @@ called. Scope eligibility is necessary, not sufficient for parse completeness.
 The original v1 run is closed and its runner archived; new gate implementation
 requires a new frozen plan, not silent migration of old scored results.
 
+## Mixed text corpus experiments
+
+`compass.text_corpus.TextCorpus` provides optional SQLite FTS5 retrieval over
+declared Git-tracked text extensions with exact source-line windows, per-file
+checkpoints, size/encoding omissions and stale/incomplete-index rejection.
+`run_mixed_corpus_validation.py` freezes a separate protocol and preserves saved
+Python-only controls' original coverage failures. It never removes reference
+paths to improve scores. Passing expanded-corpus coverage does not imply improved
+retrieval: the first five-task fixed interleave regressed on every task. Report
+admission, chunking, ranking and packing interventions separately; do not promote
+a richer corpus or force tool use merely because all files can now be indexed.
+
