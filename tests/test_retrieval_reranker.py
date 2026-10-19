@@ -8,6 +8,19 @@ from examples.reranker_worker import stable_order, run
 
 
 class RerankerTests(unittest.TestCase):
+    def test_all_completed_jobs_skip_model_import_and_inference(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            request = root/'request.json'
+            request.write_text(json.dumps({'model': 'test-only', 'cache': str(root/'cache'),
+                'jobs': [dict(id='job', query='query', documents=[dict(text='a.py\nfirst')])],
+                'completed_jobs': [dict(id='job', scores=[.7], order=[0], seconds=1)]}))
+            with patch.dict('sys.modules', {'torch': None, 'sentence_transformers': None}):
+                result = run(request, root/'result.json')
+            self.assertEqual(result['status'], 'completed')
+            self.assertEqual(result['new_pair_count'], 0)
+            self.assertEqual(result['reused_pair_count'], 1)
+
     def test_finite_scores_stable_ties_complete_permutation(self):
         self.assertEqual(stable_order([.5, .8, .8, -.3], 4), [1, 2, 0, 3])
         for values, count in [([float('nan')], 1), ([float('inf')], 1), ([.5], 2)]:

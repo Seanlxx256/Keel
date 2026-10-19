@@ -11,19 +11,39 @@ import sys
 import time
 
 
-def copy_snapshot(repo, destination):
+def copy_snapshot(repo, destination, omissions=None):
     repo = repo.resolve(strict=True)
     if destination.resolve().is_relative_to(repo):
         raise ValueError('Disposable copy must be outside the source snapshot')
-    listing = subprocess.run(['git', '-c', 'safe.directory='+str(repo), 'ls-files', '-z'],
+    listing = subprocess.run(['git', '-c', 'safe.directory='+str(repo), 'ls-files', '--stage', '-z'],
                              cwd=repo, capture_output=True, check=True, timeout=30).stdout
     destination.mkdir(parents=True, exist_ok=False)
     manifest = {}
     for raw in listing.split(b'\0'):
         if not raw:
             continue
-        relative = raw.decode('utf-8')
+        attributes, relative_bytes = raw.split(b'\t', 1)
+        mode, oid, stage = attributes.decode('ascii').split()
+        if stage != '0':
+            raise ValueError('Unmerged tracked entry')
+        relative = relative_bytes.decode('utf-8')
         source = repo/relative
+        if mode == '120000':
+            # Do not dereference links or index Windows symlink placeholders
+            # as if their target-path text were source code.
+            if omissions is not None:
+                omissions.append({'path': relative, 'blob': oid, 'reason': 'git_symlink_not_indexed'})
+            continue
+        if mode == '160000':
+            if source.is_symlink() or not source.resolve().is_relative_to(repo):
+                raise ValueError('Submodule path escapes snapshot: '+relative)
+            if source.exists() and (not source.is_dir() or any(source.iterdir())):
+                raise ValueError('Initialized submodule requires an explicit corpus policy: '+relative)
+            if omissions is not None:
+                omissions.append({'path': relative, 'commit': oid, 'reason': 'uninitialized_git_submodule'})
+            continue
+        if mode not in ('100644', '100755'):
+            raise ValueError('Unsupported tracked mode: '+mode+' '+relative)
         if source.is_symlink() or not source.resolve().is_relative_to(repo) or not source.is_file():
             raise ValueError('Unsupported tracked path: '+relative)
         target = destination/relative
@@ -93,7 +113,10 @@ def retrieve(config, output):
         report['version'] = metadata.version('cocoindex-code')
         report['stage'] = 'snapshot_copy'
         save()
-        manifest = copy_snapshot(Path(config['repo']), root)
+        omissions = []
+        manifest = copy_snapshot(Path(config['repo']), root, omissions)
+        report['omitted_entries'] = omissions
+        report['omitted_gitlinks'] = [r for r in omissions if r['reason'] == 'uninitialized_git_submodule']
         (directory/'source-manifest.json').write_text(json.dumps(manifest, sort_keys=True), encoding='utf-8')
         report['source_manifest_sha256'] = hashlib.sha256(
             (directory/'source-manifest.json').read_bytes()).hexdigest()

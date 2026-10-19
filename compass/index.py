@@ -87,7 +87,8 @@ def _schema(db):
     """)
 
 
-def build_index(repo: Path, *, parser="tree-sitter", vector_store="none", embedder=None, _previous=None):
+def build_index(repo: Path, *, parser="tree-sitter", vector_store="none", embedder=None, _previous=None,
+                progress=None, max_wallclock=None, checkpoint_vectors=False, embedding_attempts=1, recovery=None):
     root = repo.resolve(strict=True)
     if not root.is_dir():
         raise ValueError("Repository must be a directory")
@@ -97,6 +98,17 @@ def build_index(repo: Path, *, parser="tree-sitter", vector_store="none", embedd
         raise ValueError("Vector indexing requires an explicit embedding provider")
     parser_impl = PythonParser(parser)
     started = time.monotonic()
+    if type(embedding_attempts) is not int or not 1 <= embedding_attempts <= 3:
+        raise ValueError('Embedding attempts must be 1..3')
+    if max_wallclock is not None and (type(max_wallclock) not in (int, float) or max_wallclock <= 0):
+        raise ValueError('Index wall-clock limit must be positive')
+    def emit(stage, **fields):
+        elapsed = time.monotonic()-started
+        if max_wallclock is not None and elapsed >= max_wallclock:
+            raise TimeoutError('Index wall-clock budget exhausted; completed vector checkpoints retained')
+        if progress:
+            progress({'stage': stage, 'elapsed_seconds': round(elapsed, 2), **fields})
+    emit('fingerprint')
     initial_git_ref = git_ref(root)
     snapshot = fingerprint(root)
     generation = uuid.uuid4().hex
@@ -115,6 +127,7 @@ def build_index(repo: Path, *, parser="tree-sitter", vector_store="none", embedd
               "parsed_files": 0, "reused_files": 0, "changed_files": [], "deleted_files": [],
               "embedded_symbols": 0, "reused_vectors": 0, "invalidated_symbols": []}
     for name, path in source_files(root):
+        emit('parse', files_completed=len(file_rows), current_file=name)
         # Parse caches contain raw extraction, not previously resolved edges or dependency text.
         # Relink all references after applying additions/deletions/signature changes.
         old = previous_files.get(name)
@@ -158,6 +171,7 @@ def build_index(repo: Path, *, parser="tree-sitter", vector_store="none", embedd
     update["deleted_files"] = sorted(set(previous_files) - {row[0] for row in file_rows})
     raw_cache = [(file.path, json.dumps(asdict(file), ensure_ascii=False)) for file in parsed]
     symbols = [symbol for file in parsed for symbol in file.symbols]
+    emit('link', files_completed=len(file_rows), symbols_total=len(symbols))
     edges, imports = link_files(parsed)
     _dependency_text(symbols, edges)
     metadata = {"schema_version": SCHEMA_VERSION, "generation": generation, "repo": str(root),
@@ -167,6 +181,7 @@ def build_index(repo: Path, *, parser="tree-sitter", vector_store="none", embedd
                 "calls": len(edges), "resolved_calls": sum(edge["target_id"] is not None for edge in edges),
                 "imports": len(imports), "dimensions": None, "created_at": time.time(), "update": update}
     db = sqlite3.connect(directory / "symbols.sqlite")
+    checkpoint = None
     try:
         _schema(db)
         db.executemany("INSERT INTO parsed_files VALUES(?,?)", raw_cache)
@@ -178,6 +193,18 @@ def build_index(repo: Path, *, parser="tree-sitter", vector_store="none", embedd
         db.executemany("INSERT INTO imports(path,scope,alias,target,imported_module,line,resolved_module) VALUES(?,?,?,?,?,?,?)",
                        [tuple(entry.values()) for entry in imports])
         if vector_store != "none":
+            if checkpoint_vectors:
+                identity = getattr(embedder, 'checkpoint_identity', embedder.spec)
+                metadata['embedding_checkpoint_identity'] = identity
+                cache_key = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+                cache_dir = store/'vector-checkpoints'
+                cache_path = cache_dir/(cache_key+'.sqlite')
+                if cache_dir.is_symlink() or cache_path.is_symlink() or not cache_path.resolve().is_relative_to(root):
+                    raise ValueError('Vector checkpoint path escapes repository')
+                cache_dir.mkdir(exist_ok=True)
+                checkpoint = sqlite3.connect(cache_path)
+                checkpoint.execute('CREATE TABLE IF NOT EXISTS vectors(text_sha256 TEXT PRIMARY KEY, vector TEXT NOT NULL)')
+                checkpoint.commit()
             cached_vectors = {}
             if _previous and _previous.metadata["embedding"] == embedder.spec:
                 cached_vectors = {row["embed_text"]: json.loads(row["vector"]) for row in _previous.db.execute(
@@ -185,6 +212,11 @@ def build_index(repo: Path, *, parser="tree-sitter", vector_store="none", embedd
             vectors_by_id = {}
             missing = []
             for symbol in symbols:
+                if checkpoint is not None and symbol.embed_text not in cached_vectors:
+                    cached = checkpoint.execute('SELECT vector FROM vectors WHERE text_sha256=?',
+                        (hashlib.sha256(symbol.embed_text.encode()).hexdigest(),)).fetchone()
+                    if cached:
+                        cached_vectors[symbol.embed_text] = json.loads(cached[0])
                 if symbol.embed_text in cached_vectors:
                     vector = cached_vectors[symbol.embed_text]
                     metadata["dimensions"] = checked_vectors([vector], 1, metadata["dimensions"])
@@ -194,18 +226,54 @@ def build_index(repo: Path, *, parser="tree-sitter", vector_store="none", embedd
                     missing.append(symbol)
                     update["invalidated_symbols"].append(symbol.module + "." + symbol.qualname)
             for offset in range(0, len(missing), 32):
+                emit('embed', symbols_total=len(symbols), vectors_completed=len(vectors_by_id),
+                     reused_vectors=update['reused_vectors'])
                 batch = missing[offset:offset + 32]
-                vectors = embedder.embed([symbol.embed_text for symbol in batch])
+                from keel.experience import RecoverySession, environment
+                request_timeout = getattr(embedder, 'timeout', None)
+                session = recovery or RecoverySession(task='index', max_actions=embedding_attempts-1,
+                    deadline=started+max_wallclock if max_wallclock is not None else None)
+                def request():
+                    if request_timeout is not None:
+                        embedder.timeout = min(request_timeout, session.remaining())
+                    try:
+                        return embedder.embed([symbol.embed_text for symbol in batch])
+                    except Exception as error:
+                        if session.remaining() <= 0:
+                            raise TimeoutError('Index wall-clock budget exhausted; checkpoints retained') from error
+                        raise
+                    finally:
+                        if request_timeout is not None:
+                            embedder.timeout = request_timeout
+                def validate(value):
+                    checked_vectors(value, len(batch), metadata['dimensions'])
+                    return True
+                vectors = session.run(request, stage='embedding',
+                    facts=environment(embedding=getattr(embedder, 'checkpoint_identity', embedder.spec)),
+                    classify=lambda error: getattr(error, 'category', type(error).__name__),
+                    actions={'retry_same_batch_v1': {
+                        'categories': ['timeout', 'connection', 'http_429', 'http_500', 'http_502', 'http_503', 'http_504'],
+                        'probe': lambda error: {'applicable': bool(getattr(error, 'retryable', False)) and session.remaining() > 1,
+                                                'check': 'typed_transport_failure_and_remaining_budget'},
+                        'apply': lambda remaining: time.sleep(min(.1, remaining))}}, verify=validate)
                 metadata["dimensions"] = checked_vectors(vectors, len(batch), metadata["dimensions"])
                 for symbol, vector in zip(batch, vectors):
                     vectors_by_id[symbol.id] = vector
                     update["embedded_symbols"] += 1
+                if checkpoint is not None:
+                    checkpoint.executemany('INSERT OR REPLACE INTO vectors VALUES(?,?)',
+                        [(hashlib.sha256(symbol.embed_text.encode()).hexdigest(), json.dumps(vector))
+                         for symbol, vector in zip(batch, vectors)])
+                    checkpoint.commit()
+                emit('embed', symbols_total=len(symbols), vectors_completed=len(vectors_by_id),
+                     reused_vectors=update['reused_vectors'])
             # Keep a portable cache even with LanceDB: new immutable generations can
             # reuse embeddings without mutating or exporting the selected Lance table.
             db.executemany("INSERT INTO vectors VALUES(?,?)", [(identifier, json.dumps(vector)) for identifier, vector in vectors_by_id.items()])
             if vector_backend is not None:
                 vector_backend.write([{"id": identifier, "vector": vector} for identifier, vector in vectors_by_id.items()])
         # Reject mixed snapshots rather than publishing stale or internally inconsistent data.
+        emit('publish_check', symbols_total=len(symbols))
         parsed_snapshot = _fingerprint_entries([(row[0], row[2]) for row in file_rows])
         if parsed_snapshot != snapshot or fingerprint(root) != snapshot or git_ref(root) != initial_git_ref:
             raise ValueError("Repository changed during indexing; generation was not published")
@@ -213,6 +281,8 @@ def build_index(repo: Path, *, parser="tree-sitter", vector_store="none", embedd
         db.executemany("INSERT INTO metadata VALUES(?,?)", [(key, json.dumps(value)) for key, value in metadata.items()])
         db.commit()
     finally:
+        if checkpoint is not None:
+            checkpoint.close()
         db.close()
     temporary = store / (generation + ".json")
     temporary.write_text(json.dumps({"generation": generation, "schema_version": SCHEMA_VERSION}), encoding="utf-8")

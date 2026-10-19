@@ -32,6 +32,11 @@ Execution now has an explicit sequential role state machine. Successful runs pas
 
 ## Quick start
 
+Before adding or changing experiment scripts, read the
+[shared experiment engineering runbook](docs/development/experiment-runbook.md).
+It records verified failure patterns, reusable implementations, resume rules and
+regression checks. Repository agents are directed to it by [AGENTS.md](AGENTS.md).
+
 Python 3.11 or later is required. The runtime has no third-party Python dependencies.
 
 From the repository root:

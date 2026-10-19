@@ -86,16 +86,23 @@ def score(rows, instance):
 
 
 def run(source, output, serena_python=None, pyright_command=None, *, cocoindex_python=None,
-        engines=None, embedding_model='Snowflake/snowflake-arctic-embed-xs', engine_timeout=900):
+        engines=None, embedding_model='Snowflake/snowflake-arctic-embed-xs', engine_timeout=900, resume_report=None,
+        compatible_worker_hashes=None):
     output.mkdir(parents=True, exist_ok=False)
     source = source.resolve(strict=True)
     batch = json.loads(source.read_text(encoding='utf-8'))
+    previous = json.loads(resume_report.read_text(encoding='utf-8')) if resume_report else None
+    if previous and (previous['line_budget'] != 100 or previous['symbol_line_cap'] != 32):
+        raise ValueError('Prior external packing policy differs')
+    cocoindex_cache = Path(previous.get('cocoindex_model_cache', resume_report.parent.parent/'cocoindex-model-cache')) \
+        if previous else output.parent/'cocoindex-model-cache'
     report = {'status': 'running', 'records': [], 'new_model_calls': 0, 'benchmark_ready': False,
         'source_sha256': hashlib.sha256(source.read_bytes()).hexdigest(),
         'implementation_sha256': {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (
             Path(__file__), Path(__file__).with_name('serena_retrieval_worker.py'),
             Path(__file__).with_name('cocoindex_retrieval_worker.py'))},
         'line_budget': 100, 'symbol_line_cap': 32,
+        'cocoindex_model_cache': str(cocoindex_cache.resolve()),
         'limitations': 'Previously exposed three-task development sample. Lexical libraries share Compass chunks/analyzer; not full code-agent comparisons. Serena uses a disclosed deterministic identifier adapter, not an LLM Agent. Missing engines are unavailable, not zero recall.'}
     def save():
         summary = []
@@ -125,6 +132,29 @@ def run(source, output, serena_python=None, pyright_command=None, *, cocoindex_p
                    'query_sha256': hashlib.sha256(instance['query'].encode()).hexdigest(),
                    'dataset_sha256': hashlib.sha256(dataset.read_bytes()).hexdigest()}
             try:
+                old = [r for r in previous['records'] if r['instance'] == instance['id'] and
+                       r['engine'] == engine and r['status'] == 'ok'] if previous else []
+                if len(old) > 1:
+                    raise ValueError('Duplicate completed external result')
+                if old:
+                    cached = old[0]
+                    worker_name = 'serena_retrieval_worker.py' if engine == 'serena_symbols' else 'cocoindex_retrieval_worker.py'
+                    if (engine not in ('serena_symbols', 'cocoindex_semantic') or
+                            any(cached.get(key) != row[key] for key in ('query_sha256', 'dataset_sha256', 'index_ref')) or
+                            previous['implementation_sha256'].get(worker_name) not in
+                            [report['implementation_sha256'][worker_name], *(compatible_worker_hashes or {}).get(worker_name, [])] or
+                            (engine == 'cocoindex_semantic' and cached['embedding_settings']['model'] != embedding_model)):
+                        raise ValueError('Completed external result is incompatible with current request')
+                    checked = score(cached['candidates'], instance)
+                    if checked['metrics'] != cached['metrics']:
+                        raise ValueError('Completed external metrics do not reproduce')
+                    row.update(cached, reused=True, reuse_report=str(resume_report),
+                        reuse_report_sha256=hashlib.sha256(resume_report.read_bytes()).hexdigest(),
+                        seconds_this_run=0)
+                    report['records'].append(row)
+                    save()
+                    print('[Retrieval comparison] reuse '+engine+' '+instance['id'], flush=True)
+                    continue
                 if engine == 'cocoindex_semantic':
                     if not cocoindex_python or not cocoindex_python.is_file():
                         raise ModuleNotFoundError('Isolated CocoIndex interpreter not available')
@@ -132,7 +162,7 @@ def run(source, output, serena_python=None, pyright_command=None, *, cocoindex_p
                     directory.mkdir(parents=True)
                     worker_input, worker_output = directory/'query-only.json', directory/'result.json'
                     worker_input.write_text(json.dumps({'repo': instance['repo'], 'query': instance['query'],
-                        'model_cache': str((output.parent/'cocoindex-model-cache').resolve()),
+                        'model_cache': str(cocoindex_cache.resolve()),
                         'embedding_model': embedding_model, 'timeout': engine_timeout}), encoding='utf-8')
                     with (directory/'worker.log').open('w', encoding='utf-8') as log:
                         process = subprocess.run([str(cocoindex_python),

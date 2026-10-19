@@ -9,6 +9,13 @@ import urllib.request
 from urllib.parse import urlsplit
 
 
+class EmbeddingRequestError(ValueError):
+    def __init__(self, message, *, category, retryable=False):
+        super().__init__(message)
+        self.category = category
+        self.retryable = retryable
+
+
 def checked_vectors(vectors, count, dimensions=None):
     if not isinstance(vectors, list) or len(vectors) != count:
         raise ValueError("Embedding response count does not match input count")
@@ -86,9 +93,20 @@ class OllamaEmbedder:
                     detail = ": " + " ".join(message.split())[:300]
             except (ValueError, OSError, AttributeError):
                 pass
-            raise ValueError(f"Embedding HTTP request failed with status {error.code}{detail}") from None
-        except (OSError, KeyError, TypeError, json.JSONDecodeError):
-            raise ValueError("Embedding endpoint is unavailable or returned an invalid response") from None
+            raise EmbeddingRequestError(f"Embedding HTTP request failed with status {error.code}{detail}",
+                category='http_'+str(error.code), retryable=error.code in (429, 500, 502, 503, 504)) from error
+        except TimeoutError as error:
+            raise EmbeddingRequestError('Embedding request timed out', category='timeout', retryable=True) from error
+        except urllib.error.URLError as error:
+            category = 'timeout' if isinstance(error.reason, TimeoutError) else 'connection'
+            raise EmbeddingRequestError('Embedding transport failed: '+type(error.reason).__name__,
+                category=category, retryable=True) from error
+        except OSError as error:
+            raise EmbeddingRequestError('Embedding response read failed: '+type(error).__name__,
+                category='connection', retryable=True) from error
+        except (KeyError, TypeError, json.JSONDecodeError) as error:
+            raise EmbeddingRequestError('Embedding response is invalid: '+type(error).__name__,
+                category='invalid_response') from error
 
 
 def embedder_from_spec(spec):

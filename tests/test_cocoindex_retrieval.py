@@ -10,6 +10,36 @@ from examples.cocoindex_retrieval_worker import copy_snapshot, parse_search, ret
 
 
 class CocoIndexRetrievalTests(unittest.TestCase):
+    def test_uninitialized_gitlink_recorded_but_initialized_submodule_not_silently_omitted(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo = root/'repo'
+            repo.mkdir()
+            subprocess.run(['git', 'init', str(repo)], capture_output=True, check=True)
+            subprocess.run(['git', '-c', 'safe.directory='+str(repo), 'update-index', '--add',
+                '--cacheinfo', '160000,'+'a'*40+',helpers'], cwd=repo, capture_output=True, check=True)
+            (repo/'helpers').mkdir()
+            omissions = []
+            self.assertEqual(copy_snapshot(repo, root/'copy', omissions), {})
+            self.assertEqual(omissions, [dict(path='helpers', commit='a'*40, reason='uninitialized_git_submodule')])
+            (repo/'helpers/initialized.py').write_text('x = 1')
+            with self.assertRaisesRegex(ValueError, 'Initialized submodule'):
+                copy_snapshot(repo, root/'copy2')
+
+    def test_declared_symlink_is_not_followed_or_copied_as_placeholder_source(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo = root/'repo'
+            repo.mkdir()
+            subprocess.run(['git', 'init', str(repo)], capture_output=True, check=True)
+            subprocess.run(['git', '-c', 'safe.directory='+str(repo), 'update-index', '--add',
+                '--cacheinfo', '120000,'+'b'*40+',link.py'], cwd=repo, capture_output=True, check=True)
+            (repo/'link.py').write_text('../../outside.py')
+            omissions = []
+            self.assertEqual(copy_snapshot(repo, root/'copy', omissions), {})
+            self.assertEqual(omissions[0]['reason'], 'git_symlink_not_indexed')
+            self.assertFalse((root/'copy/link.py').exists())
+
     def test_parse_preserves_native_order_and_one_based_ranges(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

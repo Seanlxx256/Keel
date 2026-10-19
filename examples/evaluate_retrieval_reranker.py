@@ -17,7 +17,7 @@ from examples.reranker_worker import stable_order
 
 
 def evaluate(source, external, output, python, *, model='cross-encoder/ms-marco-MiniLM-L6-v2',
-             revision=None, timeout=1800, local_files_only=False):
+             revision=None, timeout=1800, local_files_only=False, model_cache=None, resume_from=None):
     output = output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     inputs = {}
@@ -93,9 +93,29 @@ def evaluate(source, external, output, python, *, model='cross-encoder/ms-marco-
                 jobs.append({'id': job_id, 'query': instance['query'], 'documents': documents})
                 context[job_id] = (instance, engine, index_ref, baseline)
         worker_input, worker_output = output/'query-code-only.json', output/'worker-result.json'
+        completed_jobs = []
+        if resume_from and (resume_from/'worker-result.json').is_file():
+            old_input_path = resume_from/'query-code-only.json'
+            old_input = json.loads(old_input_path.read_text(encoding='utf-8'))
+            old_output = json.loads((resume_from/'worker-result.json').read_text(encoding='utf-8'))
+            old_report = json.loads((resume_from/'evaluation.json').read_text(encoding='utf-8'))
+            if (old_output['input_sha256'] != hashlib.sha256(old_input_path.read_bytes()).hexdigest() or
+                    old_input['model'] != model or old_input.get('revision') != revision or
+                    old_report['implementation_sha256']['reranker_worker.py'] != report['implementation_sha256']['reranker_worker.py']):
+                raise ValueError('Prior reranker identity/configuration mismatch')
+            old_requests = {j['id']: j for j in old_input['jobs']}
+            new_requests = {j['id']: j for j in jobs}
+            for finished in old_output['jobs']:
+                if finished['id'] not in new_requests:
+                    continue
+                if old_requests[finished['id']] != new_requests[finished['id']]:
+                    raise ValueError('Prior scored query/code differs')
+                completed_jobs.append(finished)
+            report['resume_from'] = str(resume_from)
+            report['resume_worker_sha256'] = hashlib.sha256((resume_from/'worker-result.json').read_bytes()).hexdigest()
         worker_input.write_text(json.dumps({'model': model, 'revision': revision,
-            'cache': str((output.parent/'reranker-model-cache').resolve()),
-            'local_files_only': local_files_only, 'jobs': jobs}), encoding='utf-8')
+            'cache': str((model_cache or output.parent/'reranker-model-cache').resolve()),
+            'local_files_only': local_files_only, 'jobs': jobs, 'completed_jobs': completed_jobs}), encoding='utf-8')
         request_hash = hashlib.sha256(worker_input.read_bytes()).hexdigest()
         env = dict(os.environ, PYTHONUTF8='1', HF_HUB_ETAG_TIMEOUT='10', HF_HUB_DOWNLOAD_TIMEOUT='30')
         report['status'] = 'running'
@@ -144,7 +164,9 @@ def evaluate(source, external, output, python, *, model='cross-encoder/ms-marco-
                 arm: {key: statistics.mean(r[arm][key] for r in group) for key in
                       ('line_recall', 'line_precision', 'hit_file_rate')}
                 for arm in ('baseline', 'reranked')}})
-        report.update(status='completed', inference_pairs=measured['pair_count'])
+        report.update(status='completed', inference_pairs=measured['pair_count'],
+            new_inference_pairs=measured.get('new_pair_count', measured['pair_count']),
+            reused_inference_pairs=measured.get('reused_pair_count', 0))
         for repo, expected in snapshots.items():
             if fingerprint(Path(repo)) != expected:
                 raise ValueError('Source snapshot changed during reranking')
@@ -167,8 +189,10 @@ if __name__ == '__main__':
     parser.add_argument('--revision')
     parser.add_argument('--timeout', type=int, default=1800)
     parser.add_argument('--local-files-only', action='store_true')
+    parser.add_argument('--model-cache', type=Path)
     args = parser.parse_args()
     result = evaluate(args.source, args.external, args.output, args.python, model=args.model,
-        revision=args.revision, timeout=args.timeout, local_files_only=args.local_files_only)
+        revision=args.revision, timeout=args.timeout, local_files_only=args.local_files_only,
+        model_cache=args.model_cache)
     print(json.dumps({k: v for k, v in result.items() if k in ('status', 'summary', 'error')}, indent=2))
     sys.exit(0 if result['status'] == 'completed' else 1)
