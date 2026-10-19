@@ -31,8 +31,8 @@ class Routing:
             raise ValueError('t2_preserve_top must be an integer from 0 to 100')
         if self.evidence_policy not in ("preview", "read"):
             raise ValueError("evidence_policy must be preview or read")
-        if not isinstance(self.ranking, str) or self.ranking not in {"rrf", "code-aware"}:
-            raise ValueError("ranking must be rrf or code-aware")
+        if not isinstance(self.ranking, str) or self.ranking not in {"rrf", "code-aware", "code-aware-structure"}:
+            raise ValueError("ranking must be rrf, code-aware or code-aware-structure")
         for name in ("min_relevance", "min_overlap", "max_entropy"):
             value = getattr(self, name)
             if type(value) not in {int, float} or not math.isfinite(value) or not 0 <= value <= 1:
@@ -188,8 +188,13 @@ class Retriever:
             vector = self.index.search_vector(query, self.routing.candidates, timeout=self.budget.remaining)["results"]
             self.budget.check()
         rows = fuse(lexical, vector)
-        if self.routing.ranking == "code-aware":
+        if self.routing.ranking in {"code-aware", "code-aware-structure"}:
             rows = rank_code_evidence(query, rows)
+        if self.routing.ranking == 'code-aware-structure':
+            from .structural import rank_index_structure
+            self.budget.charge_tool()
+            rows = rank_index_structure(self.index, rows)
+            self.budget.check()
         lhs, rhs = {row["id"] for row in lexical[:10]}, {row["id"] for row in vector[:10]}
         overlap = len(lhs & rhs) / max(1, len(lhs | rhs)) if available else None
         scores = [row["score"] for row in rows[:10]]
@@ -205,7 +210,7 @@ class Retriever:
         self.record("retrieval_gate", {"query": query, "signals": signals, "reasons": reasons})
         self.record("retrieval_candidates", {"query": query, "ranked": [
             {key: row[key] for key in ("id", "path", "qualname", "start_line", "end_line", "score", "channels",
-                                       "rrf_score", "ranking_evidence") if key in row}
+                                       "rrf_score", "ranking_evidence", "structural_evidence") if key in row}
             for row in rows]})
         return rows, signals, reasons
 

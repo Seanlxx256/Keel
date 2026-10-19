@@ -34,7 +34,7 @@ def exposure_registry(project):
              'fusion.json', 'diagnosis.json', 'task.json', 'manifest.json'}
     files = [project/'examples/evaluation_development_registry.json']
     for directory in ('.keel/swe-public', '.keel/swe-independent', '.keel/swebench',
-                      '.keel/retrieval-validation', 'docs/evaluations'):
+                      '.keel/retrieval-validation', '.keel/structural-validation', 'docs/evaluations'):
         root = project/directory
         if root.exists():
             files.extend(p for p in root.rglob('*.json') if p.name in names or directory == 'docs/evaluations')

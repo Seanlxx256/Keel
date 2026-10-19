@@ -87,7 +87,7 @@ def score(rows, instance):
 
 def run(source, output, serena_python=None, pyright_command=None, *, cocoindex_python=None,
         engines=None, embedding_model='Snowflake/snowflake-arctic-embed-xs', engine_timeout=900, resume_report=None,
-        compatible_worker_hashes=None):
+        compatible_worker_hashes=None, aider_python=None):
     output.mkdir(parents=True, exist_ok=False)
     source = source.resolve(strict=True)
     batch = json.loads(source.read_text(encoding='utf-8'))
@@ -100,10 +100,11 @@ def run(source, output, serena_python=None, pyright_command=None, *, cocoindex_p
         'source_sha256': hashlib.sha256(source.read_bytes()).hexdigest(),
         'implementation_sha256': {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (
             Path(__file__), Path(__file__).with_name('serena_retrieval_worker.py'),
-            Path(__file__).with_name('cocoindex_retrieval_worker.py'))},
+            Path(__file__).with_name('cocoindex_retrieval_worker.py'),
+            Path(__file__).with_name('aider_retrieval_worker.py'))},
         'line_budget': 100, 'symbol_line_cap': 32,
         'cocoindex_model_cache': str(cocoindex_cache.resolve()),
-        'limitations': 'Previously exposed three-task development sample. Lexical libraries share Compass chunks/analyzer; not full code-agent comparisons. Serena uses a disclosed deterministic identifier adapter, not an LLM Agent. Missing engines are unavailable, not zero recall.'}
+        'limitations': 'Previously exposed development tasks. Lexical libraries share Compass chunks/analyzer; not full code-agent comparisons. Serena uses a deterministic identifier adapter. Aider measures native ranked tags with an AST range adapter, not its full rendered repo map or Agent. Missing engines are unavailable, not zero recall.'}
     def save():
         summary = []
         for engine in sorted({r['engine'] for r in report['records']}):
@@ -138,8 +139,9 @@ def run(source, output, serena_python=None, pyright_command=None, *, cocoindex_p
                     raise ValueError('Duplicate completed external result')
                 if old:
                     cached = old[0]
-                    worker_name = 'serena_retrieval_worker.py' if engine == 'serena_symbols' else 'cocoindex_retrieval_worker.py'
-                    if (engine not in ('serena_symbols', 'cocoindex_semantic') or
+                    worker_name = {'serena_symbols': 'serena_retrieval_worker.py',
+                        'aider_native_tags': 'aider_retrieval_worker.py'}.get(engine, 'cocoindex_retrieval_worker.py')
+                    if (engine not in ('serena_symbols', 'cocoindex_semantic', 'aider_native_tags') or
                             any(cached.get(key) != row[key] for key in ('query_sha256', 'dataset_sha256', 'index_ref')) or
                             previous['implementation_sha256'].get(worker_name) not in
                             [report['implementation_sha256'][worker_name], *(compatible_worker_hashes or {}).get(worker_name, [])] or
@@ -155,7 +157,31 @@ def run(source, output, serena_python=None, pyright_command=None, *, cocoindex_p
                     save()
                     print('[Retrieval comparison] reuse '+engine+' '+instance['id'], flush=True)
                     continue
-                if engine == 'cocoindex_semantic':
+                if engine == 'aider_native_tags':
+                    if not aider_python or not aider_python.is_file():
+                        raise ModuleNotFoundError('Isolated Aider interpreter not available')
+                    directory = output/f'task-{number}'/'aider'
+                    directory.mkdir(parents=True)
+                    worker_input, worker_output = directory/'query-only.json', directory/'result.json'
+                    worker_input.write_text(json.dumps({'repo': instance['repo'], 'query': instance['query']}), encoding='utf-8')
+                    with (directory/'worker.log').open('wb') as log:
+                        process = subprocess.run([str(aider_python),
+                            str(Path(__file__).with_name('aider_retrieval_worker.py')),
+                            '--input', str(worker_input.resolve()), '--output', str(worker_output.resolve())],
+                            stdout=log, stderr=subprocess.STDOUT, timeout=engine_timeout)
+                    if process.returncode or not worker_output.is_file():
+                        raise RuntimeError('Aider worker failed; inspect worker.log')
+                    measured = json.loads(worker_output.read_text(encoding='utf-8'))
+                    row['worker_result'] = str(worker_output)
+                    if measured['status'] == 'unavailable':
+                        raise ModuleNotFoundError(measured['error'])
+                    if measured['status'] != 'ok':
+                        raise RuntimeError(measured.get('error', 'Aider native ranking failed'))
+                    rows, version = measured['candidates'], measured['version']
+                    row['adapter'] = measured['adapter']
+                    row['native_implementation_sha256'] = measured['repomap_sha256']
+                    row['adapter_sha256'] = hashlib.sha256(Path(__file__).with_name('aider_retrieval_worker.py').read_bytes()).hexdigest()
+                elif engine == 'cocoindex_semantic':
                     if not cocoindex_python or not cocoindex_python.is_file():
                         raise ModuleNotFoundError('Isolated CocoIndex interpreter not available')
                     directory = output/f'task-{number}'/'cocoindex'
@@ -255,8 +281,10 @@ if __name__ == '__main__':
     parser.add_argument('--serena-python', type=Path)
     parser.add_argument('--pyright-command', nargs='+')
     parser.add_argument('--cocoindex-python', type=Path)
+    parser.add_argument('--aider-python', type=Path)
+    parser.add_argument('--resume-report', type=Path)
     parser.add_argument('--engines', nargs='+', choices=('sqlite_fts5', 'rank_bm25', 'bm25s',
-                        'serena_symbols', 'cocoindex_semantic'))
+                        'serena_symbols', 'cocoindex_semantic', 'aider_native_tags'))
     parser.add_argument('--embedding-model', default='Snowflake/snowflake-arctic-embed-xs')
     parser.add_argument('--engine-timeout', type=int, default=900)
     args = parser.parse_args()
@@ -266,5 +294,5 @@ if __name__ == '__main__':
         parser.error('--engine-timeout must be at least 30 seconds')
     result = run(args.source, args.output.resolve(), args.serena_python, args.pyright_command,
         cocoindex_python=args.cocoindex_python, engines=args.engines, embedding_model=args.embedding_model,
-        engine_timeout=args.engine_timeout)
+        engine_timeout=args.engine_timeout, aider_python=args.aider_python, resume_report=args.resume_report)
     print(json.dumps({'summary': result['summary'], 'new_model_calls': 0}, indent=2))

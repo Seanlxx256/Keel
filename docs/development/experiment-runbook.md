@@ -204,3 +204,28 @@ adapter now does so, with a canonical-path regression check. Search-stage failur
 can clone the stopped checkpoint too. Full search success remains unverified
 until the next native run; preserve the failed run and do not score it as zero.
 
+## Native competitor comparisons
+
+Audit upstream documentation and versioned source before claiming product
+equivalence. `aider_retrieval_worker.py` calls native Aider ranked tags; its
+query-only identifier hints and independent AST range packing are explicit
+component adaptations, not full Aider. Record the native module hash and version.
+`setup_aider_retrieval.py` uses an isolated pinned environment, actual-interpreter
+probe, shared progress/atomic result writers and finite process deadlines.
+Record `PIP_NO_INDEX` when installation finds no versions: that message alone
+does not prove the package/version is nonexistent. Do not disable environment
+network policy or infer quality from missing dependencies. Native installation
+and a source/query-only probe must succeed before reporting native metrics.
+
+## Same-pool structural ranking experiments
+
+`compass.structural` reorders only supplied candidate IDs using resolved static
+calls and fixed PageRank/RRF settings. Keep candidate membership, source ranges
+and packing unchanged in a ranking-only experiment. Native Aider's different
+pool belongs to a separately disclosed arm. Freeze task IDs and implementation
+hashes before scoring new tasks. Include structural plans in exposure_registry,
+including failed/planned IDs. `run_structural_validation.py` checks receipt and
+artifact hashes before reusing completed tasks and uses parent-bounded task
+processes. Network-bound snapshot failures are infrastructure outcomes, not
+retrieval misses.
+
