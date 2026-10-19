@@ -161,8 +161,20 @@ def run(source, output, serena_python=None, pyright_command=None, *, cocoindex_p
                     directory = output/f'task-{number}'/'cocoindex'
                     directory.mkdir(parents=True)
                     worker_input, worker_output = directory/'query-only.json', directory/'result.json'
+                    checkpoints = [r for r in previous['records'] if r['instance'] == instance['id']
+                        and r['engine'] == engine and r.get('worker_result')
+                        and r.get('query_sha256') == row['query_sha256']
+                        and r.get('dataset_sha256') == row['dataset_sha256']] if previous else []
+                    checkpoint = None
+                    if checkpoints:
+                        candidate = Path(checkpoints[-1]['worker_result']).resolve()
+                        if candidate.is_file():
+                            saved = json.loads(candidate.read_text(encoding='utf-8'))
+                            if saved.get('daemon_cleanup_returncode') == 0 and saved.get('stage') in ('index', 'search'):
+                                checkpoint = str(candidate.parent)
                     worker_input.write_text(json.dumps({'repo': instance['repo'], 'query': instance['query'],
                         'model_cache': str(cocoindex_cache.resolve()),
+                        'resume_checkpoint': checkpoint,
                         'embedding_model': embedding_model, 'timeout': engine_timeout}), encoding='utf-8')
                     with (directory/'worker.log').open('w', encoding='utf-8') as log:
                         process = subprocess.run([str(cocoindex_python),
@@ -174,7 +186,10 @@ def run(source, output, serena_python=None, pyright_command=None, *, cocoindex_p
                     measured = json.loads(worker_output.read_text(encoding='utf-8'))
                     row['worker_result'] = str(worker_output)
                     row['stage'] = measured['stage']
+                    if measured.get('ipc_preflight'):
+                        row['ipc_preflight'] = measured['ipc_preflight']
                     if measured['status'] == 'unavailable':
+                        row['unavailable_type'] = measured.get('error_type', 'ModuleNotFoundError')
                         raise ModuleNotFoundError(measured['error'])
                     if measured['status'] != 'ok':
                         raise RuntimeError(measured.get('error', 'CocoIndex worker failed'))
@@ -189,7 +204,8 @@ def run(source, output, serena_python=None, pyright_command=None, *, cocoindex_p
                     directory.mkdir()
                     worker_input, worker_output = directory/'query-only.json', directory/'serena-result.json'
                     worker_input.write_text(json.dumps({'repo': instance['repo'], 'query': instance['query'],
-                        'state': str((output/'serena-state').resolve()), 'pyright_command': pyright_command}), encoding='utf-8')
+                        'state': str((output/'serena-state').resolve()), 'pyright_command': pyright_command,
+                        'experience_store': str(Path(__file__).resolve().parents[1]/'.keel/experience/operations.sqlite')}), encoding='utf-8')
                     with (directory/'serena.log').open('w', encoding='utf-8') as log:
                         process = subprocess.run([str(serena_python), str(Path(__file__).with_name('serena_retrieval_worker.py')),
                             '--input', str(worker_input.resolve()), '--output', str(worker_output.resolve())],
@@ -201,11 +217,14 @@ def run(source, output, serena_python=None, pyright_command=None, *, cocoindex_p
                         raise RuntimeError('Serena worker failed; inspect its result and log')
                     rows, version = measured['candidates'], measured['version']
                     row['adapter'] = measured['adapter']
+                    row['worker_result'] = str(worker_output)
+                    row['recovery'] = measured.get('recovery', [])
+                    row['tool_calls'] = measured.get('tool_calls')
                 else:
                     rows, version = rank_external(engine, documents, instance['query'])
                 row.update(status='ok', version=version, **score(rows, instance))
             except ModuleNotFoundError as error:
-                row.update(status='unavailable', error_type=type(error).__name__, detail=str(error)[:200])
+                row.update(status='unavailable', error_type=row.get('unavailable_type', type(error).__name__), detail=str(error)[:200])
             except Exception as error:
                 row.update(status='failed', error_type=type(error).__name__, detail=str(error)[:200])
             row['seconds_including_initialization'] = time.monotonic()-started

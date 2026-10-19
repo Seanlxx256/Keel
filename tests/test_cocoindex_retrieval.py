@@ -6,10 +6,60 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from examples.cocoindex_retrieval_worker import copy_snapshot, parse_search, retrieve
+from examples.cocoindex_retrieval_worker import (copy_snapshot, parse_search, retrieve,
+    restore_checkpoint, native_index_command)
+import hashlib
 
 
 class CocoIndexRetrievalTests(unittest.TestCase):
+    def test_native_index_uses_canonical_project_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root/'child').mkdir()
+            command = native_index_command(root/'child/..')
+            self.assertEqual(command[-1], str(root.resolve()))
+            self.assertIn('client.index(sys.argv[1]', command[3])
+            self.assertNotIn('client.index("."', command[3])
+
+    def test_checkpoint_clone_preserves_old_run_and_rejects_changed_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            old = base/'old'
+            native = old/'snapshot/.cocoindex_code'
+            native.mkdir(parents=True)
+            data = b'x = 1\n'
+            (old/'snapshot/a.py').write_bytes(data)
+            manifest = {'a.py': hashlib.sha256(data).hexdigest()}
+            embedding = {'provider': 'sentence-transformers', 'model': 'same-model'}
+            (old/'source-manifest.json').write_text(json.dumps(manifest))
+            (old/'result.json').write_text(json.dumps(dict(daemon_cleanup_returncode=0,
+                version='v1', embedding_settings=embedding)))
+            (native/'settings.yml').write_text(json.dumps({'include_patterns': ['**/*.py']}))
+            (native/'checkpoint').write_bytes(b'native-state')
+            root = base/'new'
+            root.mkdir()
+            result = restore_checkpoint(old, root, manifest, 'v1', embedding)
+            self.assertEqual(result['status'], 'cloned')
+            (root/'.cocoindex_code/checkpoint').write_bytes(b'new-state')
+            self.assertEqual((native/'checkpoint').read_bytes(), b'native-state')
+            (old/'snapshot/a.py').write_bytes(b'changed')
+            with self.assertRaisesRegex(ValueError, 'source bytes differ'):
+                restore_checkpoint(old, base/'other', manifest, 'v1', embedding)
+
+    def test_blocked_transport_stops_before_snapshot_or_model_load(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)/'result.json'
+            with patch('examples.cocoindex_retrieval_worker.metadata.version', return_value='test'), \
+                    patch('examples.cocoindex_retrieval_worker.probe_named_pipe', return_value={
+                        'status': 'unavailable', 'permission_boundary': True}) as probe, \
+                    patch('examples.cocoindex_retrieval_worker.copy_snapshot') as copy:
+                result = retrieve({'model_cache': str(Path(directory)/'models')}, output)
+            copy.assert_not_called()
+            probe.assert_called_once()
+            self.assertEqual(result['status'], 'unavailable')
+            self.assertEqual(result['stage'], 'ipc_preflight')
+            self.assertTrue(result['ipc_preflight']['permission_boundary'])
+            self.assertFalse((Path(directory)/'snapshot').exists())
     def test_uninitialized_gitlink_recorded_but_initialized_submodule_not_silently_omitted(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

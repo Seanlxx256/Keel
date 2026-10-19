@@ -10,6 +10,9 @@ import subprocess
 import sys
 import time
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from keel.ipc import probe_named_pipe
+
 
 def copy_snapshot(repo, destination, omissions=None):
     repo = repo.resolve(strict=True)
@@ -72,6 +75,42 @@ def parse_search(payload, repo):
     return result
 
 
+def restore_checkpoint(previous, root, manifest, version, embedding):
+    """Clone a stopped native checkpoint; never mutate the preceding run."""
+    previous = Path(previous).resolve(strict=True)
+    report = json.loads((previous/'result.json').read_text(encoding='utf-8'))
+    if report.get('daemon_cleanup_returncode') != 0:
+        raise ValueError('Checkpoint daemon was not confirmed stopped')
+    if report.get('version') != version or report.get('embedding_settings') != embedding:
+        raise ValueError('Checkpoint package/model settings differ')
+    archived = json.loads((previous/'source-manifest.json').read_text(encoding='utf-8'))
+    if archived != manifest:
+        raise ValueError('Checkpoint source manifest differs')
+    source = previous/'snapshot'
+    for relative, digest in manifest.items():
+        path = source/relative
+        if path.is_symlink() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+            raise ValueError('Checkpoint source bytes differ: '+relative)
+    native = source/'.cocoindex_code'
+    if json.loads((native/'settings.yml').read_text()) != {'include_patterns': ['**/*.py']}:
+        raise ValueError('Checkpoint corpus settings differ')
+    if any(p.is_symlink() for p in native.rglob('*')):
+        raise ValueError('Checkpoint contains symlinks')
+    shutil.copytree(native, root/'.cocoindex_code')
+    return {'source': str(previous), 'status': 'cloned',
+            'scope': 'Native incremental index revalidation; embedding reuse is not independently measured'}
+
+
+def native_index_command(root):
+    # The upstream client translates host mappings but does NOT resolve relative
+    # paths. Use the same canonical project identity as CLI search.
+    return [sys.executable, '-u', '-c',
+        'import json,sys,msgspec; from cocoindex_code import client; '
+        'emit=lambda p: print(json.dumps(msgspec.to_builtins(p)),flush=True); '
+        'r=client.index(sys.argv[1],on_progress=emit,on_waiting=lambda: print("waiting",flush=True)); '
+        'emit(r); raise SystemExit(0 if r.success else 1)', str(root.resolve(strict=True))]
+
+
 def retrieve(config, output):
     directory = output.parent.resolve()
     report = {'status': 'running', 'stage': 'package_probe', 'commands': [],
@@ -97,10 +136,34 @@ def retrieve(config, output):
         remaining = timeout-(time.monotonic()-started)
         if remaining <= 0:
             raise TimeoutError('CocoIndex worker wall-clock limit reached')
+        invocation = cli+args
+        if stage == 'index':
+            # The native CLI uses a transient Rich spinner, invisible in redirected logs.
+            invocation = native_index_command(root)
         with (directory/(stage+'.stdout.log')).open('wb') as stdout, \
                 (directory/(stage+'.stderr.log')).open('wb') as stderr:
-            process = subprocess.run(cli+args, cwd=root, env=env, stdin=subprocess.DEVNULL,
-                stdout=stdout, stderr=stderr, timeout=min(seconds or remaining, remaining))
+            process = subprocess.Popen(invocation, cwd=root, env=env, stdin=subprocess.DEVNULL,
+                stdout=stdout, stderr=stderr)
+            deadline = time.monotonic()+min(seconds or remaining, remaining)
+            try:
+                while True:
+                    try:
+                        process.wait(timeout=min(10, max(.01, deadline-time.monotonic())))
+                        break
+                    except subprocess.TimeoutExpired:
+                        report['elapsed_seconds'] = time.monotonic()-started
+                        report['progress_log'] = str(directory/(stage+'.stdout.log'))
+                        save()
+                        print('[CocoIndex] '+stage+' elapsed='+str(round(report['elapsed_seconds']))+
+                              's log_bytes='+str((directory/(stage+'.stdout.log')).stat().st_size), flush=True)
+                        if time.monotonic() >= deadline:
+                            raise
+            except BaseException:
+                process.kill()
+                process.wait()
+                report['commands'].append({'stage': stage, 'arguments': args,
+                    'returncode': process.returncode, 'interrupted': True})
+                raise
         report['commands'].append({'stage': stage, 'arguments': args, 'returncode': process.returncode})
         save()
         if process.returncode:
@@ -111,6 +174,14 @@ def retrieve(config, output):
         return (directory/(stage+'.stdout.log')).read_text(encoding='utf-8')
     try:
         report['version'] = metadata.version('cocoindex-code')
+        report['stage'] = 'ipc_preflight'
+        save()
+        report['ipc_preflight'] = probe_named_pipe(sys.executable)
+        if report['ipc_preflight']['status'] == 'unavailable':
+            report.update(status='unavailable', error_type='TransportUnavailable',
+                error='Selected interpreter cannot complete local Windows named-pipe IPC; inspect ipc_preflight. '
+                      'No source copy, model load or daemon startup attempted.')
+            return report
         report['stage'] = 'snapshot_copy'
         save()
         omissions = []
@@ -129,7 +200,11 @@ def retrieve(config, output):
         (state/'global_settings.yml').write_text(json.dumps(settings), encoding='utf-8')
         report['embedding_settings'] = settings['embedding']
         report['model_revision'] = 'upstream default; not independently pinned'
-        command('init', ['init', '--force'])
+        if config.get('resume_checkpoint'):
+            report['checkpoint'] = restore_checkpoint(config['resume_checkpoint'], root,
+                manifest, report['version'], settings['embedding'])
+        else:
+            command('init', ['init', '--force'])
         project = root/'.cocoindex_code/settings.yml'
         # Same Python language scope as the historical Compass corpus; native
         # CocoIndex chunking remains independent of Compass symbol boundaries.

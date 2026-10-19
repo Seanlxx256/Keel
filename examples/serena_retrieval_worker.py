@@ -8,6 +8,8 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from examples.launch_serena import prepare
+from keel.experience import ExperienceStore
+from keel.tool_recovery import symbol_queries
 
 
 def query_identifiers(query):
@@ -40,40 +42,43 @@ def retrieve(config):
     candidates, observations, seen = [], [], set()
     try:
         tool = agent.get_tool(FindSymbolTool)
-        for term in query_identifiers(config['query']):
-            value = agent.execute_task(lambda: tool.apply(name_path_pattern=term, substring_matching=True,
+        def invoke(term, substring, timeout):
+            value = agent.execute_task(lambda: tool.apply(name_path_pattern=term, substring_matching=substring,
                                include_body=False, max_matches=100, max_answer_chars=100000),
-                               name='benchmark_symbol_query', timeout=30)
-            payload = json.loads(value)
-            observations.append({'term': term, 'response': payload})
-            if not isinstance(payload, list):
-                raise ValueError('Serena returned a non-list symbol response; inspect raw observation')
-            for row in payload:
-                # File/package entries are navigation containers, not code
-                # definitions; some LSPs report virtual EOF lines for them.
-                if row.get('kind') in ('File', 'Package', 'Module'):
-                    continue
-                path = row.get('relative_path')
-                location = row.get('body_location') or {}
-                start, end = location.get('start_line'), location.get('end_line')
-                if not isinstance(path, str) or type(start) is not int or type(end) is not int:
-                    continue
-                target = (repo/path).resolve(strict=True)
-                if not target.is_relative_to(repo):
-                    raise ValueError('Serena returned a path outside the snapshot')
-                # Language servers also return package-directory symbols. These
-                # have no file lines and cannot enter the line-budget metric.
-                if not target.is_file():
-                    continue
-                # Installed Serena body locations are 0-based line numbers.
-                item = {'path': target.relative_to(repo).as_posix(), 'start_line': start+1, 'end_line': end+1}
-                key = (item['path'], item['start_line'], item['end_line'])
-                if key not in seen:
-                    seen.add(key)
-                    candidates.append(item)
+                               name='benchmark_symbol_query', timeout=timeout)
+            return json.loads(value)
+        store = ExperienceStore(config['experience_store']) if config.get('experience_store') else None
+        measured = symbol_queries(invoke, query_identifiers(config['query']),
+            version=metadata.version('serena-agent'), store=store)
+        observations = measured['observations']
+        for row in measured['symbols']:
+            # File/package entries are navigation containers, not code
+            # definitions; some LSPs report virtual EOF lines for them.
+            if row.get('kind') in ('File', 'Package', 'Module'):
+                continue
+            path = row.get('relative_path')
+            location = row.get('body_location') or {}
+            start, end = location.get('start_line'), location.get('end_line')
+            if not isinstance(path, str) or type(start) is not int or type(end) is not int:
+                continue
+            target = (repo/path).resolve(strict=True)
+            if not target.is_relative_to(repo):
+                raise ValueError('Serena returned a path outside the snapshot')
+            # Language servers also return package-directory symbols. These
+            # have no file lines and cannot enter the line-budget metric.
+            if not target.is_file():
+                continue
+            # Installed Serena body locations are 0-based line numbers.
+            item = {'path': target.relative_to(repo).as_posix(), 'start_line': start+1, 'end_line': end+1}
+            key = (item['path'], item['start_line'], item['end_line'])
+            if key not in seen:
+                seen.add(key)
+                candidates.append(item)
         return {'status': 'ok', 'candidates': candidates[:100], 'observations': observations,
+            'recovery': measured['recovery'], 'tool_calls': measured['tool_calls'], 'max_tool_calls': 8,
+            'unqueried_terms': measured['unqueried_terms'],
             'version': metadata.version('serena-agent'),
-            'adapter': 'Issue-only deterministic dotted/camel/snake identifiers, max 8 symbol queries; not a full Serena Agent.'}
+            'adapter': 'Issue-only identifiers, max 8 calls including relative/root exact-query recovery; not a full Serena Agent.'}
     finally:
         # shutdown() sends SIGTERM to its own process in installed Serena 2.0.
         # Use its cleanup hook so the worker can persist the measured result.

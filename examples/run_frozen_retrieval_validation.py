@@ -90,7 +90,8 @@ def freeze(project, output, *, count=5, seed=20261018):
         Path(__file__).with_name('replay_retrieval_fusion.py'), project/'compass/retrieval.py',
         project/'compass/benchmarks.py', project/'compass/index.py', project/'compass/sweep.py',
         project/'compass/lexical.py', project/'compass/vectors.py', project/'compass/preparation.py',
-        project/'keel/experience.py', project/'compass/coverage.py', project/'compass/progress.py', Path(__file__).with_name('build_validation_index.py')]
+        project/'keel/experience.py', project/'keel/tool_recovery.py', project/'keel/ipc.py',
+        project/'compass/coverage.py', project/'compass/progress.py', Path(__file__).with_name('build_validation_index.py')]
     plan = {'kind': 'frozen new-task retrieval validation', 'tasks': tasks, 'sources': [swe_source, verified_source],
         'seed': seed, 'selection': selection, 'excluded_instance_ids': sorted(excluded),
         'exposure_receipts_sha256': receipts, 'implementation_sha256': {str(p.resolve()): digest(p) for p in implementations},
@@ -136,6 +137,7 @@ def resume_plan(project, parent, previous, output, *, coverage_policy=None):
                Path(__file__).with_name('reranker_worker.py'),
                Path(__file__).with_name('build_validation_index.py'),
                Path(__file__).with_name('cocoindex_retrieval_worker.py'), project/'keel/experience.py',
+               Path(__file__).with_name('serena_retrieval_worker.py'), project/'keel/tool_recovery.py', project/'keel/ipc.py',
                project/'compass/sweep.py', project/'compass/coverage.py', project/'compass/progress.py'}
     allowed.add(project/'compass/vectors.py')
     changes = {}
@@ -165,17 +167,38 @@ def resume_plan(project, parent, previous, output, *, coverage_policy=None):
     plan['implementation_sha256'][str(experience)] = digest(experience)
     coverage = project/'compass/coverage.py'
     plan['implementation_sha256'][str(coverage)] = digest(coverage)
+    for helper in ('tool_recovery.py', 'ipc.py'):
+        path = project/'keel'/helper
+        plan['implementation_sha256'][str(path)] = digest(path)
     helper = project/'compass/progress.py'
     plan['implementation_sha256'][str(helper)] = digest(helper)
     coco = Path(__file__).with_name('cocoindex_retrieval_worker.py')
     if str(coco) in changes:
-        # Reviewed migration: git mode handling changes formerly failing copies;
-        # successful old copies contained regular files only. Query, chunks,
-        # embeddings and scoring are unchanged for those successful results.
         previous_hash = changes[str(coco)]['before']
+        if previous_hash not in {'3af42ee7548752cd2a49ac3af2a75d52b7e44062b227ac0d5b526a6b80690590',
+                                 'a6da6287516933443e4dd939343066d49ec19dfbf4725b0666cbdf7a1e6ef147',
+                                 '939f440795ba1881e1f0ddfb2f70995ca2e0c980006ce56004d12d9d4614f698'}:
+            raise ValueError('CocoIndex migration requires explicit predecessor review')
         compatibility = plan.setdefault('compatible_worker_hashes', {})
         compatibility.setdefault(coco.name, []).append(previous_hash)
-        plan['worker_compatibility_scope'] = 'Reuse successful regular-file copies across explicit gitlink-copy repair; no ranking/model change'
+    # Reviewed exact predecessors: successful executions did not exercise the
+    # newly added failure branches. Do not authorize arbitrary future workers.
+    serena = Path(__file__).with_name('serena_retrieval_worker.py')
+    if str(serena) in changes:
+        before = changes[str(serena)]['before']
+        if before not in {'908581c1c1f84fe721cd606578158a17e50f1824a93ef177b7bfae14fd8dccc4',
+                          '0635b3ac111b4f9ecd446768f6157ba43cb7c08bce45c048bbcd64311ae1dcc2'}:
+            raise ValueError('Serena migration requires explicit review of the predecessor implementation')
+        plan.setdefault('compatible_worker_hashes', {}).setdefault(serena.name, []).append(before)
+        plan['resume_revision']['adapter_changes'] = {'serena_failure_recovery': {
+            'before': plan['policy'].get('serena_failure_recovery', 'stop on match-overflow'),
+            'after': 'relative/root exact-match on overflow; max 8 total calls'}}
+        plan['policy']['serena_failure_recovery'] = 'relative/root exact-match on overflow; max 8 total calls'
+    if str(serena) in changes or str(coco) in changes:
+        plan['worker_compatibility_scope'] = ('Reuse verified successful predecessor results only; '
+            'Serena normal query path unchanged, recovery applies only to previously failing match-overflow calls. '
+            'CocoIndex adds a transport-capability preflight; successful indexing/query behavior unchanged. '
+            'Failed engines are retried, never reclassified in place.')
     output.mkdir(parents=True, exist_ok=False)
     path = output/'plan.json'
     path.write_text(json.dumps(plan, indent=2), encoding='utf-8')

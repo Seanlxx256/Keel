@@ -148,3 +148,59 @@ failures and task data, and reuses unaffected complete baselines after checking
 eligibility. Never reinterpret a previous failed row in place or edit fixtures to
 make a benchmark pass. Checks: `tests/test_index_coverage.py`, `tests/test_sweep.py`.
 
+## External-tool recovery and transport capability (2026-10-19)
+
+Serena can raise `Matched N>max_matches=100 symbols.` for a broad identifier.
+`keel.tool_recovery.symbol_queries` uses the shared `RecoverySession`: substring
+query, relative exact query, then upstream absolute/root exact query if needed.
+All attempts share at most eight tool calls and a deadline. Only a typed
+match-overflow error permits narrowing; permission and unknown errors propagate.
+No source paths, task IDs, gold labels or raised result limits are involved.
+Successful normal queries follow the original path. Evidence records rejected
+queries, unqueried terms, failed recovery attempts and verified response shapes.
+Source range and final quality checks remain separate; a query recovery is not
+proof of a better answer. Actual cross-task experience is stored only when the
+registered action and response validator succeed.
+
+For a daemon timeout, do not infer a network/model failure from unrelated log
+warnings. `keel.ipc.probe_named_pipe` runs a small server/client exchange using
+the selected interpreter, with bounded subprocesses and cleanup. In this tool
+environment the server returns WinError 5 and the client WinError 2. This verifies
+a local transport permission boundary, not that all user terminals are broken.
+`examples/cocoindex_retrieval_worker.py` now checks this before copying sources
+or loading models, records `TransportUnavailable`, and does not attempt privilege
+changes. Cached measurements remain usable after identity checks. A fresh user
+terminal may support the transport; the same entry point must probe it again.
+
+Worker changes are recorded in derived plans. Only explicitly reviewed predecessor
+hashes permit reuse of successful unaffected measurements. Failed attempts are
+retained and retried separately. Checks: `tests/test_tool_recovery.py` and the
+CocoIndex transport-preflight regression in `tests/test_cocoindex_retrieval.py`.
+
+## Native index deadlines and checkpoint continuation
+
+Run-v10 passed transport checks and loaded its model, but reached the 900-second
+worker deadline during indexing. Its native database was about 50 MB. The later
+BrokenPipeError followed client termination; it is not evidence of the initial
+cause. Rich transient progress is not useful redirected evidence. The CocoIndex
+adapter now uses the upstream streaming callback and flushes counters to
+index.stdout.log, with a ten-second heartbeat and the original hard deadline.
+
+A retry may clone a stopped native checkpoint only after checking the package,
+embedding settings, exact source manifest, archived source bytes and corpus
+settings. The original run stays intact. Upstream incremental indexing validates
+the cloned state at its new location; vector reuse is not independently measured
+and successful continuation still requires a completed index and valid search.
+This path has unit coverage; full Django continuation needs a terminal that passes
+named-pipe preflight. Do not claim the timeout resolved before that run succeeds.
+
+Run-v11 verified native continuation: 2,401 unchanged files, 330 additions,
+zero processing errors, successful index response. Search then failed because
+the new progress adapter indexed `.` while the CLI used a resolved absolute root.
+The upstream client only translates path mappings; its daemon registry keys are
+literal project strings. Both names attempted to open the same native database.
+Always pass the resolved absolute project root across API/CLI boundaries. The
+adapter now does so, with a canonical-path regression check. Search-stage failures
+can clone the stopped checkpoint too. Full search success remains unverified
+until the next native run; preserve the failed run and do not score it as zero.
+
