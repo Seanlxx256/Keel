@@ -229,3 +229,33 @@ artifact hashes before reusing completed tasks and uses parent-bounded task
 processes. Network-bound snapshot failures are infrastructure outcomes, not
 retrieval misses.
 
+## Bounded continuation across index attempts
+
+`examples/continue_index_validation.py` supervises repeated invocations of the
+unchanged frozen structural runner. It retries only baseline index/recovery
+wall-clock exhaustion, never coverage exclusions or unknown errors. A subsequent
+round requires increased checkpoint vector counts or a newly completed task.
+The supervisor has a round cap, total deadline, exclusive supervisor lock,
+heartbeat log and per-round before/after observations. Deadlines include waiting
+for a current run. On total deadline it stops its launched process tree; it does
+not terminate a pre-existing run it is merely waiting for. Prior runner receipts
+and failed attempts remain intact. Additional attempts are not first-attempt
+benchmark scores. No frozen task, ranker setting or per-attempt budget changes.
+
+Structural continuation revealed another corpus mismatch after Astropy 12907's
+index completed: its reference ranges include `pyproject.toml`, while this
+experiment indexes Python only. Xarray 3993 similarly includes `.rst` files.
+For future protocols, run the existing reference/corpus eligibility check before
+expensive embedding work, in the evaluation layer only. Do not expose reference
+paths to retrievers, silently remove those labels, or retrofit corpus expansion
+into an already frozen scored experiment. Retain the original exclusions.
+
+This prevention is now implemented by `compass.evaluation_scope.reference_scope`
+and gated in future `run_structural_validation.py` plans before embedding. It
+reuses the indexer's source inventory and size policy and returns a recorded
+out_of_scope result without passing reference paths to adapters. Unit checks
+include an actual runner gate asserting that embedding/native tools are not
+called. Scope eligibility is necessary, not sufficient for parse completeness.
+The original v1 run is closed and its runner archived; new gate implementation
+requires a new frozen plan, not silent migration of old scored results.
+

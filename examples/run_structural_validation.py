@@ -9,6 +9,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from compass.benchmarks import load_swe_instance
 from compass.coverage import index_coverage
+from compass.evaluation_scope import reference_scope, POLICY as SCOPE_POLICY
 from compass.index import RepositoryIndex
 from compass.preparation import prepare_snapshot
 from compass.progress import atomic_json, ProgressLog
@@ -27,8 +28,9 @@ def freeze(project, output):
     plan['policy'].update(arms=['code-aware', 'same-pool-structure', 'aider-native-tags'],
         index_coverage='valid-python', structural=POLICY, index_timeout=900,
         task_timeout=1500, aider_timeout=300, aider_version='0.86.2',
+        scope_preflight=SCOPE_POLICY,
         structural_pool='exact saved original Compass T1 candidates; no acquisition change')
-    for path in [Path(__file__), project/'compass/structural.py',
+    for path in [Path(__file__), project/'compass/structural.py',project/'compass/evaluation_scope.py',
                  Path(__file__).with_name('aider_retrieval_worker.py')]:
         plan['implementation_sha256'][str(path.resolve())] = digest(path)
     plan['limitations'] += ' Structural weights fixed before new task scoring; no tuning or replacement. '
@@ -58,6 +60,14 @@ def task_run(project, plan_path, output, number):
             raise ValueError('Existing task data differs')
         dataset.write_bytes(Path(task['dataset']).read_bytes())
         instance = load_swe_instance(dataset,task['instance_id'],repo)
+        if policy.get('scope_preflight') == SCOPE_POLICY:
+            report['stage'] = 'scope_preflight'
+            report['scope_preflight'] = reference_scope(instance)
+            atomic_json(result_path,report)
+            if not report['scope_preflight']['eligible']:
+                report.update(status='out_of_scope',error='Reference files outside declared index scope; no embedding attempted')
+                atomic_json(result_path,report)
+                return report
         report['stage'] = 'baseline'
         atomic_json(result_path,report)
         if not completed_baseline(directory):
