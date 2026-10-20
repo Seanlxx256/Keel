@@ -388,3 +388,13 @@ the SDK, and report bounded leaf exception causes. Optional `search_text` stays
 absent from default discovery. Memory-stream SDK checks do not replace the
 Linux CI subprocess check; require the real CI rerun before claiming it passed.
 
+## Canonical adapter boundaries
+
+`parse_search` resolved result paths but compared them with an unresolved
+repository root. Canonicalize both before containment and relative-path checks;
+Windows temporary aliases/short names or relative roots must not create false
+escapes. Keep traversal, existence and line-range validation strict. Report
+which check failed instead of collapsing all failures into `invalid range`.
+A relative-root CRLF fixture reproduces the mismatch independently of platform;
+the exact Windows CI temporary-path alias remains unverified until rerun.
+

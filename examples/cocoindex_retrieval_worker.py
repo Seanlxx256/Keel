@@ -57,6 +57,7 @@ def copy_snapshot(repo, destination, omissions=None):
 
 
 def parse_search(payload, repo):
+    repo = Path(repo).resolve(strict=True)
     if not isinstance(payload, dict) or payload.get('success') is not True:
         raise ValueError('CocoIndex search did not report success')
     if not isinstance(payload.get('results'), list):
@@ -67,9 +68,13 @@ def parse_search(payload, repo):
         if not isinstance(path, str) or type(start) is not int or type(end) is not int:
             raise ValueError('CocoIndex search returned an invalid range schema')
         target = (repo/path).resolve(strict=True)
-        if (not target.is_relative_to(repo) or not target.is_file() or
-                not 1 <= start <= end <= len(target.read_bytes().splitlines())):
-            raise ValueError('CocoIndex search returned an invalid source range')
+        if not target.is_relative_to(repo):
+            raise ValueError('CocoIndex search returned a path outside the canonical repository')
+        if not target.is_file():
+            raise ValueError('CocoIndex search returned a non-file source path')
+        lines = len(target.read_bytes().splitlines())
+        if not 1 <= start <= end <= lines:
+            raise ValueError(f'CocoIndex search returned an invalid source range: {start}..{end}, file lines={lines}')
         result.append({'path': target.relative_to(repo).as_posix(),
                        'start_line': start, 'end_line': end})
     return result

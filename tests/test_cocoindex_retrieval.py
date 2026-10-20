@@ -99,6 +99,16 @@ class CocoIndexRetrievalTests(unittest.TestCase):
                 dict(file_path='a.py', start_line=1, end_line=1)]}, root)
             self.assertEqual([r['start_line'] for r in result], [2, 1])
 
+    def test_parse_canonicalizes_relative_repository_root(self):
+        import os
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary:
+            root = Path(temporary)
+            (root/'a.py').write_bytes(b'one\r\ntwo\r\nthree\r\n')
+            relative = Path(os.path.relpath(root, Path.cwd()))
+            result = parse_search({'success': True, 'results': [
+                dict(file_path='a.py', start_line=2, end_line=3)]}, relative)
+            self.assertEqual(result, [dict(path='a.py', start_line=2, end_line=3)])
+
     def test_failed_response_is_not_an_empty_success(self):
         with self.assertRaises(ValueError):
             parse_search({'success': False, 'results': []}, Path.cwd())
