@@ -378,3 +378,13 @@ three-attempt workload stopped after one attempt because this causal correlation
 was missing; retain that outcome. Tests cover matching and mismatched suites,
 standalone signature failures and mixed permanent/transient errors.
 
+## MCP validation contract drift
+
+The SDK subprocess validator retained a four-tool discovery assertion after
+`get_symbols_overview` became a default fifth tool. This mismatch can be wrapped
+in an SDK TaskGroup ExceptionGroup, hiding the useful cause. Update explicit
+validation expectations when adding default tools, exercise the new tool via
+the SDK, and report bounded leaf exception causes. Optional `search_text` stays
+absent from default discovery. Memory-stream SDK checks do not replace the
+Linux CI subprocess check; require the real CI rerun before claiming it passed.
+

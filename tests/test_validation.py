@@ -6,6 +6,16 @@ from compass.validation import validate_components
 
 
 class ValidationTests(unittest.TestCase):
+    def test_nested_sdk_failure_reports_the_leaf_contract_error(self):
+        error = ExceptionGroup('TaskGroup', [ExceptionGroup('inner', [ValueError('SDK tool discovery differs')])])
+        def fail(root):
+            raise error
+        with patch('compass.validation.util.find_spec', return_value=object()), \
+             patch('compass.validation.metadata.version', return_value='test'), \
+             patch.dict('compass.validation.PROBES', {'mcp_sdk': fail}):
+            report = validate_components(['mcp_sdk'])
+        self.assertEqual(report['checks'][0]['causes'], ['ValueError: SDK tool discovery differs'])
+        self.assertFalse(report['all_passed'])
     def test_missing_dependencies_are_unavailable_not_passed(self):
         with patch("compass.validation.util.find_spec", return_value=None):
             report = validate_components()

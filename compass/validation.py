@@ -67,8 +67,13 @@ async def _sdk_session(root):
             initialized = await session.initialize()
             tools = await session.list_tools()
             names = {tool.name for tool in tools.tools}
-            if names != {"find_symbol", "search_code", "get_context", "impact_analysis"}:
-                raise ValueError("SDK tool discovery differs from the service contract")
+            expected = {"find_symbol", "search_code", "get_context", "impact_analysis", "get_symbols_overview"}
+            if names != expected:
+                raise ValueError(f"SDK tool discovery differs: missing={sorted(expected-names)}, unexpected={sorted(names-expected)}")
+            overview = await session.call_tool("get_symbols_overview", {"file": "api.py"})
+            outline = overview.structuredContent
+            if overview.isError or not outline or not any(row.get('qualname') == 'fetch' for row in outline.get('results', [])):
+                raise ValueError("SDK overview did not return the indexed fetch symbol")
             result = await session.call_tool("find_symbol", {"name": "fetch"})
             data = result.structuredContent
             if result.isError or not data or not data["results"]:
@@ -84,7 +89,7 @@ async def _sdk_session(root):
                 raise ValueError("Missing chat model should produce a tool error")
             await session.send_ping()
             return {"protocol_version": initialized.protocolVersion, "tools": sorted(names),
-                    "structured_results": True, "auto_update": True, "tool_errors": True}
+                    "structured_results": True, "auto_update": True, "tool_errors": True, "symbol_overview": True}
 
 
 def probe_mcp_sdk(root):
@@ -94,6 +99,20 @@ def probe_mcp_sdk(root):
 
 
 PROBES = {"tree_sitter": probe_tree_sitter, "lancedb": probe_lancedb, "mcp_sdk": probe_mcp_sdk}
+
+
+def exception_causes(error):
+    """Expose bounded leaf causes instead of losing them behind TaskGroup wrappers."""
+    causes = []
+    pending = [error]
+    while pending and len(causes) < 8:
+        current = pending.pop()
+        children = getattr(current, 'exceptions', None)
+        if children:
+            pending.extend(reversed(children))
+        else:
+            causes.append(f'{type(current).__name__}: {str(current)[:1000]}')
+    return causes
 
 
 def validate_components(components=None):
@@ -120,7 +139,7 @@ def validate_components(components=None):
                 with tempfile.TemporaryDirectory(prefix=f"compass-{name}-") as directory:
                     record.update(status="passed", evidence=PROBES[name](Path(directory)))
             except Exception as error:
-                record.update(status="failed", error=f"{type(error).__name__}: {error}")
+                record.update(status="failed", error=f"{type(error).__name__}: {error}", causes=exception_causes(error))
         record["seconds"] = time.perf_counter() - started
         checks.append(record)
     return {"python": platform.python_version(), "platform": platform.platform(), "checks": checks,
