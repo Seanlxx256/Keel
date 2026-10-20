@@ -398,3 +398,13 @@ which check failed instead of collapsing all failures into `invalid range`.
 A relative-root CRLF fixture reproduces the mismatch independently of platform;
 the exact Windows CI temporary-path alias remains unverified until rerun.
 
+## Git encoding-filter test fixtures
+
+An encoding test expected a diff immediately after adding working-tree-encoding
+attributes without changing file bytes/stat. Windows CI returned no diff while
+local Git reported one. Make the temporary fixture's newline policy explicit
+and invalidate the target mtime before asserting filter-induced differences;
+assert raw bytes still equal the committed blob. Keep the subsequent real-edit
+rejection. This changes the fixture, not snapshot acceptance rules. Verify the
+Windows runner again; local passes alone do not prove the CI cause resolved.
+

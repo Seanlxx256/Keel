@@ -2,6 +2,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+import os
 from compass.benchmarks import check_snapshot
 
 
@@ -14,6 +15,8 @@ class SnapshotEncodingTests(unittest.TestCase):
                     '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid',
                     '-c', 'commit.gpgsign=false', *args], check=True, capture_output=True, **kwargs)
             git('init', '-q')
+            git('config', 'core.autocrlf', 'false')
+            git('config', 'core.safecrlf', 'false')
             (root/'wrong.inc').write_bytes(b'latin-1: \xdf\xfc\n')
             git('add', 'wrong.inc')
             git('commit', '-qm', 'raw encoding fixture')
@@ -21,6 +24,13 @@ class SnapshotEncodingTests(unittest.TestCase):
             git('add', '.gitattributes')
             git('commit', '-qm', 'upstream encoding attribute')
             head = git('rev-parse', 'HEAD').stdout.decode().strip()
+            # Adding attributes does not change the file's stat tuple. Some Git
+            # builds trust the cached tuple and do not re-run encoding filters.
+            # Invalidate it explicitly, without sleeping or changing raw bytes.
+            path = root/'wrong.inc'
+            before = path.stat()
+            os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns+2_000_000_000))
+            self.assertEqual(path.read_bytes(), git('show', head+':wrong.inc').stdout)
             self.assertNotEqual(git('diff', '--name-only').stdout, b'')
             check_snapshot(root, head)
             (root/'wrong.inc').write_bytes(b'changed: \xdf\xfc\n')
