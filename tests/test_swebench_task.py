@@ -13,6 +13,71 @@ from keel.runtime import validate
 
 
 class SwebenchTaskTests(unittest.TestCase):
+    def test_missing_or_invalid_credentials_fail_before_any_experiment_work(self):
+        import os
+        from examples.run_swebench_task import execute
+        from keel.core import ModelError
+        config = {'provider': 'openai-compatible', 'name': 'fixture',
+                  'base_url': 'https://example.invalid/v1', 'api_key_env': 'KEEL_TEST_PREFLIGHT_KEY'}
+        for value in (None, 'invalid key'):
+            with self.subTest(missing=value is None), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                with patch.dict(os.environ, {}, clear=True):
+                    if value is not None:
+                        os.environ['KEEL_TEST_PREFLIGHT_KEY'] = value
+                    with patch('examples.run_swebench_task.check_reference') as reference, \
+                         patch('examples.run_swebench_task.prepare_snapshot') as snapshot, \
+                         patch('examples.run_swebench_task.subprocess.run') as process, \
+                         patch('examples.run_swebench_task.run') as agent, \
+                         patch('examples.run_swebench_task.grade') as grade:
+                        with self.assertRaises(ModelError) as caught:
+                            execute(root, root/'task', root/'reference', config, 'python', root/'trial')
+                        self.assertNotIn('invalid key', str(caught.exception))
+                        for operation in (reference, snapshot, process, agent, grade):
+                            operation.assert_not_called()
+                self.assertFalse((root/'trial').exists())
+
+    def policy_reference(self,root,row):
+        reference=root/'reference';reference.mkdir()
+        (reference/'grader-input.json').write_text(json.dumps([row]))
+        result={'status':'graded','official_resolved':True,'runtime_status':'reference_only',
+                'harness_version':'3.0.0','grader_input_sha256':file_hash(reference/'grader-input.json')}
+        for key,filename,value in [('network_policy','network-policy.json','no_pipeline'),
+                                    ('plugin_policy','plugin-policy.json','remove_unused_vcs_versioning')]:
+            (reference/filename).write_text(json.dumps({'policy':value,'version':1}))
+            result[key]=value;result[key+'_sha256']=file_hash(reference/filename)
+        (reference/'grading.json').write_text(json.dumps(result))
+        return reference
+
+    def test_recovered_policies_propagate_through_agent_verification_and_final_grade(self):
+        from examples.run_swebench_task import execute
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);row=self.task(root);reference=self.policy_reference(root,row)
+            repo=root/'repo';repo.mkdir()
+            with patch('examples.run_swebench_task.subprocess.run',return_value=SimpleNamespace(stdout='3.0.0')), \
+                 patch('examples.run_swebench_task.prepare_snapshot',return_value=repo), \
+                 patch('examples.run_swebench_task.run',return_value={'status':'passed','budget':{}}) as agent, \
+                 patch('examples.run_swebench_task.export_prediction'), \
+                 patch('examples.run_swebench_task.grade',return_value={'status':'graded','official_resolved':True}) as grade:
+                report=execute(root,root/'task',reference,{'name':'test'},'python',root/'trial')
+            acceptance=agent.call_args.args[0]['acceptance'][0]
+            self.assertIn('--network-policy',acceptance);self.assertIn('--plugin-policy',acceptance)
+            self.assertEqual(grade.call_args.kwargs['network_policy'],'no_pipeline')
+            self.assertEqual(grade.call_args.kwargs['plugin_policy'],'remove_unused_vcs_versioning')
+            self.assertTrue(report['official_resolved'])
+            (reference/'plugin-policy.json').write_text('{}')
+            with self.assertRaisesRegex(ValueError,'plugin_policy changed'):
+                check_reference(root/'task',reference)
+
+    def test_intermediate_verifier_passes_both_policies_to_harness(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);self.task(root)
+            with patch('examples.swebench_verify_workspace.workspace_patch',return_value='source diff'), \
+                 patch('examples.swebench_verify_workspace.grade',return_value={'status':'graded','official_resolved':True,'run_id':'run'}) as grade:
+                verify(root,root/'task',root/'verification','python',network_policy='no_pipeline',plugin_policy='remove_unused_vcs_versioning')
+            self.assertEqual(grade.call_args.kwargs['plugin_policy'],'remove_unused_vcs_versioning')
+            self.assertEqual(grade.call_args.kwargs['network_policy'],'no_pipeline')
     def test_reconstructed_overlay_is_bound_to_reference_and_propagated(self):
         from tests.test_harness_environment import plan
         with tempfile.TemporaryDirectory() as temp:

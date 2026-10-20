@@ -22,6 +22,9 @@ def run_harness(command, *, cwd, log_path, timeout, heartbeat=10):
     environment = {**os.environ, 'PYTHONUNBUFFERED': '1', 'PYTHONIOENCODING': 'utf-8', 'PYTHONUTF8': '1'}
     environment.pop('KEEL_HARNESS_ENV_OVERLAY', None)
     environment.pop('KEEL_HARNESS_NETWORK_POLICY', None)
+    environment.pop('KEEL_HARNESS_PLUGIN_POLICY', None)
+    if (cwd/'plugin-policy.json').is_file():
+        environment['KEEL_HARNESS_PLUGIN_POLICY'] = json.loads((cwd/'plugin-policy.json').read_text(encoding='utf-8'))['policy']
     if (cwd/'network-policy.json').is_file():
         environment['KEEL_HARNESS_NETWORK_POLICY'] = json.loads((cwd/'network-policy.json').read_text(encoding='utf-8'))['policy']
     if (cwd/'environment-overlay.json').is_file():
@@ -67,17 +70,21 @@ def run_harness(command, *, cwd, log_path, timeout, heartbeat=10):
                                                                'returncode': process.returncode}), encoding='utf-8')
 
 
-def grade(task_dir, export_dir, output, *, python=sys.executable, timeout=1800, environment_overlay=None, network_policy=None):
+def grade(task_dir, export_dir, output, *, python=sys.executable, timeout=1800, environment_overlay=None, network_policy=None, plugin_policy=None):
     if type(timeout) not in (int, float) or not 0 < timeout <= 86400:
         raise ValueError('Harness timeout must be positive and at most 86400 seconds')
     if network_policy not in (None, 'no_pipeline') or (network_policy and environment_overlay):
         raise ValueError('Use one registered network policy without stacking packaging overlays')
+    if plugin_policy not in (None,'remove_unused_vcs_versioning') or (plugin_policy and environment_overlay):
+        raise ValueError('Use registered plugin recovery without packaging overlay stacking')
     task = verify_task(task_dir)
     receipt = json.loads((export_dir/'export-receipt.json').read_text(encoding='utf-8'))
     if (receipt['predictions_sha256'] != file_hash(export_dir/'predictions.jsonl') or
             receipt['task_receipt_sha256'] != file_hash(task_dir/'task-receipt.json')):
         raise ValueError('Export inputs changed')
     output.mkdir(parents=True, exist_ok=False)
+    if plugin_policy:
+        (output/'plugin-policy.json').write_text(json.dumps({'policy':plugin_policy,'version':1}),encoding='utf-8')
     if network_policy:
         (output/'network-policy.json').write_text(json.dumps({'policy':network_policy,'version':1}),encoding='utf-8')
     if environment_overlay is not None:
@@ -89,7 +96,7 @@ def grade(task_dir, export_dir, output, *, python=sys.executable, timeout=1800, 
                '--dataset_name', str((output/'grader-input.json').resolve()),
                '--predictions_path', str((export_dir/'predictions.jsonl').resolve()),
                '--instance_ids', task['instance_id'], '--max_workers', '1', '--run_id', run_id]
-    if environment_overlay is not None or network_policy:
+    if environment_overlay is not None or network_policy or plugin_policy:
         command.extend(['--cache_level', 'instance'])
     result = {'status': 'running', 'official_resolved': None, 'runtime_status': receipt['runtime_status'],
               'command': command, 'run_id': run_id, 'benchmark_ready': False, 'timeout_seconds': timeout,
@@ -101,6 +108,10 @@ def grade(task_dir, export_dir, output, *, python=sys.executable, timeout=1800, 
         result['network_policy'] = network_policy
         result['network_policy_sha256'] = file_hash(output/'network-policy.json')
         result['environment_scope'] = 'Explicit APT transport adaptation; separate image tag, unchanged source/tests/packages; not original-condition score'
+    if plugin_policy:
+        result['plugin_policy']=plugin_policy
+        result['plugin_policy_sha256']=file_hash(output/'plugin-policy.json')
+        result['environment_scope']='Explicit SCM plugin recovery and any declared network adaptation; unchanged source/tests; reconstructed environment, not original-condition score'
     try:
         result['harness_version'] = (importlib.metadata.version('swebench') if python == sys.executable else
             subprocess.run([python, '-c', 'import importlib.metadata; print(importlib.metadata.version("swebench"))'],
@@ -133,9 +144,52 @@ def grade(task_dir, export_dir, output, *, python=sys.executable, timeout=1800, 
     return result
 
 
+def grade_snapshot(task_dir, repo, reference_dir, output, *, python, timeout):
+    """Salvage grading only; never pretend to restore interrupted Agent state."""
+    from examples.run_swebench_task import check_reference,reference_policies
+    from examples.swebench_verify_workspace import workspace_patch
+    import hashlib
+    overlay=check_reference(task_dir,reference_dir)
+    policies=reference_policies(reference_dir)
+    task=verify_task(task_dir)
+    patch=workspace_patch(repo,task)
+    names=subprocess.run(['git','-c','safe.directory='+repo.as_posix(),'-c','core.autocrlf=false',
+        '-C',str(repo),'diff','--name-only','HEAD','--'],capture_output=True,text=True,check=True,timeout=30).stdout.splitlines()
+    if not patch.strip() or not names:
+        raise ValueError('Saved workspace has no source patch')
+    for name in names:
+        path=repo/name
+        if (not name.endswith('.py') or any(part in ('tests','test','testing','testdata') for part in Path(name).parts)
+                or Path(name).name.startswith('test_') or Path(name).name=='conftest.py'
+                or path.is_symlink() or not path.resolve().is_relative_to(repo.resolve()) or not path.is_file()):
+            raise ValueError('Snapshot grading only admits existing unprotected Python source changes: '+name)
+    hashes={name:file_hash(repo/name) for name in names}
+    output.mkdir(parents=True,exist_ok=False)
+    export=output/'snapshot-export';export.mkdir()
+    (export/'predictions.jsonl').write_text(json.dumps({'instance_id':task['instance_id'],
+        'model_name_or_path':'keel-saved-snapshot','model_patch':patch})+'\n',encoding='utf-8')
+    (export/'export-receipt.json').write_text(json.dumps({'instance_id':task['instance_id'],
+        'runtime_status':'saved_snapshot_only','predictions_sha256':file_hash(export/'predictions.jsonl'),
+        'task_receipt_sha256':file_hash(task_dir/'task-receipt.json')}),encoding='utf-8')
+    report={'status':'grading','source_files':hashes,'patch_sha256':hashlib.sha256(patch.encode()).hexdigest(),
+        'model_calls':0,'benchmark_ready':False,'reference_grade_sha256':file_hash(reference_dir/'grading.json'),
+        'scope':'Independent grading of saved workspace, not resumed Agent execution, runtime pass, or a replacement first-attempt score'}
+    try:
+        kwargs={'environment_overlay':overlay} if overlay is not None else {}
+        result=grade(task_dir,export,output/'grading',python=python,timeout=timeout,**policies,**kwargs)
+        if any(file_hash(repo/name)!=value for name,value in hashes.items()):
+            raise ValueError('Saved workspace changed during grading')
+        report.update(status=result['status'],official_resolved=result['official_resolved'],grading=result)
+    finally:
+        (output/'snapshot-grade.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
+    return report
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=('prepare', 'export', 'reference', 'grade'))
+    parser.add_argument('action', choices=('prepare', 'export', 'reference', 'grade','recover-reference','grade-snapshot'))
+    parser.add_argument('--reference-grade',type=Path)
+    parser.add_argument('--failed-grade',type=Path)
     parser.add_argument('--dataset', type=Path)
     parser.add_argument('--instance-id')
     parser.add_argument('--task', type=Path)
@@ -160,6 +214,23 @@ def main():
         if not args.task:
             parser.error('reference requires task')
         result = reference_prediction(args.task, args.output)
+    elif args.action=='grade-snapshot':
+        if not args.task or not args.run or not args.reference_grade:
+            parser.error('grade-snapshot requires task, run (saved repo), reference-grade')
+        if not args.execute:
+            result={'status':'plan_only','next':'Grade saved source without restarting Agent inference'}
+        else:
+            result=grade_snapshot(args.task.resolve(),args.run.resolve(),args.reference_grade.resolve(),
+                                  args.output.resolve(),python=sys.executable,timeout=args.timeout)
+    elif args.action=='recover-reference':
+        if not args.task or not args.export_dir or not args.failed_grade:
+            parser.error('recover-reference requires task, export and failed-grade')
+        if not args.execute:
+            result={'status':'plan_only','next':'Inspect collision, isolated removal and independent reference grading'}
+        else:
+            from keel.reference_recovery import recover_reference
+            result=recover_reference(args.task.resolve(),args.export_dir.resolve(),args.failed_grade.resolve(),
+                args.output.resolve(),python=sys.executable,timeout=args.timeout,grader=grade)
     else:
         if not args.task or not args.export_dir:
             parser.error('grade requires task and export')
@@ -168,7 +239,7 @@ def main():
         else:
             result = grade(args.task.resolve(), args.export_dir.resolve(), args.output.resolve(), timeout=args.timeout, network_policy=args.network_policy)
     print(json.dumps(result, indent=2))
-    return 1 if result.get('status') == 'grading_error' else 0
+    return 1 if result.get('status') in ('grading_error','environment_unresolved') else 0
 
 
 if __name__ == '__main__':

@@ -44,7 +44,53 @@ print(json.dumps(result))
 '''
 
 
-def inspect_image(directory, modules, distributions, *, timeout=45):
+PLUGIN_PROGRAM = r'''
+import importlib.metadata as md,json,sys,warnings,traceback
+def canonical(name): return name.lower().replace('_','-').replace('.','-')
+group='setuptools_scm.version_scheme'
+scheme='release-branch-semver'
+providers=[]
+installed=list(md.distributions())
+for dist in installed:
+ for entry in dist.entry_points:
+  if entry.group==group and entry.name==scheme:
+   providers.append((dist,entry))
+result={'group':group,'scheme':scheme,'providers':[], 'dependent_distributions':{}}
+for dist,entry in providers:
+ name=dist.metadata.get('Name','')
+ row={'distribution':name,'version':dist.version,'entry_point':entry.value}
+ # Report possible dependents conservatively; no uninstall is authorized here.
+ result['dependent_distributions'][name]=[
+  {'name':other.metadata.get('Name',''),'requirement':requirement}
+  for other in installed for requirement in (other.requires or [])
+  if canonical(requirement.split(';')[0].split('[')[0].split(' ')[0].split('>')[0].split('<')[0].split('=')[0].split('!')[0].strip())==canonical(name)][:40]
+ result['providers'].append(row)
+try:
+ import setuptools_scm
+ from setuptools_scm.git import parse
+ with warnings.catch_warnings():
+  warnings.simplefilter('error',DeprecationWarning)
+  try:
+   result['baseline']={'passed':True,'value':setuptools_scm.get_version(root='/testbed',version_scheme=scheme)}
+  except Exception as error:
+   result['baseline']={'passed':False,'error_type':type(error).__name__,'error':str(error)[:1500]}
+ version=parse('/testbed')
+ for row,(dist,entry) in zip(result['providers'],providers):
+  try:
+   with warnings.catch_warnings():
+    warnings.simplefilter('error',DeprecationWarning)
+    value=entry.load()(version)
+   row['isolated_call']={'passed':True,'value':str(value)}
+  except Exception as error:
+   row['isolated_call']={'passed':False,'error_type':type(error).__name__,'error':str(error)[:1500]}
+except Exception as error:
+ result['probe_error']={'error_type':type(error).__name__,'error':str(error)[:1500]}
+result['scope']='Read-only provider calls with identical SCM input and DeprecationWarning-as-error; not package removal or reference recovery.'
+print(json.dumps(result))
+'''
+
+
+def inspect_image(directory, modules, distributions, *, timeout=45, plugin_probe=False):
     validate_inspection(modules, distributions)
     images = sorted((directory/'logs/build_images/instances').glob('*/Dockerfile'))
     if len(images) != 1:
@@ -55,7 +101,7 @@ def inspect_image(directory, modules, distributions, *, timeout=45):
     command = ['docker', 'run', '--rm', '--name', container, '--pull', 'never', '--network', 'none', '--read-only', '--cap-drop', 'ALL',
                '--security-opt', 'no-new-privileges', '--pids-limit', '128', '--memory', '1g',
                '--tmpfs', '/tmp:rw,size=64m', '--workdir', '/testbed',
-               '--entrypoint', '/opt/miniconda3/envs/testbed/bin/python', image, '-B', '-c', PROGRAM,
+               '--entrypoint', '/opt/miniconda3/envs/testbed/bin/python', image, '-B', '-c', PLUGIN_PROGRAM if plugin_probe else PROGRAM,
                json.dumps({'modules': modules, 'distributions': distributions})]
     try:
         result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=timeout)
@@ -79,6 +125,9 @@ def inspect_image(directory, modules, distributions, *, timeout=45):
             subprocess.run(['docker','rm','-f',container],capture_output=True,timeout=10)
         except (OSError,subprocess.TimeoutExpired):
             pass
-    return {'image':image, 'restored_from_archived_recipe':restored, 'returncode':result.returncode, 'stdout':result.stdout[:14000],
-            'stderr':result.stderr[-2000:], 'omitted_stdout_characters':max(0,len(result.stdout)-14000),
+    if len(result.stdout)>262144:
+        return {'image':image,'returncode':1,'error':'Inspection output exceeds 256 KiB; narrow the inspection',
+                'stdout':'','omitted_stdout_characters':len(result.stdout)}
+    return {'image':image, 'restored_from_archived_recipe':restored, 'returncode':result.returncode, 'stdout':result.stdout,
+            'stderr':result.stderr[-2000:], 'omitted_stdout_characters':0,
             'scope':'Fixed diagnostics in network-disabled read-only container; no host mount or credentials'}

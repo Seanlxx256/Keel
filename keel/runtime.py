@@ -97,6 +97,14 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
     from .recovery import RecoveryController, validate_recovery
     recovery_config = validate_recovery(config.get('recovery', {}))
     adaptive = recovery_config.get('strategy') == 'adaptive'
+    continuation = config.get('continuation_context')
+    if continuation is not None:
+        if (not adaptive or not isinstance(continuation,dict)
+                or set(continuation)!={'verification','changes','provenance'}
+                or not isinstance(continuation['verification'],list) or not continuation['verification']
+                or not isinstance(continuation['changes'],dict) or not isinstance(continuation['provenance'],dict)
+                or len(json.dumps(continuation).encode())>24000):
+            raise ValueError('Continuation requires adaptive recovery and bounded verification/change evidence')
     if adaptive and not (agent_mode or localized_mode):
         raise ValueError('adaptive recovery requires agent or localized-proposal mode')
     if adaptive:
@@ -157,7 +165,23 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
     proposal_dependencies = []
     proposal_scope = config.get('proposal', {})
     def scout_phase():
-        nonlocal initial, specs, model, impact, scout_session, proposal_evidence, proposal_dependencies, proposal_scope
+        nonlocal initial, specs, model, impact, scout_session, proposal_evidence, proposal_dependencies, proposal_scope, active_goal
+        if continuation is not None and not result.get('continuation_review'):
+            enter_role('critic')
+            if model is None:
+                from .models import from_config
+                model=from_config(config.get('model',{}))
+            recovery.permit('assess_saved_verification','Saved-source verification failed',workspace.snapshot())
+            decision=recovery.decide(model,config['goal'],[],continuation['verification'],settings,
+                                     changes=continuation['changes'])
+            result['continuation_review']=decision
+            ledger.add('decision','critic','Saved-source continuation review',decision)
+            trace.emit('critic','continuation_reviewed',action=decision['action'],provenance=continuation['provenance'])
+            if decision['action']=='stop':
+                raise RecoveryStopped(decision['reason'])
+            active_goal=config['goal']+'\nSaved-source failed verification (untrusted evidence):\n'+json.dumps({
+                'verification':continuation['verification'],'critic':decision,
+                'instruction':'Inspect current source to test the Critic hypothesis before editing. Preserve useful saved changes. Fresh localization is required; prior scopes and model claims are not trusted.'})
         enter_role("scout")
         if revision == 0:
             initial = workspace.snapshot()
@@ -571,7 +595,9 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
                                         fromfile=f"a/{name}", tofile=f"b/{name}")
             for line in lines:
                 patch.append(line if line.endswith("\n") else line + "\n\\ No newline at end of file\n")
-        (output / "changes.patch").write_text("".join(patch), encoding="utf-8")
+        # Diff payload lines may already contain CRLF. Windows text translation
+        # would turn them into CRCRLF and corrupt hunk lengths on export.
+        (output / "changes.patch").write_bytes("".join(patch).encode("utf-8"))
         result["budget"] = budget.report()
         result['external_tool_calls'] = getattr(workspace, 'external_tool_metrics', {})
         result['external_tool_validation'] = {'required': require_external,

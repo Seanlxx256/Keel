@@ -105,6 +105,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--url')
     parser.add_argument('--inspect-grade', type=Path, help='Read-only runtime inspection of the archived instance image')
+    parser.add_argument('--check-scm-plugins', action='store_true', help='Compare registered SCM version-scheme providers without modifying packages')
     parser.add_argument('--apt-script', type=Path, help='Diagnose the original update/upgrade/install chain in a separate cached build')
     parser.add_argument('--timeout', type=int, default=1800)
     parser.add_argument('--attempts', type=int, default=1, help='APT workload attempts, 1..3, sharing the total deadline')
@@ -119,6 +120,8 @@ def main():
     args = parser.parse_args()
     if sum(bool(v) for v in (args.url,args.apt_script,args.inspect_grade)) != 1:
         parser.error('Provide exactly one of --url, --apt-script or --inspect-grade')
+    if args.check_scm_plugins and not args.inspect_grade:
+        parser.error('--check-scm-plugins requires --inspect-grade')
     if not args.inspect_grade and not args.image:
         parser.error('Network modes require --image')
     if args.apt_script and (args.download or args.build or args.apt_build):
@@ -129,7 +132,13 @@ def main():
     if args.inspect_grade:
         from keel.environment_probe import inspect_image
         result = inspect_image(args.inspect_grade.resolve(),
-            ['setuptools_scm','vcs_versioning','pytest'],['setuptools-scm','vcs-versioning','pytest','setuptools'],timeout=45)
+            ['setuptools_scm','vcs_versioning','pytest'],['setuptools-scm','vcs-versioning','pytest','setuptools'],timeout=45,
+            plugin_probe=args.check_scm_plugins)
+        if result.get('returncode')==0:
+            try:
+                result['observation']=json.loads(result['stdout'])
+            except ValueError:
+                result['error']='Inspection returned invalid JSON'
         (args.output/'inspection.json').write_text(json.dumps(result,indent=2),encoding='utf-8')
         print(json.dumps(result,indent=2))
         return

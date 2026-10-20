@@ -484,3 +484,92 @@ network-disabled, read-only instance inspection. This inspects the saved image,
 not the deleted post-test container; it cannot prove what evaluation-time
 installation changed. Compare against test-time logs before proposing recovery.
 
+The saved instance inspection confirmed both setuptools-scm 7.1.0 and
+vcs-versioning 2.6.0 register `release-branch-semver`; pytest uses testbed.
+`--inspect-grade ... --check-scm-plugins` now compares each provider on identical
+parsed SCM input, keeping DeprecationWarning as an error, and lists possible
+reverse dependencies. This is a read-only counterfactual, not an uninstall or
+full reference validation. A provider difference supports a collision hypothesis
+but does not justify removing a required dependency without checking metadata.
+The first inspection cut JSON mid-object at 14k characters. Preserve complete
+JSON up to a declared 256 KiB cap; oversized results explicitly fail instead of
+silently becoming invalid JSON. Tests cover warning-preserving provider
+comparison and a valid result larger than the former truncation threshold.
+
+## Evidence-gated SCM recovery and automatic reference continuation
+
+`swebench_bridge.py recover-reference` validates the frozen task/reference and
+the failed reference log, performs fresh read-only provider inspection, then
+immediately invokes grading with registered `remove_unused_vcs_versioning`.
+The policy is not an arbitrary uninstall tool: it requires the failing SCM
+provider, a passing original provider, and no active reverse requirements at
+execution time. Inside the disposable harness environment it uninstalls only
+that provider, compares pip-check output before/after (pre-existing problems
+are disclosed, new problems fail), and verifies default version calculation in
+a fresh interpreter with deprecations treated as errors. The guard runs after
+repository/evaluation installs. It does not alter tests, warning policy, source
+or host packages. Combined network/plugin conditions get a separate image tag
+and explicit grading metadata. Recovery has one shared deadline and one grade
+attempt; success requires the actual official report. This is a registered
+recovery for a known failure family, not arbitrary autonomous environment repair.
+Do not merge reconstructed results into the old frozen comparison score.
+
+Recovered reference policies are now validated against their recorded file
+hashes by `run_swebench_task`, propagated into the trusted intermediate verifier
+and final grade, and frozen throughout inference. Continuation preparation on
+`run_swebench_tool_comparison.py` admits only a selected old task whose arms never
+started, copies its frozen task/export, inherits unchanged model/profile and arm
+order, binds successful reference files, and freezes current implementation.
+The continuation executes just those two arms and reuses the successful reference
+without regrading it. Prior completed pairs and their scores are untouched.
+Disclose separate reconstructed conditions; do not call it the original frozen
+first attempt. Tests cover propagation, reference tampering and skipped regrade.
+
+## Interrupted paired run and patch-byte salvage
+
+The Matplotlib continuation lost its terminal during optional-arm verification.
+Keep its interrupted status and completed local-arm failure. Runtime patch
+writing used Windows text translation over CRLF diff payload lines, producing
+CRCRLF and malformed exported hunks. Write patch bytes exactly; test generated
+CRLF-source diffs with Git reverse-apply checks, not string presence alone.
+`swebench_bridge.py grade-snapshot` grades a preserved workspace Git diff with
+the reference's validated policies and no new model calls. It checks exact base
+HEAD, restricts changes to existing unprotected Python sources and records source
+hashes; it does not modify old reports or restore conversations/global budgets.
+This is independently scored saved source, not an Agent runtime pass or resumed
+first attempt. Regrading cannot establish missing audit stages of an interrupted
+run. Long-lived remote Docker containers may outlive a dead launcher; inspect
+ownership before cleanup, never terminate unrelated containers.
+
+
+## Saved-source failure feedback into a new Agent attempt
+
+`run_swebench_task.py --resume-snapshot DIR --saved-repo DIR` binds a failed
+saved-source grading to its task, successful reference conditions, source hashes,
+base-relative patch and official report hash. Plan-only mode performs these checks
+without inference. A new isolated checkout receives the validated patch. Critic
+first reviews observed test failures and the saved diff, then Scout localizes
+current source and the ordinary repair/verification loop runs under one fresh
+attempt budget, including Critic calls. The original interrupted run is unchanged.
+This is source-and-evidence continuation, not restoration of conversations or the
+old global budget. New audit stages cover edits made in this new attempt; they do
+not retroactively certify omitted stages of the interrupted run. Final export
+includes the entire base-relative patch, while runtime changes.patch records the
+new attempt delta. Reuse the reference's validated environment policies at every
+verification. No task-specific repair answer belongs in this mechanism.
+Regression checks cover Critic-first repair, shared budget exhaustion, source/report
+tampering and existing reference/export behavior. Real task success remains an
+experiment outcome, never inferred from passing synthetic regression tests.
+
+## Model credentials before experiment side effects
+
+A saved-source continuation reached Critic with no model credential in the current
+terminal, then unnecessarily graded the unchanged seed. The task runner now
+constructs and validates model configuration and invokes the provider's existing
+local credential check before reference inspection, subprocesses, output creation
+or workspace preparation. It reuses that model instance; no authentication request
+or paid inference is used for preflight. Missing/invalid values exit immediately
+without a trial directory or final grade. Plan-only remains credential-independent.
+The regression covers missing and whitespace-invalid values, zero subprocess /
+Agent / harness calls, and no secret value in the error. Local presence checks do
+not establish remote credential validity or guarantee later service availability.

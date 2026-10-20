@@ -77,6 +77,37 @@ class AdaptiveTests(unittest.TestCase):
         self.assertIn('Perform the Critic next_check', str(model.calls[4]))
         return root, result
 
+    def test_saved_failure_enters_critic_then_repairs_with_shared_budget(self):
+        root = self.workspace()
+        config = self.config()
+        config['budget']['max_model_calls'] = 4
+        config['continuation_context'] = {
+            'verification': [{'returncode': 1, 'stdout': 'AssertionError: saved value is 1', 'stderr': ''}],
+            'changes': {'diff': 'saved partial modification'},
+            'provenance': {'scope': 'new attempt'}}
+        model = self.model([{'action': 'replan', 'reason': 'Inspect saved value'},
+                            {'files': ['pkg/actual.py']}, {'locations': ['pkg/actual.py:1']},
+                            self.patch('actual', 1, 3)])
+        result = run(config, root, root/'.keel/run', model=model)
+        self.assertEqual(result['status'], 'passed', result.get('failure'))
+        self.assertEqual(result['budget']['model_calls'], 4)
+        self.assertEqual(result['state_machine']['history'][0]['role'], 'critic')
+        self.assertIn('saved value is 1', str(model.calls[0]))
+        self.assertIn('Inspect saved value', str(model.calls[1]))
+        self.assertEqual(result['recovery']['used_actions'], 1)
+
+    def test_saved_failure_review_cannot_reset_model_budget(self):
+        root = self.workspace()
+        config = self.config()
+        config['budget']['max_model_calls'] = 1
+        config['continuation_context'] = {
+            'verification': [{'returncode': 1, 'stdout': 'AssertionError', 'stderr': ''}],
+            'changes': {}, 'provenance': {}}
+        model = self.model([{'action': 'replan', 'reason': 'Inspect source'}])
+        result = run(config, root, root/'.keel/run', model=model)
+        self.assertEqual(result['failure']['category'], 'budget_exhausted')
+        self.assertEqual(len(model.calls), 1)
+
     def test_second_diagnosis_receives_previous_hypothesis_and_current_diff(self):
         root = self.workspace()
         responses = [{'files': ['pkg/actual.py']}, {'locations': ['pkg/actual.py:1']},

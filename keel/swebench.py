@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 import re
+import subprocess
 
 from .evaluation_protocol import file_hash
 
@@ -55,7 +56,7 @@ def verify_task(task_dir):
     return task
 
 
-def export_prediction(task_dir, run_dir, output, model_name):
+def export_prediction(task_dir, run_dir, output, model_name, *, source_repo=None):
     task = verify_task(task_dir)
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,119}', model_name):
         raise ValueError('Simple model label required, not a path or credential')
@@ -65,6 +66,8 @@ def export_prediction(task_dir, run_dir, output, model_name):
     if result.get('status') not in {'passed', 'failed'}:
         raise ValueError('Terminal runtime result required')
     patch = (run_dir/'changes.patch').read_text(encoding='utf-8')
+    if source_repo is not None:
+        patch=workspace_patch(source_repo,task)
     output.mkdir(parents=True, exist_ok=False)
     prediction = {'instance_id': task['instance_id'], 'model_name_or_path': model_name, 'model_patch': patch}
     (output/'predictions.jsonl').write_text(json.dumps(prediction)+'\n', encoding='utf-8')
@@ -75,6 +78,8 @@ def export_prediction(task_dir, run_dir, output, model_name):
                'task_receipt_sha256': file_hash(task_dir/'task-receipt.json'),
                'official_resolved': None, 'benchmark_ready': False,
                'scope': 'Operator-associated run; goal match does not prove source provenance. Official grading pending.'}
+    if source_repo is not None:
+        receipt['patch_scope']='Full base-relative Git diff including validated seed changes; runtime changes.patch remains the new-attempt delta'
     (output/'export-receipt.json').write_text(json.dumps(receipt, indent=2), encoding='utf-8')
     return receipt
 
@@ -112,3 +117,13 @@ def reference_prediction(task_dir, output):
                'scope': 'Gold environment preflight, zero agent runs; never include in agent scores'}
     (output/'export-receipt.json').write_text(json.dumps(receipt, indent=2), encoding='utf-8')
     return receipt
+
+
+def workspace_patch(repo, task):
+    def git(*args):
+        result = subprocess.run(['git', '-c', 'safe.directory='+repo.resolve().as_posix(), '-c', 'core.autocrlf=false',
+                                 '-C', str(repo), *args], check=True, capture_output=True, timeout=30)
+        return result.stdout.decode('utf-8')
+    if git('rev-parse', 'HEAD').strip() != task['base_commit']:
+        raise ValueError('Solver HEAD differs from frozen base commit')
+    return git('diff', '--no-ext-diff', '--no-textconv', '--binary', 'HEAD', '--')

@@ -11,6 +11,22 @@ from keel.workspace import Workspace
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_crlf_patch_artifact_preserves_exact_diff_bytes(self):
+        import difflib
+        original=b'VERSION = 1\r\n'
+        (self.root/'app.py').write_bytes(original)
+        output=self.root/'.keel'/'crlf'
+        run(self.config(),self.root,output)
+        current=(self.root/'app.py').read_bytes()
+        expected=''.join(difflib.unified_diff(original.decode().splitlines(True),current.decode().splitlines(True),
+            fromfile='a/app.py',tofile='b/app.py')).encode()
+        self.assertEqual((output/'changes.patch').read_bytes(),expected)
+        self.assertNotIn(b'\r\r\n',expected)
+        import subprocess
+        subprocess.run(['git','init','-q',str(self.root)],check=True,capture_output=True)
+        subprocess.run(['git','-c','safe.directory='+self.root.as_posix(),'-c','core.autocrlf=false',
+            '-C',str(self.root),'apply','--check','--reverse',str((output/'changes.patch').resolve())],
+            check=True,capture_output=True)
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

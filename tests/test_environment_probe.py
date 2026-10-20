@@ -8,9 +8,42 @@ import unittest
 from unittest.mock import patch
 
 from keel.environment_probe import PROGRAM, inspect_image, validate_inspection
+from keel.environment_probe import PLUGIN_PROGRAM
+import contextlib
+import io
+import warnings
 
 
 class EnvironmentProbeTests(unittest.TestCase):
+    def test_plugin_comparison_retains_warning_errors_and_provider_identity(self):
+        def deprecated(*args,**kwargs):
+            warnings.warn('renamed scheme',DeprecationWarning)
+        good=SimpleNamespace(group='setuptools_scm.version_scheme',name='release-branch-semver',
+            value='old:scheme',load=lambda:lambda version:'3.8')
+        bad=SimpleNamespace(group=good.group,name=good.name,value='new:deprecated',load=lambda:deprecated)
+        distributions=[SimpleNamespace(metadata={'Name':name},version='1',requires=[],entry_points=[entry])
+                       for name,entry in [('old-provider',good),('new-provider',bad)]]
+        output=io.StringIO()
+        with patch('importlib.metadata.distributions',return_value=distributions), \
+             patch.dict('sys.modules',{'setuptools_scm':SimpleNamespace(get_version=deprecated),
+                                      'setuptools_scm.git':SimpleNamespace(parse=lambda root:object())}), \
+             contextlib.redirect_stdout(output):
+            exec(compile(PLUGIN_PROGRAM,'<plugin-probe>','exec'),{})
+        observed=json.loads(output.getvalue())
+        self.assertFalse(observed['baseline']['passed'])
+        self.assertTrue(observed['providers'][0]['isolated_call']['passed'])
+        self.assertEqual(observed['providers'][1]['isolated_call']['error_type'],'DeprecationWarning')
+
+    def test_large_valid_inspection_json_is_preserved_without_truncation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)
+            image=root/'logs/build_images/instances/sweb.eval.org__lib-1__latest'
+            image.mkdir(parents=True);(image/'Dockerfile').write_text('FROM base')
+            payload=json.dumps({'details':'x'*20000})
+            with patch('keel.environment_probe.subprocess.run',return_value=SimpleNamespace(returncode=0,stdout=payload,stderr='')):
+                result=inspect_image(root,['json'],[])
+            self.assertEqual(json.loads(result['stdout'])['details'],'x'*20000)
+            self.assertEqual(result['omitted_stdout_characters'],0)
     def test_fixed_program_observes_import_location_and_missing_distribution(self):
         result=subprocess.run([sys.executable,'-c',PROGRAM,json.dumps({'modules':['json'],
             'distributions':['keel_nonexistent_probe_package']})],capture_output=True,text=True,check=True)

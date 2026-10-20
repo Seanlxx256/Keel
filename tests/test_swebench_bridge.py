@@ -8,12 +8,29 @@ import sys
 import unittest
 from unittest.mock import patch
 
-from examples.swebench_bridge import grade, run_harness
+from examples.swebench_bridge import grade, run_harness,grade_snapshot
 from keel.swebench import prepare, verify_task, export_prediction, reference_prediction, grading_outcome
 from keel.swebench_transport import linux_artifact_writes
 
 
 class SwebenchBridgeTests(unittest.TestCase):
+    def test_saved_snapshot_grades_without_restarting_agent_or_overwriting_original(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);self.fixture(root)
+            repo=root/'repo';repo.mkdir();(repo/'app.py').write_bytes(b'VALUE=2\n')
+            reference=root/'reference';reference.mkdir();(reference/'grading.json').write_text('{}')
+            with patch('examples.run_swebench_task.check_reference',return_value=None), \
+                 patch('examples.run_swebench_task.reference_policies',return_value={'network_policy':'no_pipeline'}), \
+                 patch('examples.swebench_verify_workspace.workspace_patch',return_value='VALID_GIT_DIFF'), \
+                 patch('examples.swebench_bridge.subprocess.run',return_value=SimpleNamespace(stdout='app.py\n')), \
+                 patch('examples.swebench_bridge.grade',return_value={'status':'graded','official_resolved':False}) as grader:
+                report=grade_snapshot(root/'task',repo,reference,root/'salvage',python='python',timeout=600)
+            self.assertEqual(report['model_calls'],0)
+            self.assertFalse(report['official_resolved'])
+            self.assertEqual(grader.call_args.kwargs['network_policy'],'no_pipeline')
+            prediction=json.loads((root/'salvage/snapshot-export/predictions.jsonl').read_text())
+            self.assertEqual(prediction['model_patch'],'VALID_GIT_DIFF')
+            self.assertEqual(json.loads((root/'run/result.json').read_text())['status'],'failed')
     def test_harness_default_file_encoding_is_utf8_even_if_parent_disables_it(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
