@@ -14,10 +14,20 @@ def validate_inspection(modules, distributions):
 
 
 PROGRAM = r'''
-import importlib, importlib.metadata as md, json, sys, traceback
+import importlib, importlib.metadata as md, json, sys, traceback, shutil,pathlib
 request = json.loads(sys.argv[1])
 inventory = sorted((d.metadata.get('Name', ''), d.version) for d in md.distributions())
-result = {'python': sys.version, 'inventory': inventory[:200], 'omitted_distributions': max(0,len(inventory)-200), 'modules': {}, 'distributions': {}}
+result = {'python': sys.version, 'executable':sys.executable, 'sys_path':sys.path,
+ 'inventory': inventory[:200], 'omitted_distributions': max(0,len(inventory)-200), 'modules': {}, 'distributions': {},'launchers':{}}
+for name in ('python','pip','pytest'):
+ path=shutil.which(name)
+ entry={'path':path}
+ if path:
+  try:
+   with open(path,'rb') as stream: first=stream.readline(512)
+   if first.startswith(b'#!'): entry['shebang']=first.decode('utf-8',errors='replace').strip()
+  except OSError: pass
+ result['launchers'][name]=entry
 for name in request['modules']:
     try:
         module = importlib.import_module(name)

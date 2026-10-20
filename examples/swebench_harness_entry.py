@@ -9,6 +9,9 @@ from keel.swebench_transport import linux_artifact_writes
 
 
 if __name__ == '__main__':
+    if os.environ.get('KEEL_HARNESS_NETWORK_POLICY'):
+        from keel.harness_network import install_network_policy
+        install_network_policy(os.environ['KEEL_HARNESS_NETWORK_POLICY'])
     if os.environ.get('KEEL_HARNESS_ENV_OVERLAY'):
         import json
         from keel.harness_environment import install_overlay

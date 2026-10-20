@@ -21,6 +21,9 @@ def run_harness(command, *, cwd, log_path, timeout, heartbeat=10):
     # IOENCODING covers stdio only. UTF8 also covers harness open(..., 'w') logs.
     environment = {**os.environ, 'PYTHONUNBUFFERED': '1', 'PYTHONIOENCODING': 'utf-8', 'PYTHONUTF8': '1'}
     environment.pop('KEEL_HARNESS_ENV_OVERLAY', None)
+    environment.pop('KEEL_HARNESS_NETWORK_POLICY', None)
+    if (cwd/'network-policy.json').is_file():
+        environment['KEEL_HARNESS_NETWORK_POLICY'] = json.loads((cwd/'network-policy.json').read_text(encoding='utf-8'))['policy']
     if (cwd/'environment-overlay.json').is_file():
         environment['KEEL_HARNESS_ENV_OVERLAY'] = str((cwd/'environment-overlay.json').resolve())
     print(f'[SWE-bench] starting; log: {log_path}', flush=True)
@@ -64,15 +67,19 @@ def run_harness(command, *, cwd, log_path, timeout, heartbeat=10):
                                                                'returncode': process.returncode}), encoding='utf-8')
 
 
-def grade(task_dir, export_dir, output, *, python=sys.executable, timeout=1800, environment_overlay=None):
+def grade(task_dir, export_dir, output, *, python=sys.executable, timeout=1800, environment_overlay=None, network_policy=None):
     if type(timeout) not in (int, float) or not 0 < timeout <= 86400:
         raise ValueError('Harness timeout must be positive and at most 86400 seconds')
+    if network_policy not in (None, 'no_pipeline') or (network_policy and environment_overlay):
+        raise ValueError('Use one registered network policy without stacking packaging overlays')
     task = verify_task(task_dir)
     receipt = json.loads((export_dir/'export-receipt.json').read_text(encoding='utf-8'))
     if (receipt['predictions_sha256'] != file_hash(export_dir/'predictions.jsonl') or
             receipt['task_receipt_sha256'] != file_hash(task_dir/'task-receipt.json')):
         raise ValueError('Export inputs changed')
     output.mkdir(parents=True, exist_ok=False)
+    if network_policy:
+        (output/'network-policy.json').write_text(json.dumps({'policy':network_policy,'version':1}),encoding='utf-8')
     if environment_overlay is not None:
         from keel.harness_environment import validate_overlay
         validate_overlay(environment_overlay)
@@ -82,7 +89,7 @@ def grade(task_dir, export_dir, output, *, python=sys.executable, timeout=1800, 
                '--dataset_name', str((output/'grader-input.json').resolve()),
                '--predictions_path', str((export_dir/'predictions.jsonl').resolve()),
                '--instance_ids', task['instance_id'], '--max_workers', '1', '--run_id', run_id]
-    if environment_overlay is not None:
+    if environment_overlay is not None or network_policy:
         command.extend(['--cache_level', 'instance'])
     result = {'status': 'running', 'official_resolved': None, 'runtime_status': receipt['runtime_status'],
               'command': command, 'run_id': run_id, 'benchmark_ready': False, 'timeout_seconds': timeout,
@@ -90,6 +97,10 @@ def grade(task_dir, export_dir, output, *, python=sys.executable, timeout=1800, 
     if environment_overlay is not None:
         result['environment_scope'] = 'reconstructed packaging overlay; not unchanged official environment'
         result['environment_overlay_sha256'] = file_hash(output/'environment-overlay.json')
+    if network_policy:
+        result['network_policy'] = network_policy
+        result['network_policy_sha256'] = file_hash(output/'network-policy.json')
+        result['environment_scope'] = 'Explicit APT transport adaptation; separate image tag, unchanged source/tests/packages; not original-condition score'
     try:
         result['harness_version'] = (importlib.metadata.version('swebench') if python == sys.executable else
             subprocess.run([python, '-c', 'import importlib.metadata; print(importlib.metadata.version("swebench"))'],
@@ -133,6 +144,7 @@ def main():
     parser.add_argument('--model-name', default='keel')
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--execute', action='store_true')
+    parser.add_argument('--network-policy', choices=['no_pipeline'])
     parser.add_argument('--timeout', type=int, default=1800,
                         help='Total grading deadline in seconds, including image builds (default: 1800)')
     args = parser.parse_args()
@@ -154,7 +166,7 @@ def main():
         if not args.execute:
             result = {'status': 'plan_only', 'next': 'Invoke official Docker harness with --execute', 'benchmark_ready': False}
         else:
-            result = grade(args.task.resolve(), args.export_dir.resolve(), args.output.resolve(), timeout=args.timeout)
+            result = grade(args.task.resolve(), args.export_dir.resolve(), args.output.resolve(), timeout=args.timeout, network_policy=args.network_policy)
     print(json.dumps(result, indent=2))
     return 1 if result.get('status') == 'grading_error' else 0
 

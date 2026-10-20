@@ -15,6 +15,9 @@ class EnvironmentProbeTests(unittest.TestCase):
         result=subprocess.run([sys.executable,'-c',PROGRAM,json.dumps({'modules':['json'],
             'distributions':['keel_nonexistent_probe_package']})],capture_output=True,text=True,check=True)
         observed=json.loads(result.stdout)
+        self.assertEqual(Path(observed['executable']).resolve(),Path(sys.executable).resolve())
+        self.assertIn('pytest',observed['launchers'])
+        self.assertIsInstance(observed['sys_path'],list)
         self.assertTrue(observed['modules']['json']['file'].endswith('__init__.py'))
         self.assertIn('error',observed['distributions']['keel_nonexistent_probe_package'])
 

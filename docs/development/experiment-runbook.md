@@ -378,6 +378,25 @@ three-attempt workload stopped after one attempt because this causal correlation
 was missing; retain that outcome. Tests cover matching and mismatched suites,
 standalone signature failures and mixed permanent/transient errors.
 
+## Bounded network diagnosis after retries
+
+The existing network entry accepts `--failed-workload` plus `--model-config`
+in APT-script mode. `keel.network_recovery` validates the prior image/script
+identity, supplies bounded redacted log evidence and host-extracted failed URLs,
+and uses six model steps, a 60k-token ceiling and one shared wall-clock budget.
+Registered actions are HTTP/HTTPS APT acquisition probes, one isolated HTTP
+pipeline-depth-zero workload experiment, and stop. There is no arbitrary shell,
+proxy/DNS edit, source switch or authentication bypass action. Failed and invalid
+decisions return as observations, repeated actions are rejected, and recovery
+requires full diagnostic APT completion. Probe success alone remains unresolved.
+The pipeline experiment keeps exact packages and original command, using an
+isolated APT_CONFIG; label it changed transport conditions, not an original
+official reference score. Paid model diagnosis is explicit opt-in. This is not
+automatically enabled on every runtime entry, nor is cross-task learning proven.
+Tests simulate multi-round failed-probe/next-probe/recovery trajectories; actual
+Docker/model execution is still required. A transport diagnosis may stop within
+its supported action scope without establishing the root cause.
+
 ## MCP validation contract drift
 
 The SDK subprocess validator retained a four-tool discovery assertion after
@@ -407,4 +426,61 @@ and invalidate the target mtime before asserting filter-induced differences;
 assert raw bytes still equal the committed blob. Keep the subsequent real-edit
 rejection. This changes the fixture, not snapshot acceptance rules. Verify the
 Windows runner again; local passes alone do not prove the CI cause resolved.
+
+## Network ReAct protocol corrections
+
+The first live network diagnosis spent three of six turns citing nonexistent
+evidence, then used all remaining turns for probes. It did not execute recovery.
+Always provide exact available evidence IDs, prior invalid decisions and explicit
+non-execution feedback; a failed initial log is not a successful probe. Select
+targets from the most recent failed attempt before older package URLs. Cap probes
+at two and expose remaining registered actions so a successful inspection can
+lead to a recovery test within the same model budget. These controls do not
+force recovery: the model may stop, and full workload completion is still required.
+Regression checks cover fabricated-ID correction, recent-stage selection and
+probe-budget reservation. Preserve the unsuccessful live run as evidence.
+
+Network reflection now receives bounded actual APT failure excerpts after a
+transport workload experiment. That registered action is removed after one
+attempt under unchanged conditions. Shared `ExperienceStore` records outcomes
+in `network-experience.sqlite` beside runs; matching uses setup hash, image name,
+base image ID and transport-policy version. Only a completed workload with a
+matching concrete base ID is verified. Missing identity is not learned as
+success. Prior verified experience is advisory and never skips fresh probes or
+grants actions. Failed attempts are retained and surfaced as recent outcomes.
+This is operational memory, not model-weight learning or proof of general
+environment recovery. Tests cover failure-feedback handoff and prevent past
+success from authorizing an uninspected current recovery.
+
+The second live network run stopped after a successful current-stage probe,
+with no recovery test despite remaining budget. Distinguish uncertainty from
+blockage: a reversible registered experiment can test a hypothesis without
+already proving root cause. Network recovery now challenges one early stop when
+completed probe evidence permits an untried workload experiment and sufficient
+time/steps remain. Review consumes the same model budget; a second stop is
+accepted and recorded unresolved. This is not forced success or unbounded
+persistence. Tests cover review-to-recovery and accepting a repeated stop.
+
+## Resume reference grading under explicit transport conditions
+
+The live network ReAct v3 completed the full diagnostic APT workload under
+no_pipeline; its base ID matched and ExperienceStore recorded verified workload
+completion. This is not proof of pipelining as root cause (cache/time differed).
+`swebench_bridge.py grade --network-policy no_pipeline` now passes a child-only
+registered policy to the harness adapter. It injects APT_CONFIG before repository
+APT commands, preserves the original command/source/tests, and uses a separate
+instance-image tag. The grading report stores policy/hash and discloses changed
+transport conditions. Do not stack with packaging overlays or overwrite the
+original comparison. Cached diagnostic image retention was disabled there;
+this reference policy changes only pipelining, so success must be verified again.
+
+Reference transport grading completed but reported 35 failed, 66 passed and
+8 skipped tests. Many failures raise a version-scheme DeprecationWarning in
+vcs_versioning, despite installation output reporting setuptools_scm 7.1.0.
+Do not pin blindly or suppress warnings. Existing `environment_probe` now records
+the selected interpreter, sys.path, launcher paths/shebangs and module/distribution
+locations. `check_repository_network.py --inspect-grade` exposes that same
+network-disabled, read-only instance inspection. This inspects the saved image,
+not the deleted post-test container; it cannot prove what evaluation-time
+installation changed. Compare against test-time logs before proposing recovery.
 

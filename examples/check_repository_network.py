@@ -38,18 +38,20 @@ def extract_apt(script):
     return command
 
 
-def apt_workload(script_path, image, output, timeout, *, attempts=1):
+def apt_workload(script_path, image, output, timeout, *, attempts=1, transport='original'):
     if not 60 <= timeout <= 7200:
         raise ValueError('APT workload deadline must be 60..7200 seconds')
     if not 1 <= attempts <= 3:
         raise ValueError('APT attempts must be 1..3')
+    if transport not in ('original', 'no_pipeline'):
+        raise ValueError('Unsupported transport policy')
     deadline = time.monotonic()+timeout
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._/:@-]*', image) or image.startswith('sha256:'):
         raise ValueError('Use a named local image')
     source = script_path.read_bytes()
     command = extract_apt(source.decode('utf-8'))
     result = {'status': 'running', 'source_sha256': hashlib.sha256(source).hexdigest(),
-              'apt_command': command, 'image': image, 'timeout_seconds': timeout, 'max_attempts': attempts,
+              'apt_command': command, 'image': image, 'timeout_seconds': timeout, 'max_attempts': attempts, 'transport': transport,
               'scope': 'Separate diagnostic build; archives retained by disabling docker-clean in this image only. No source or package-list change; not a reference score.'}
     def save():
         (output/'diagnosis.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
@@ -63,7 +65,10 @@ def apt_workload(script_path, image, output, timeout, *, attempts=1):
         key = hashlib.sha256(identity.encode()).hexdigest()[:24]
         context = output/'build-context'
         context.mkdir()
-        (context/'apt.sh').write_bytes(('#!/bin/bash\nset -euxo pipefail\n'+command+'\n').encode('utf-8'))
+        prefix = ''
+        if transport == 'no_pipeline':
+            prefix = "printf '%s\\n' 'Acquire::http::Pipeline-Depth \"0\";' > /tmp/keel-apt-transport.conf\nexport APT_CONFIG=/tmp/keel-apt-transport.conf\n"
+        (context/'apt.sh').write_bytes(('#!/bin/bash\nset -euxo pipefail\n'+prefix+command+'\n').encode('utf-8'))
         (context/'Dockerfile').write_text('FROM '+image+'\nCOPY apt.sh /keel-apt.sh\n'
             'RUN rm -f /etc/apt/apt.conf.d/docker-clean\n'
             'RUN --mount=type=cache,id=keel-apt-'+key+',target=/var/cache/apt/archives,sharing=locked '
@@ -99,22 +104,46 @@ def apt_workload(script_path, image, output, timeout, *, attempts=1):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--url')
+    parser.add_argument('--inspect-grade', type=Path, help='Read-only runtime inspection of the archived instance image')
     parser.add_argument('--apt-script', type=Path, help='Diagnose the original update/upgrade/install chain in a separate cached build')
     parser.add_argument('--timeout', type=int, default=1800)
     parser.add_argument('--attempts', type=int, default=1, help='APT workload attempts, 1..3, sharing the total deadline')
-    parser.add_argument('--image', required=True, help='Existing local image; never pulled')
+    parser.add_argument('--failed-workload', type=Path, help='Previous workload evidence for bounded model diagnosis')
+    parser.add_argument('--model-config', type=Path)
+    parser.add_argument('--image', help='Existing local image; never pulled')
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--download', action='store_true', help='Read to EOF within byte cap')
     parser.add_argument('--build', action='store_true', help='Probe a disposable build using the local image')
     parser.add_argument('--apt-build', action='store_true', help='Download the URL using APT acquisition in a disposable build; no install/update')
     parser.add_argument('--max-bytes', type=int, default=8388608)
     args = parser.parse_args()
-    if bool(args.url) == bool(args.apt_script):
-        parser.error('Provide exactly one of --url or --apt-script')
+    if sum(bool(v) for v in (args.url,args.apt_script,args.inspect_grade)) != 1:
+        parser.error('Provide exactly one of --url, --apt-script or --inspect-grade')
+    if not args.inspect_grade and not args.image:
+        parser.error('Network modes require --image')
     if args.apt_script and (args.download or args.build or args.apt_build):
         parser.error('APT workload mode cannot combine URL probe flags')
+    if (args.failed_workload or args.model_config) and not (args.apt_script and args.failed_workload and args.model_config):
+        parser.error('Network ReAct requires --apt-script, --failed-workload and --model-config together')
     args.output.mkdir(parents=True, exist_ok=False)
+    if args.inspect_grade:
+        from keel.environment_probe import inspect_image
+        result = inspect_image(args.inspect_grade.resolve(),
+            ['setuptools_scm','vcs_versioning','pytest'],['setuptools-scm','vcs-versioning','pytest','setuptools'],timeout=45)
+        (args.output/'inspection.json').write_text(json.dumps(result,indent=2),encoding='utf-8')
+        print(json.dumps(result,indent=2))
+        return
     if args.apt_script:
+        if args.failed_workload:
+            if not args.model_config:
+                parser.error('Model diagnosis requires --model-config')
+            from keel.models import from_config
+            from keel.network_recovery import recover_network
+            result = recover_network(args.failed_workload, args.apt_script, args.image, args.output,
+                from_config(json.loads(args.model_config.read_text(encoding='utf-8'))), apt_workload,
+                timeout=args.timeout)
+            print(json.dumps(result, indent=2))
+            return
         result = apt_workload(args.apt_script, args.image, args.output, args.timeout, attempts=args.attempts)
         print(json.dumps(result, indent=2))
         return
