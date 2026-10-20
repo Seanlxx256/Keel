@@ -65,6 +65,8 @@ def run_harness(command, *, cwd, log_path, timeout, heartbeat=10):
 
 
 def grade(task_dir, export_dir, output, *, python=sys.executable, timeout=1800, environment_overlay=None):
+    if type(timeout) not in (int, float) or not 0 < timeout <= 86400:
+        raise ValueError('Harness timeout must be positive and at most 86400 seconds')
     task = verify_task(task_dir)
     receipt = json.loads((export_dir/'export-receipt.json').read_text(encoding='utf-8'))
     if (receipt['predictions_sha256'] != file_hash(export_dir/'predictions.jsonl') or
@@ -83,7 +85,7 @@ def grade(task_dir, export_dir, output, *, python=sys.executable, timeout=1800, 
     if environment_overlay is not None:
         command.extend(['--cache_level', 'instance'])
     result = {'status': 'running', 'official_resolved': None, 'runtime_status': receipt['runtime_status'],
-              'command': command, 'run_id': run_id, 'benchmark_ready': False,
+              'command': command, 'run_id': run_id, 'benchmark_ready': False, 'timeout_seconds': timeout,
               'transport_adapter': 'LF-only shell/diff/patch writes on Windows; official harness via runpy'}
     if environment_overlay is not None:
         result['environment_scope'] = 'reconstructed packaging overlay; not unchanged official environment'
@@ -131,6 +133,8 @@ def main():
     parser.add_argument('--model-name', default='keel')
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--execute', action='store_true')
+    parser.add_argument('--timeout', type=int, default=1800,
+                        help='Total grading deadline in seconds, including image builds (default: 1800)')
     args = parser.parse_args()
     if args.action == 'prepare':
         if not args.dataset or not args.instance_id:
@@ -150,7 +154,7 @@ def main():
         if not args.execute:
             result = {'status': 'plan_only', 'next': 'Invoke official Docker harness with --execute', 'benchmark_ready': False}
         else:
-            result = grade(args.task.resolve(), args.export_dir.resolve(), args.output.resolve())
+            result = grade(args.task.resolve(), args.export_dir.resolve(), args.output.resolve(), timeout=args.timeout)
     print(json.dumps(result, indent=2))
     return 1 if result.get('status') == 'grading_error' else 0
 

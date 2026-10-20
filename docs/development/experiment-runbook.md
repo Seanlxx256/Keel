@@ -283,3 +283,98 @@ discovery. SDK memory interoperability and raw-process stdio are distinct from
 full SDK subprocess validation. Record transport-blocked checks explicitly.
 See `docs/compass-text-search.md` and `tests/test_text_mcp.py`.
 
+## Cold-build deadlines versus test failures
+
+The optional Compass pilot's Matplotlib reference exhausted a 1,800-second
+total harness deadline after roughly 930 seconds building its environment and
+then installing system packages in the instance image. Its last log began the
+editable wheel build, before tests. Inspect internal stage logs before assuming
+dependency incompatibility or changing pins. `swebench_bridge.py grade --timeout`
+exposes a bounded total deadline (default unchanged) and records it in grading
+metadata. A longer retry needs a fresh output directory and must retain the
+first timeout; it is not a replacement first-attempt score. Keep successful
+paired tasks intact. A successful retry is required before claiming recovery.
+
+## Package-source network failures
+
+The Matplotlib reference retry failed in apt downloads with HTTP 502 and
+connection timeouts, exit 100, before tests. Do not treat this as a dependency
+version conflict. `keel.network_probe` and `check_repository_network.py` separate
+host DNS/HTTP observations from runtime-container access using an existing image,
+without pulling images, mounting host files or changing proxy/DNS settings.
+Requests and subprocesses have deadlines; timeout cleanup targets only the
+uniquely named diagnostic container. Permission-denied Docker access is an
+unobserved container network, not proof of remote outage. Three regression
+checks cover layer separation, credential-URL rejection and permission handling.
+The initial tool-host probe failed HTTP access and could not access Docker;
+ordinary-terminal container evidence is still required. Runtime-container
+success does not prove build-network or large apt-download success. No recovery
+experience should be marked verified until the reference actually completes.
+
+The ordinary-terminal homepage probe later returned 200 in both layers, yet
+another apt build still failed on concrete `.deb` downloads. A homepage sample
+is insufficient recovery evidence. Use `--download --build` with an actual
+failed package URL: the same bounded probe reads to EOF or the explicit byte
+cap in host, runtime container and a disposable build. `download_complete`
+requires EOF within the cap and a matching Content-Length when supplied;
+HTTP reachability alone is not a complete download. This does not verify package
+checksums or the whole apt transaction. The build inspects the local image ID,
+uses no pull and no cache, and never retags harness images. Diagnostic images
+are removed when possible. A Docker CLI timeout does not guarantee remote build
+cancellation; do not interpret it as a completed or recovered build. Fixed
+per-layer deadlines bound the local probe; retain failures and do not launch
+full reference grading merely because a small request succeeds.
+
+The first disposable build incorrectly used `FROM sha256:<local image ID>`.
+BuildKit interpreted it as `docker.io/library/sha256:<tag>` and failed before
+RUN; this is a diagnostic implementation bug, not a network-test result. Use
+the inspected local image name/tag in FROM, with pull disabled, and verify its
+ID again after building. Retain the ID in the result and reject changed or
+unverifiable identities. Tests must inspect the generated Dockerfile as well
+as command flags; mocked exit codes alone did not catch this failure.
+
+After all three Python URL probes downloaded the package, `--apt-build` was
+added to the same entry point. It uses `/usr/lib/apt/apt-helper download-file`
+inside a disposable build, without install/update/source changes. A Linux
+file-size limit caps output; a 30-second child deadline kills its process group.
+Report completion, bytes and SHA256 only on successful download. This tests
+APT acquisition of one URL, not index freshness, dependency resolution or the
+full parallel/repeated installation workload. SHA256 is an observation, not a
+comparison against trusted package-index checksums. Real Docker validation is
+required separately from mocked portable tests.
+
+`check_repository_network.py --apt-script <archived setup_repo.sh>` now extracts
+one original standalone update/upgrade/install chain for an independent build.
+Reject unsupported shell syntax instead of executing the rest of the repository
+script. Preserve exact command, source hash, base ID, deadline and streamed log.
+An archive cache keyed by base ID uses a locked BuildKit mount; docker-clean is
+disabled only in this diagnostic image to retain downloads. This disclosed
+cache-retention adaptation is not the original harness or an official score.
+No automatic repeated full installs: inspect the bounded attempt first. Completed
+APT work is not a successful Matplotlib install or reference-test result.
+
+The first workload probe stopped before APT: Python's Windows text writes
+created CRLF in `apt.sh`, making Bash reject `pipefail\r`. All generated Linux
+shell files must use byte writes or explicit LF newlines. Assert raw bytes,
+not `read_text()` comparisons (which normalize newlines). Existing harness
+transport LF handling does not automatically cover newly generated contexts.
+
+The corrected workload reproduced successful index update followed by HTTP 502
+on some upgrade package downloads. `keel.network_probe.bounded_apt_attempts`
+now supports at most three attempts under one total deadline, with per-attempt
+logs and saved outcomes. Only fetch errors containing transient transport
+evidence are retried; other fatal APT errors stop. Index-download warnings do
+not count as success even with exit zero. `--attempts` defaults to one, so
+recovery must be explicitly enabled. The original command, packages and sources
+stay unchanged; the existing archive cache is shared. Completion verifies only
+this diagnostic workload, not the reference task or a learned generic recovery.
+
+APT may emit `repository ... InRelease is not signed` immediately after a
+transient InRelease fetch failure. Retry only if the same repository URL and
+suite match an explicit transient `/dists/<suite>/InRelease` failure; standalone
+unsigned errors, other repositories, permanent fetch errors and explicit
+NO_PUBKEY/BADSIG/EXPKEYSIG evidence stop. Never disable authentication. The first
+three-attempt workload stopped after one attempt because this causal correlation
+was missing; retain that outcome. Tests cover matching and mismatched suites,
+standalone signature failures and mixed permanent/transient errors.
+

@@ -37,3 +37,18 @@ a new frozen plan, not rerunning this plan against changed implementation hashes
 Next: audit tool visibility in a newly frozen trial, retain zero-call outcomes,
 and test task relevance without forcing calls or selecting tasks after results.
 Diagnose the reference timeout separately before authorizing a recorded retry.
+
+## Reference timeout diagnosis
+
+Internal logs show environment-image build took about 930 seconds. Instance
+setup then installed system dependencies including TeX, fonts and image tools.
+At 20:03:21 it began building the editable Matplotlib wheel; the 1,800-second
+launcher deadline then expired. No test execution is recorded. This supports
+build-time exhaustion, not a demonstrated dependency incompatibility or test
+failure. Completion with a longer deadline remains unverified.
+
+The generic bridge now exposes `--timeout` and records `timeout_seconds`.
+Its default remains 1,800 seconds. A separate retry may use 3,600 seconds with
+unchanged task/reference inputs, retaining the first outcome. Such a retry is
+additional infrastructure validation, not a first-attempt paired score; it does
+not authorize rewriting this closed comparison or bypassing frozen hashes.
