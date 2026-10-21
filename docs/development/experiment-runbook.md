@@ -916,3 +916,56 @@ This repairs an execution contract; it does not establish better localization,
 causal diagnosis or task success. Preserve the historical policy-denied score.
 Checks: tests/test_proposals.py and tests/test_recovery_controller.py, including
 mixed-batch atomicity, correction, protected paths and repeated-mismatch stopping.
+
+## Recovery source handoff (2026-10-21)
+
+Progress inventories are not source delivery. When monitor_progress is enabled,
+RecoveryProgress.context now includes bounded whole source windows from previously
+observed facts, lexically ranked against the prior check question. It may reuse
+earlier rounds but never future rounds. Each included window is compared with
+current source; a recorded full-file hash must also match. Missing historical
+hashes permit only a current-window-match claim, not whole-file freshness.
+Reads consume the shared tool budget. Whole windows exceeding the 4,500-byte
+content allowance are omitted explicitly; if the total Critic prompt exceeds its
+existing cap, bodies are removed with a capacity omission marker. No cap increases,
+new model calls, new source ranges or write rights are implied. Permission failures
+still propagate. Model interpretation and probe execution remain unverified.
+
+Offline v3-ledger replay selects fact14 (test body) and a fact21 source window,
+using the currently restored seed; it is not a replay of historical execution or
+evidence of repair improvement. Tests: tests/test_recovery_progress.py, including
+actual Critic request delivery, unchanged unknown-check status, stale content,
+full-file hash mismatch, byte limits and future-round exclusion. Keep the feature
+opt-in and assess model diagnosis separately before another full paid repair.
+
+Frozen diagnostic prompt pairs can use examples/run_frozen_model_review.py.
+They store pending state before dispatch, preserve failed responses and validate
+completed receipts before reusing a paid arm. No automatic retry follows an
+unreceipted attempt. Freeze both requests before execution and record when context
+is reconstructed against a restored workspace rather than historical state.
+Two model responses are a qualitative review, not a repair benchmark; output
+schema validity is not a diagnosis-quality score. Tests: test_frozen_model_review.
+
+An optional targeted_source_review may resolve exact definition names explicitly
+mentioned by the Critic's next_check, within current-plan and previously observed
+paths. Reuse existing AST structures and complete-definition evidence; bound reads,
+whole-window bytes and additional review calls. This is static read-only inspection,
+not execution or permission expansion. Keep it separately opt-in, record source
+hashes and inspection ledger, suppress unchanged repeat follow-ups and retain global
+budgets. Single-arm frozen follow-up reviews avoid paying for completed controls
+again. Do not equate a better textual diagnosis with a verified repair.
+
+## Explicit Critic questions (2026-10-21)
+
+CRITIC_QUESTIONS defines concise field-level obligations: failure location and
+phase; established/excluded/unknown observations; prior-check execution/result/update;
+and next target/question/support/refutation. Questions are included in JSON Schema
+descriptions and the system prompt for structured and JSON-object providers.
+Unknown is valid when the missing evidence is specified. Do not ask for private
+reasoning traces or let a filled checklist count as proof of correct reasoning.
+The six-field wire format and 1,000-character field bounds remain compatible.
+Host validation checks shape, action and length, not truth or complete semantic
+coverage of every label. No keyword-based correctness score or automatic repair
+success follows. The next role receives the check's predictions as tentative
+criteria, not authority to edit outside its scope. New prompt efficacy needs a
+fresh frozen diagnostic review; previous plans and paid outputs remain historical.

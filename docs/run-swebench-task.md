@@ -24,6 +24,17 @@ comparison rules and limits; it does not certify execution of a semantic next_ch
 
 ## Explicit larger-budget exploration
 
+Optional `--targeted-source-review --recovery-progress` enables a read-only
+named-definition follow-up after a Critic replan decision. The model's next_check
+must explicitly name a Python definition in the current plan or previously observed
+paths. At most four known paths and three matching definitions per path are
+considered, within a 4,500-byte whole-window allowance. At most one extra Critic
+call is made per routing decision; all reads and calls share original budgets.
+Repeated unchanged definitions do not trigger another follow-up call. No runtime
+probe is executed and no write scope is added. This is default-off experimental
+behavior, separate from the earlier forced diagnostic-inspection gate. Existing
+frozen plans must not be modified to enable it retroactively.
+
 `--budget-profile extended` is an opt-in exploration profile: 60 model calls,
 400,000 tokens, 160 tools and 3,600 Agent seconds. It also allows twelve shared
 recovery actions and eight verification repairs (at most nine intermediate

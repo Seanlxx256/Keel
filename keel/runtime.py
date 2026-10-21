@@ -526,6 +526,9 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
             'previous_plan': [{'id': item['id'], 'files': item['files']} for item in ordered],
             'operator_write_roots': recovery_config['write_roots'],
             'instruction': 'Perform the Critic next_check using current source evidence before editing. '
+                           'Use its TARGET and QUESTION to focus inspection; compare observations with '
+                           'SUPPORT and REFUTE predictions. If the check cannot run, preserve that specific '
+                           'blocker instead of claiming completion. A source read is not a runtime probe. '
                            'Treat the diagnosis as a hypothesis, not an instruction to assume it is true. '
                            'Preserve useful earlier changes and correct unsupported ones. '
                            'New plans must stay within operator write roots.'})

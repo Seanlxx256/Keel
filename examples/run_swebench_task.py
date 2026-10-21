@@ -95,13 +95,15 @@ def config_for(task, task_dir, output, model_config, harness_python, environment
     return config
 
 
-def execute(root, task_dir, reference_dir, model_config, harness_python, output, *, mcp_config=None, localization_tool_steps=6, require_external_tool=False, local_exploration=False, resume_snapshot=None, saved_repo=None, diagnostic_inspection=False, recovery_progress=False, budget_limits=None, budget_profile='standard'):
+def execute(root, task_dir, reference_dir, model_config, harness_python, output, *, mcp_config=None, localization_tool_steps=6, require_external_tool=False, local_exploration=False, resume_snapshot=None, saved_repo=None, diagnostic_inspection=False, recovery_progress=False, targeted_source_review=False, budget_limits=None, budget_profile='standard'):
     started = time.monotonic()
     limits = trial_budget(budget_limits, profile=budget_profile)
     if type(diagnostic_inspection) is not bool:
         raise ValueError('diagnostic_inspection must be boolean')
     if type(recovery_progress) is not bool:
         raise ValueError('recovery_progress must be boolean')
+    if type(targeted_source_review) is not bool or (targeted_source_review and not recovery_progress):
+        raise ValueError('targeted_source_review requires recovery_progress and a boolean value')
     if require_external_tool and not mcp_config:
         raise ValueError('--require-external-tool requires --mcp-config')
     # Local configuration/credential checks must precede checkout, output creation
@@ -155,6 +157,7 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
               'benchmark_ready': False, 'implementation': hashes,
               'diagnostic_inspection': diagnostic_inspection,
               'recovery_progress': recovery_progress,
+              'targeted_source_review': targeted_source_review,
               'limits': limits,
               'budget_profile': budget_profile,
               'recovery_limits': {'max_actions': 12 if budget_profile == 'extended' else 6,
@@ -200,6 +203,7 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
                             budget_limits=limits, budget_profile=budget_profile)
         config['require_diagnostic_inspection'] = diagnostic_inspection
         config['recovery']['monitor_progress'] = recovery_progress
+        config['recovery']['targeted_source_review'] = targeted_source_review
         if continuation:
             config['continuation_context']=continuation
         if local_exploration:
@@ -257,6 +261,8 @@ def main():
                         help='Experimental pre-edit inspection gate; off by default pending efficacy evidence')
     parser.add_argument('--recovery-progress', action='store_true',
                         help='Experimental round evidence inventory and Critic feedback; no extra model calls')
+    parser.add_argument('--targeted-source-review', action='store_true',
+                        help='Opt-in named-definition read and at most one additional Critic call per decision; requires --recovery-progress')
     parser.add_argument('--max-model-calls', type=int)
     parser.add_argument('--budget-profile', choices=tuple(BUDGET_PROFILES), default='standard',
                         help='Explicit extended exploration budget; default limits remain unchanged')
@@ -268,6 +274,8 @@ def main():
     parser.add_argument('--localization-tool-steps', type=int, choices=range(1, 13), default=6)
     parser.add_argument('--require-external-tool', action='store_true', help='Integration validation: require an authorized MCP attempt before local fallback')
     args = parser.parse_args()
+    if args.targeted_source_review and not args.recovery_progress:
+        parser.error('--targeted-source-review requires --recovery-progress')
     limits = trial_budget({key: value for key, value in (
         ('max_model_calls', args.max_model_calls), ('max_tokens', args.max_tokens),
         ('max_wallclock', args.max_agent_seconds)) if value is not None}, profile=args.budget_profile)
@@ -285,7 +293,8 @@ def main():
                           'max_verification_rounds': 9 if args.budget_profile == 'extended' else 4,
                           'budget_profile': args.budget_profile, 'benchmark_ready': False,
                           'diagnostic_inspection': args.diagnostic_inspection == 'required',
-                          'recovery_progress': args.recovery_progress}))
+                          'recovery_progress': args.recovery_progress,
+                          'targeted_source_review': args.targeted_source_review}))
         return 0
     docker = Path('D:/Docker/Desktop/resources/bin')
     if not shutil.which('docker') and (docker/'docker.exe').is_file():
@@ -297,7 +306,8 @@ def main():
                      resume_snapshot=args.resume_snapshot.resolve() if args.resume_snapshot else None,
                      saved_repo=args.saved_repo.resolve() if args.saved_repo else None,
                      diagnostic_inspection=args.diagnostic_inspection == 'required',
-                     recovery_progress=args.recovery_progress, budget_limits=limits, budget_profile=args.budget_profile)
+                     recovery_progress=args.recovery_progress, targeted_source_review=args.targeted_source_review,
+                     budget_limits=limits, budget_profile=args.budget_profile)
     print(json.dumps({key: value for key, value in report.items() if key != 'implementation'}, indent=2))
     return 0 if report['official_resolved'] is True else 1
 
