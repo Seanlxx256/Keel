@@ -16,4 +16,10 @@ The verifier **launcher runs on the host** under Keel's local command backend an
 
 Full outputs: `run/`, `verifications/`, `prediction/`, `final-grade/`, `trial.json`, `input-receipt.json`. The implementation and task receipts are checked before/after model calls; edit-free execution is required. Runtime report status and official resolved status remain distinct.
 
+Optional `--recovery-progress` enables experimental per-round evidence inventory
+and feedback to the next Critic, independently of diagnostic inspection. It is off
+by default and recorded in plan/trial reports. It adds context but no model calls,
+permissions or budget. See [recovery progress](recovery-progress.md) for verification
+comparison rules and limits; it does not certify execution of a semantic next_check.
+
 Validation: five task-runner tests cover configuration boundary, reference-preflight rejection, no-patch rejection, stripping setup/reference-test-patch text from feedback, and real git diff/HEAD binding. Bridge tests independently cover actual loader/transport contracts and mocked grading. No live Keel inference or repair success is claimed until the operator executes this runner.

@@ -122,6 +122,27 @@ class AdaptiveTests(unittest.TestCase):
         self.assertIn('+    return 4', str(observation['current_changes']))
         self.assertEqual(len(result['recovery']['diagnoses']), 2)
 
+    def test_progress_feedback_binds_prior_question_to_real_receipts_without_extra_calls(self):
+        root = self.workspace()
+        config = self.config()
+        config['recovery']['monitor_progress'] = True
+        model = self.model([{'files': ['pkg/actual.py']}, {'locations': ['pkg/actual.py:1']},
+            self.patch('actual', 1, 2), {'action': 'repair', 'reason': 'Inspect observed wrong value'},
+            self.patch('actual', 2, 4), {'action': 'repair', 'reason': 'Earlier correction is disproved'},
+            self.patch('actual', 4, 3)])
+        result = run(config, root, root/'.keel/run', model=model)
+        self.assertEqual(result['status'], 'passed', result.get('failure'))
+        self.assertEqual(len(model.calls), 7)
+        self.assertNotIn('previous_check_observations', json.loads(model.calls[3][1]['content']))
+        observed = json.loads(model.calls[5][1]['content'])['previous_check_observations']
+        self.assertEqual(observed['question'], result['recovery']['diagnoses'][0]['next_check'])
+        self.assertEqual(observed['check_execution'], 'not_established')
+        self.assertEqual(observed['verification_comparison']['status'], 'incomparable')
+        rows = result['recovery']['progress']['rounds']
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[-1]['terminal_status'], 'passed')
+        self.assertTrue(all(row['verification_fact_ids'] for row in rows))
+
     def test_no_effective_repair_reselects_fresh_source_before_retry(self):
         root = self.workspace()
         model = self.model([{'files': ['pkg/actual.py']}, {'locations': ['pkg/actual.py:1']},

@@ -13,7 +13,7 @@ from .core import BudgetExceeded, InputCapacityExceeded, InvalidSelection, Model
 
 
 def validate_recovery(config):
-    if (not isinstance(config, dict) or set(config) - {'max_actions', 'repeat_limit', 'strategy', 'write_roots'} or
+    if (not isinstance(config, dict) or set(config) - {'max_actions', 'repeat_limit', 'strategy', 'write_roots', 'monitor_progress'} or
             type(config.get('max_actions', 0)) is not int or not 0 <= config.get('max_actions', 0) <= 12 or
             type(config.get('repeat_limit', 2)) is not int or not 1 <= config.get('repeat_limit', 2) <= 3):
         raise ValueError('recovery requires max_actions 0..12 and repeat_limit 1..3')
@@ -27,6 +27,10 @@ def validate_recovery(config):
         raise ValueError('write_roots requires unique repository-relative directories')
     if config.get('strategy') == 'adaptive' and (not config.get('max_actions') or not roots):
         raise ValueError('adaptive recovery requires max_actions and explicit write_roots')
+    if type(config.get('monitor_progress', False)) is not bool:
+        raise ValueError('monitor_progress must be boolean')
+    if config.get('monitor_progress') and config.get('strategy') != 'adaptive':
+        raise ValueError('monitor_progress requires adaptive recovery')
     return config
 
 
@@ -69,6 +73,8 @@ class RecoveryController:
         self.actions = []
         self.failures = {}
         self.decisions = []
+        from .recovery_progress import RecoveryProgress
+        self.progress = RecoveryProgress(workspace) if config.get('monitor_progress') else None
 
     def change_evidence(self, originals):
         """Read actual current changes, not model summaries, with explicit omissions."""
@@ -113,6 +119,16 @@ class RecoveryController:
                        'failed_verification': bounded_verification(verification),
                        'previous_actions': self.actions[-3:],
                        'previous_diagnoses': self.decisions[-2:], 'current_changes': changes or {}}
+        if self.progress:
+            row = self.progress.review(verification)
+            if row:
+                observation['previous_check_observations'] = self.progress.context(row)
+                observation['progress_instruction'] = (
+                    'Review whether the preceding next_check was actually answered by the observed evidence. '
+                    'IDs and source activity alone do not prove execution or relevance. '
+                    'Use previous_attempt_assessment to distinguish observed facts from an unverified hypothesis. '
+                    'For next_check state the uncertainty to resolve and a check that could change your diagnosis. '
+                    'Unchanged failures do not rule out useful diagnostic progress; more reads do not prove it.')
         if feedback:
             observation['host_decision_error'] = feedback[:700]
         messages = [{'role': 'system', 'content':
@@ -179,6 +195,8 @@ class RecoveryController:
                          'Choose replan/repair if a useful permitted check remains; otherwise identify a concrete '
                          'blocker and retain stop. Do not claim the regression is patch-caused without evidence.',
                 _review_stop=False)
+        if self.progress:
+            self.progress.begin(decision, verification, fact)
         return decision
 
     def permit(self, kind, error, state):
@@ -238,9 +256,12 @@ class RecoveryController:
                                        'against the failed input and diagnosis; test the hypothesis before repeating edits.'}
 
     def report(self):
-        return {'max_actions': self.limit, 'used_actions': len(self.actions), 'actions': self.actions,
+        report = {'max_actions': self.limit, 'used_actions': len(self.actions), 'actions': self.actions,
                 'diagnoses': self.decisions,
                 'scope': 'Shared runtime recovery budget; model/tool/token/wall-clock limits still apply'}
+        if self.progress:
+            report['progress'] = self.progress.report()
+        return report
 
 
 def verification_observation(verification):

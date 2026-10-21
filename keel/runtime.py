@@ -617,6 +617,8 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
             record_failure()
         lifecycle.finish(result["status"])
         result["state_machine"] = lifecycle.report()
+        if recovery and recovery.progress:
+            recovery.progress.review(result['verification'], terminal_status=result['status'])
         if candidates is not None and result['status']=='failed' and result.get('failure',{}).get('category') in {
                 'budget_exhausted','recovery_stopped','verification_failed'}:
             try:

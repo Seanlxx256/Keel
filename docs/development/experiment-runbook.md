@@ -831,3 +831,19 @@ completed-arm receipts guard resume. Existing completed arms are reused without
 model calls; incomplete arms are not automatically retried. This runner changes
 neither production reflection nor domain-specific repair behavior. Closed-menu
 diagnosis results cannot establish free-form investigation or repair efficacy.
+
+## Observe recovery questions without turning activity into a success criterion
+
+The real diagnosis pilot had correct first probe choices/predictions in all eight
+arms; two baseline arms failed evidence-ID validation. Do not use the aggregate
+2/4 versus 4/4 as evidence for mandatory diagnostic gates. A smaller opt-in
+recovery.monitor_progress now records the existing Critic question, post-decision
+file/symbol facts and matching new verifier receipts, then supplies a bounded
+inventory to the next Critic. Reuse the existing grouped verification_score and
+test-universe comparison; no extra role, model request, permissions or stop rule.
+New facts alone do not certify relevance, freshness, execution or hypothesis truth.
+Without matching new verifier facts, old supplied results are not revalidation.
+Terminal inventory precedes candidate restoration. The default remains off; larger
+Critic input must still fit the existing context/budget caps. Validate plumbing
+separately from actual task efficacy and freeze a new plan for any comparison.
+See docs/recovery-progress.md and tests/test_recovery_progress.py.

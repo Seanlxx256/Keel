@@ -55,7 +55,10 @@ class SwebenchTaskTests(unittest.TestCase):
     def test_inspection_ablation_disables_only_gate_and_retains_candidate_policy(self):
         self.check_policy_propagation(False)
 
-    def check_policy_propagation(self, inspection):
+    def test_progress_monitor_is_an_explicit_independent_toggle(self):
+        self.check_policy_propagation(False, progress=True)
+
+    def check_policy_propagation(self, inspection, progress=False):
         from examples.run_swebench_task import execute
         from types import SimpleNamespace
         with tempfile.TemporaryDirectory() as temp:
@@ -66,10 +69,13 @@ class SwebenchTaskTests(unittest.TestCase):
                  patch('examples.run_swebench_task.run',return_value={'status':'passed','budget':{}}) as agent, \
                  patch('examples.run_swebench_task.export_prediction'), \
                  patch('examples.run_swebench_task.grade',return_value={'status':'graded','official_resolved':True}) as grade:
-                report=execute(root,root/'task',reference,{'name':'test'},'python',root/'trial',diagnostic_inspection=inspection)
+                report=execute(root,root/'task',reference,{'name':'test'},'python',root/'trial',
+                               diagnostic_inspection=inspection,recovery_progress=progress)
             self.assertEqual(agent.call_args.args[0]['require_diagnostic_inspection'],inspection)
             self.assertTrue(agent.call_args.args[0]['preserve_repair_candidates'])
             self.assertEqual(report['diagnostic_inspection'],inspection)
+            self.assertEqual(agent.call_args.args[0]['recovery']['monitor_progress'], progress)
+            self.assertEqual(report['recovery_progress'], progress)
             acceptance=agent.call_args.args[0]['acceptance'][0]
             self.assertIn('--network-policy',acceptance);self.assertIn('--plugin-policy',acceptance)
             self.assertEqual(grade.call_args.kwargs['network_policy'],'no_pipeline')
