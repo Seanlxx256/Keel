@@ -705,3 +705,129 @@ remaining progress, repeated-range suppression/no-progress stopping, global-budg
 exhaustion and path escape denial. The original failed run is untouched. Synthetic
 coverage checks do not establish real Astropy repair success or validate a model's
 claim of semantic progress; independent grading remains authoritative.
+
+## Locate named diagnostic targets before scanning unrelated pages
+
+The real adaptive Astropy inspection performed 15 assessment calls, covered 919
+new source lines and stopped on repeated reads without editing. It scanned roughly
+900..1600 in a test file while the named failing test definition was at line 2020.
+This demonstrates why new line coverage is not semantic investigative progress.
+
+Diagnostic checks now support literal {path,query} searches as well as source
+ranges. The shared Workspace search_code implementation accepts an optional paths
+scope, uses a distinct cache key and preserves path policy/budget checks. Scoped
+literal search does not require building a Compass index, and test files remain
+read-only. Before planning, names from observed failed test IDs are searched in
+those existing files. Located definition lines and actual search fact IDs are
+navigation evidence, not generated test answers or permission to edit tests.
+Repeated identical searches reuse observations rather than charging new scans.
+
+Progress reports distinguish targets located/read from lines covered. Two rounds
+that still miss the same target require a target-directed search/read, otherwise
+stop; repeated unchanged next_check text and citations also stop. Reading a target
+signature is only a navigation milestone, not proof of having understood its body.
+Search-only citations cannot finish supported/refuted without a cited source read.
+All previous global limits, no-progress protection and source hash checks remain.
+Models can still misjudge relevance: independent source modification, audit and
+verification determine task success. Tests cover a target after 2000 unrelated
+lines, search-then-read navigation, early stopping of continued blind scanning,
+scoped search isolation and metadata path denial. Real full repair remains pending.
+
+## Replay cached source bodies across diagnostic searches without inventing progress
+
+The next real inspection found/read the target immediately but still stopped:
+subsequent stateless assessment requests showed search hits and only an index of
+older source reads. When the model requested those reads again, interval dedup
+skipped the tool without replaying the existing body. It therefore repeatedly
+claimed it had not seen the implementation. This was a context-delivery defect,
+not evidence of an unavailable source or proof the model could not solve the bug.
+
+Diagnostic request construction now keeps up to three complete relevant source
+pages alongside current search results. Requested cached ranges take priority,
+followed by search-matching source, previously cited source and recent windows
+per file. Omitted body IDs are explicit and the full fact index/ledger remains;
+a narrower range selects another cached page. No source body is silently sliced.
+Covered read requests replay original fact IDs/text without a new read_lines fact,
+coverage increment or no-progress reset. Source hashes are checked before reusing
+bodies and after assessment. The model may conclude with sufficient evidence on a
+replay round, while endless requests still stop under unchanged global budgets.
+Tests exercise read-search-replay completion, one read fact and zero new coverage,
+bounded body retention/explicit omissions and stale-source denial. Real historical
+windows were replayed read-only; no old source, score or model budget was changed.
+A fresh real repair is still required to establish task effectiveness.
+
+## Stop layering mechanisms when development repair efficacy is unproven
+
+A descriptive review of six Astropy continuation revisions recorded 553,140 tokens
+and 114 model-call attempts without a resolved continuation. These revisions are
+not paired controls and include a connection/infra error, so the totals establish
+cost exposure, not causal regression or a benchmark success rate. Offline replay
+of four cached-range requests confirms current context delivery only; it does not
+replay model reasoning or establish future repair success.
+
+Before more recovery features or expensive reruns, freeze a simple-vs-required
+inspection pilot using the same saved patch, task, grading/reference, model/tools,
+checkpoint policy and budgets. run_swebench_task exposes --diagnostic-inspection
+required/off (default unchanged); both arms still use ordinary Critic feedback and
+independent grading. The treatment toggle is reported explicitly. The frozen local
+pilot checks implementation/input hashes, preserves incomplete/error arms, reuses
+matching completed arms and stops on infrastructure/model connection failures.
+One attempt per arm is not statistical evidence. If both fail, report no efficacy
+winner; if both pass, report costs descriptively. Record historical failures and
+include full costs rather than promoting a mechanism on synthetic tests alone.
+See docs/evaluations/diagnostic-inspection-review-v1.md for the review and prepared,
+not yet executed, pilot. No additional runtime recovery feature was added here.
+
+## Completed inspection ablation: simplify defaults and retain falsifiable lessons
+
+The frozen simple/required Astropy pair completed with no resolved arm. Simple
+spent 156,074 tokens / 30 calls with four verifications; required inspection spent
+68,107 / 13 with no edits or verifications. Lower spend from stopping early is not
+an efficacy-preserving optimization. Actual checkpoint hashes confirm the simple
+arm restored its earlier seed after four equal-ranked candidates. Preserve all
+scores and do not rerun the old plan after changing implementation.
+
+The task runner now defaults diagnostic inspection off in configuration, execute
+API and CLI; explicit required remains an experimental option. This avoids an
+unproven mandatory gate, without asserting a generalized performance advantage.
+Offline inspection found six zero-hit prose-like queries against a literal-search
+tool; individual identifiers matched in the same source copies. Store this as a
+versioned experience/prompt candidate with source evidence and counterexamples,
+not an automatically verified repair rule. Test unseen tool-use cases before
+promoting guidance; full-task benefits still require independent evaluation.
+See docs/evaluations/diagnostic-inspection-review-v1.md. No additional runtime
+recovery/long-term-memory system is added on the basis of these failures.
+
+## Separate search-contract evaluation from repair reasoning
+
+examples/evaluate_search_guidance.py prepares or executes six synthetic literal
+search cases against the real scoped ToolGateway. Cases include a legitimate
+multiword phrase, case-insensitive identifier matching, recovery from a prose
+query miss, a decoy in another file and an absent identifier. Expected labels and
+fixture source are not included in model prompts. Baseline/candidate ordering is
+counterbalanced; one response per case/arm means at most twelve model requests,
+with no retries, a 45-second request timeout and a 600-second stage ceiling.
+Credentials are checked before creating an execute output. Failures retain an
+incomplete report and completed observations; original runs are never overwritten.
+Input/guidance/implementation hashes and raw replies are recorded. No prompt is
+promoted automatically. The local fixture/scoring tests verify tool behavior only;
+even a perfect model score would establish neither causal diagnosis nor improved
+task repair. These examples become development material after their first use.
+
+## Diagnose through discriminating observations before claiming reflection gains
+
+The search-guidance pilot improved a semantic boolean answer, while search choices
+were identical in effectiveness. Report these components separately rather than
+using aggregate scores to claim a historical failure was fixed.
+examples/evaluate_diagnosis.py now isolates diagnosis in synthetic twin cases with
+identical symptoms and different underlying causes. Fixed host-owned probes are
+executed through CommandRunner; model text cannot become executable code. Before
+execution the model predicts both hypotheses' outcomes; only actual-case results
+enter the next model request, while counterfactual fixture results remain scorer
+evidence. Correct guesses without valid discriminating evidence fail. Protocol
+errors count as failed cases; model/infra errors stop as incomplete, preserving
+attempt counts and raw replies. Use shared Budget and atomic_json; hashes and
+completed-arm receipts guard resume. Existing completed arms are reused without
+model calls; incomplete arms are not automatically retried. This runner changes
+neither production reflection nor domain-specific repair behavior. Closed-menu
+diagnosis results cannot establish free-form investigation or repair efficacy.

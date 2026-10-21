@@ -37,6 +37,11 @@ Before adding or changing experiment scripts, read the
 It records verified failure patterns, reusable implementations, resume rules and
 regression checks. Repository agents are directed to it by [AGENTS.md](AGENTS.md).
 
+For the reasoning behind design changes, failed experiments and interview-ready
+case studies, see the Chinese [project learning journal](docs/development/learning-journal.md).
+It is maintained across project turns and separates observations, verified results
+and pending ideas; it is not a runtime memory or automatic-learning claim.
+
 Python 3.11 or later is required. The runtime has no third-party Python dependencies.
 
 From the repository root:

@@ -37,6 +37,7 @@ def request(model, workspace, settings, stage, data, schema):
 
 def inspect_diagnosis(model,workspace,goal,decision,verification,source_files,settings):
     paths=list(dict.fromkeys(source_files))
+    targets=[]
     # Failing test files are permitted read-only evidence, never added edit scope.
     for row in verification:
         try: failures=json.loads(row.get('stdout','')).get('failed_tests',[])
@@ -48,24 +49,48 @@ def inspect_diagnosis(model,workspace,goal,decision,verification,source_files,se
                 try:
                     if workspace.path(name).is_file(): paths.append(name)
                 except (ValueError,OSError,PolicyDenied): pass
+            symbol=str(failure.get('test','')).split('::')[-1].split('[',1)[0]
+            if name in paths and symbol.isidentifier() and {'path':name,'query':symbol} not in targets:
+                targets.append({'path':name,'query':symbol})
     if not paths: raise RecoveryStopped('No current source paths available for diagnostic inspection')
-    schema={'type':'object','properties':{'checks':{'type':'array','minItems':1,'maxItems':3,'items':{
-        'type':'object','properties':{'path':{'type':'string','enum':paths},
-        'start_line':{'type':'integer','minimum':1},'end_line':{'type':'integer','minimum':1}},
-        'required':['path','start_line','end_line'],'additionalProperties':False}}},
-        'required':['checks'],'additionalProperties':False}
-    plan=request(model,workspace,settings,'plan',{'goal':goal,'critic':decision,'readable_paths':paths,
-        'instruction':'Choose 1..3 source ranges to investigate next_check. Large ranges are paged, '
-                      'not rejected: each observation reports actual lines, unread remainder and next position. '
-                      'Test files are read-only. No shell, installs or edits are available.'},schema)
-    if not isinstance(plan,dict) or set(plan)!={'checks'}:
-        raise ModelError('Diagnostic plan requires source checks')
     gateway=ToolGateway('scout',workspace)
     evidence=[]
+    searches={}
+
+    def search(check):
+        key=(check['path'],check['query'].casefold())
+        if key in searches:
+            return searches[key], False
+        result=gateway.call('search_code',{'query':check['query'],'paths':[check['path']]})
+        payload=workspace.ledger.recall(result['fact_id'])
+        row={'fact_id':result['fact_id'],'path':check['path'],'query':check['query'],'kind':'search',
+             'matches':payload['matches'][:8],'omitted_matches':max(0,len(payload['matches'])-8),
+             'truncated':payload.get('truncated',False),
+             'source_sha256':hashlib.sha256(workspace.path(check['path']).read_bytes()).hexdigest()}
+        searches[key]=row;evidence.append(row)
+        return row,True
+
+    # Observed failed test IDs are navigation anchors, never task-specific fixes.
+    for target in targets:
+        search(target)
+    schema={'type':'object','properties':{'checks':{'type':'array','minItems':1,'maxItems':3,
+             'items':check_schema(paths)}},'required':['checks'],'additionalProperties':False}
+    plan=request(model,workspace,settings,'plan',{'goal':goal,'critic':decision,'readable_paths':paths,
+        'target_locations':target_locations(targets,searches),
+        'instruction':'Choose 1..3 checks. Use {path,query} to search a literal name within a readable file '
+            'BEFORE guessing line numbers. Known failing test names have already been searched; '
+            'read their displayed locations directly. Use {path,start_line,end_line} for source ranges. '
+            'Large ranges are paged and report actual bounds/remainder. Test files are read-only.'},schema)
+    if not isinstance(plan,dict) or set(plan)!={'checks'}:
+        raise ModelError('Diagnostic plan requires source checks')
     history=[]
     all_checks=[]
     coverage={}
     no_progress=0
+    target_stall=0
+    last_target_count=0
+    stale_assessments=0
+    last_signature=None
     previous_assessment=None
     checks=plan['checks']
     while True:
@@ -73,13 +98,26 @@ def inspect_diagnosis(model,workspace,goal,decision,verification,source_files,se
         batch=[]
         pending=[]
         new_lines=0
+        new_search_hits=0
         for check in checks:
             workspace.budget.check()
             name=check['path']
+            if 'query' in check:
+                row,fresh=search(check)
+                batch.append(row)
+                new_search_hits+=len(row['matches']) if fresh else 0
+                history.append({'path':name,'query':check['query'],'fact_id':row['fact_id'],
+                                'status':'searched' if fresh else 'already_searched',
+                                'new_hits':len(row['matches']) if fresh else 0})
+                continue
             start=first_unread(coverage.get(name,[]),check['start_line'],check['end_line'])
             if start is None:
+                replayed=[row['fact_id'] for row in cached_source_windows(evidence,check)]
                 history.append({'path':name,'requested_start':check['start_line'],
-                                'requested_end':check['end_line'],'status':'already_observed'})
+                                'requested_end':check['end_line'],'status':'already_observed',
+                                'replayed_fact_ids':replayed})
+                workspace.trace.emit('implementer','diagnostic_source_replayed',path=name,
+                                     fact_ids=replayed,new_lines=0)
                 continue
             current_check={**check,'start_line':start}
             result=gateway.call('read_lines',current_check)
@@ -103,7 +141,11 @@ def inspect_diagnosis(model,workspace,goal,decision,verification,source_files,se
             if next_line is not None:
                 pending.append({'path':name,'start_line':next_line,'end_line':end})
         all_checks.extend(checks)
-        no_progress=no_progress+1 if new_lines==0 else 0
+        no_progress=no_progress+1 if new_lines==0 and new_search_hits==0 else 0
+        pending_targets=unread_targets(targets,searches,coverage)
+        target_count=len(targets)-len(pending_targets)
+        target_stall=target_stall+1 if pending_targets and target_count==last_target_count else 0
+        last_target_count=target_count
         ids=[row['fact_id'] for row in evidence]
         if not ids:
             raise RecoveryStopped('Diagnostic inspection produced no source evidence')
@@ -111,23 +153,33 @@ def inspect_diagnosis(model,workspace,goal,decision,verification,source_files,se
             'outcome':{'type':'string','enum':['supported','refuted','insufficient','continue']},
             'evidence_ids':{'type':'array','minItems':1,'maxItems':3,'items':{'type':'integer','enum':ids}},
             'assessment':{'type':'string'},'next_step':{'type':'string'},
-            'checks':{'type':'array','maxItems':3,'items':{
-                'type':'object','properties':{'path':{'type':'string','enum':paths},
-                'start_line':{'type':'integer','minimum':1},'end_line':{'type':'integer','minimum':1}},
-                'required':['path','start_line','end_line'],'additionalProperties':False}}},
+            'checks':{'type':'array','maxItems':3,'items':check_schema(paths)}},
             'required':['outcome','evidence_ids','assessment','next_step','checks'],'additionalProperties':False}
         workspace.trace.emit('implementer','diagnostic_inspection_progress',new_lines=new_lines,
-                             no_progress_rounds=no_progress,pending_ranges=pending)
+                             no_progress_rounds=no_progress,pending_ranges=pending,
+                             unresolved_targets=pending_targets,target_stall_rounds=target_stall)
+        check_freshness(workspace,evidence)
+        shown,omitted = inspection_observations(evidence,batch,checks,previous_assessment)
+        shown_ids={row['fact_id'] for row in shown}
         assessment=request(model,workspace,settings,'assessment',{
-            'goal':goal,'critic':decision,'observations':batch or evidence[-3:],
-            'prior_observation_index':[{k:r[k] for k in ('fact_id','path','start_line','end_line','source_sha256')}
-                                       for r in evidence if r not in batch],
+            'goal':goal,'critic':decision,'observations':shown,
+            'omitted_observation_bodies':omitted,
+            'evidence_delivery':'Current source plus relevant cached windows; cached replay is not a new read or progress. '
+                'Omitted bodies remain in the ledger/index; request a narrower range to see another cached page.',
+            'prior_observation_index':[{k:r[k] for k in ('fact_id','path','start_line','end_line','source_sha256','query') if k in r}
+                                       for r in evidence if r['fact_id'] not in shown_ids],
             'previous_assessment':previous_assessment,'progress':history[-len(checks):],
             'pending_ranges':pending,'new_lines':new_lines,'no_progress_rounds':no_progress,
+            'target_locations':target_locations(targets,searches),'unresolved_targets':pending_targets,
+            'target_stall_rounds':target_stall,
+            'strategy_review_required':target_stall>=2 or stale_assessments>=1,
             'remaining_budget':workspace.budget.report(),
             'instruction':'Assess the hypothesis using actual reads; cite only observed fact IDs. '
                 'Return continue only with a concrete next check and evidence-based reason. Set checks=[] '
-                'to read pending ranges, or choose new readable ranges to change direction. '
+                'to read pending ranges, or choose {path,query} searches / new readable ranges to change direction. '
+                'Use literal searches to locate named functions; do not sequentially scan for a known symbol. '
+                'If strategy_review_required, address an unresolved target at its known location or search its name, '
+                'or stop insufficient. Do not repeat a next_step without new cited evidence. '
                 'Finish supported/refuted when enough evidence exists; leave checks=[]. Return insufficient '
                 'when blocked or no meaningful investigation remains. Reading new lines proves coverage, '
                 'not relevance or correctness. Repeated reads do not count as progress. Code inspection '
@@ -142,14 +194,24 @@ def inspect_diagnosis(model,workspace,goal,decision,verification,source_files,se
             raise ModelError('Diagnostic assessment must cite actual fresh source facts')
         check_freshness(workspace,evidence)
         if assessment['outcome']!='continue':
+            if assessment['outcome'] in {'supported','refuted'} and not any(
+                    r['fact_id'] in assessment['evidence_ids'] and r.get('kind')!='search' for r in evidence):
+                raise RecoveryStopped('Search located symbols but no cited source window was inspected')
             if assessment['checks']:
                 raise ModelError('Finished diagnostic assessment must not request further reads')
             break
+        signature=(tuple(sorted(assessment['evidence_ids'])),' '.join(assessment['next_step'].casefold().split()))
+        stale_assessments=stale_assessments+1 if signature==last_signature else 0
+        last_signature=signature
         checks=assessment['checks'] or pending
+        if target_stall>=2 and pending_targets and not addresses_target(checks,pending_targets):
+            raise RecoveryStopped('Diagnostic strategy stalled on unresolved targets; search or read a located target instead of scanning')
         if not checks:
             raise RecoveryStopped('Inspection requested continuation without an untried check or unread range')
         if no_progress>=2:
             raise RecoveryStopped('Diagnostic inspection repeated without new source evidence; change strategy or stop')
+        if stale_assessments>=2:
+            raise RecoveryStopped('Diagnostic assessment repeated the same check and citations without a new finding')
         previous_assessment=assessment
     cited=set(assessment['evidence_ids'])
     record={'critic_next_check':decision['next_check'],'checks':all_checks,
@@ -162,15 +224,57 @@ def inspect_diagnosis(model,workspace,goal,decision,verification,source_files,se
     return record
 
 
+def check_schema(paths):
+    return {'anyOf':[
+        {'type':'object','properties':{'path':{'type':'string','enum':paths},
+         'start_line':{'type':'integer','minimum':1},'end_line':{'type':'integer','minimum':1}},
+         'required':['path','start_line','end_line'],'additionalProperties':False},
+        {'type':'object','properties':{'path':{'type':'string','enum':paths},
+         'query':{'type':'string','minLength':1,'maxLength':300}},
+         'required':['path','query'],'additionalProperties':False}]}
+
+
 def validate_checks(checks,paths):
     if not isinstance(checks,list) or not 1<=len(checks)<=3:
         raise ModelError('Diagnostic plan requires 1..3 source checks')
     for check in checks:
-        if (not isinstance(check,dict) or set(check)!={'path','start_line','end_line'}
-                or not isinstance(check['path'],str) or check['path'] not in paths
-                or type(check['start_line']) is not int or type(check['end_line']) is not int
-                or not 1<=check['start_line']<=check['end_line']):
-            raise ModelError('Diagnostic source check is outside supplied paths or valid line ranges')
+        if (not isinstance(check,dict) or not isinstance(check.get('path'),str) or check['path'] not in paths):
+            raise ModelError('Diagnostic source check is outside supplied paths')
+        if set(check)=={'path','query'}:
+            if not isinstance(check['query'],str) or not check['query'].strip() or len(check['query'])>300:
+                raise ModelError('Diagnostic search requires a bounded nonempty literal query')
+        elif (set(check)!={'path','start_line','end_line'} or type(check['start_line']) is not int
+                or type(check['end_line']) is not int or not 1<=check['start_line']<=check['end_line']):
+            raise ModelError('Diagnostic source check has invalid line ranges')
+
+
+def target_locations(targets,searches):
+    rows=[]
+    for target in targets:
+        observation=searches.get((target['path'],target['query'].casefold()),{})
+        lines=[m['line'] for m in observation.get('matches',[]) if m['file']==target['path'] and
+               m['text'].lstrip().startswith(('def '+target['query']+'(', 'async def '+target['query']+'('))]
+        rows.append({**target,'definition_lines':lines,'search_fact_id':observation.get('fact_id')})
+    return rows
+
+
+def unread_targets(targets,searches,coverage):
+    return [target for target in target_locations(targets,searches)
+            if not any(first_unread(coverage.get(target['path'],[]),line,line) is None
+                       for line in target['definition_lines'])]
+
+
+def addresses_target(checks,targets):
+    for check in checks:
+        if not isinstance(check,dict):continue
+        for target in targets:
+            if check.get('path')!=target['path']:continue
+            if isinstance(check.get('query'),str) and target['query'] in check['query']:
+                return True
+            if (type(check.get('start_line')) is int and type(check.get('end_line')) is int
+                    and any(check['start_line']<=n<=check['end_line'] for n in target['definition_lines'])):
+                return True
+    return False
 
 
 def first_unread(intervals,start,end):
@@ -202,3 +306,41 @@ def check_freshness(workspace,evidence):
     for name,expected in hashes.items():
         if hashlib.sha256(workspace.path(name).read_bytes()).hexdigest()!=expected:
             raise ModelError('Diagnostic source changed after inspection')
+
+
+def cached_source_windows(evidence,check):
+    """Select complete previously observed pages, never manufacture a new read."""
+    candidates=[row for row in evidence if row.get('kind')!='search' and row['path']==check['path']
+                and row['end_line']>=check['start_line'] and row['start_line']<=check['end_line']]
+    return sorted(candidates,key=lambda row:(-min(row['end_line'],check['end_line'])+
+                                           max(row['start_line'],check['start_line']),row['start_line']))[:3]
+
+
+def inspection_observations(evidence,batch,checks,previous_assessment):
+    """Keep bounded source bodies across stateless assessment calls and searches."""
+    priority=[row for row in batch if row.get('kind')!='search']
+    for check in checks:
+        if 'query' not in check:
+            priority.extend(cached_source_windows(evidence,check))
+        else:
+            priority.extend(row for row in reversed(evidence) if row.get('kind')!='search'
+                            and row['path']==check['path'] and check['query'].casefold() in row['text'].casefold())
+    cited=set((previous_assessment or {}).get('evidence_ids',[]))
+    priority.extend(row for row in evidence if row['fact_id'] in cited and row.get('kind')!='search')
+    # Keep the most recent window per source file when a search returns only locations.
+    seen_paths=set()
+    for row in reversed(evidence):
+        if row.get('kind')!='search' and row['path'] not in seen_paths:
+            priority.append(row);seen_paths.add(row['path'])
+    sources=[];seen=set()
+    for row in priority:
+        if row['fact_id'] not in seen:
+            sources.append(row);seen.add(row['fact_id'])
+            if len(sources)==3:break
+    searches=[]
+    for row in batch:
+        if row.get('kind')=='search' and row['fact_id'] not in seen:
+            searches.append(row);seen.add(row['fact_id'])
+    shown=sources+searches[:3]
+    shown_ids={row['fact_id'] for row in shown}
+    return shown,[row['fact_id'] for row in evidence if row['fact_id'] not in shown_ids]

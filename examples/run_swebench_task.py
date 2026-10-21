@@ -60,7 +60,7 @@ def config_for(task, task_dir, output, model_config, harness_python, environment
     config = {'mode': 'localized-proposal', 'goal': task['problem_statement'], 'model': model_config,
             'agent': {'max_steps': 12, 'max_context_bytes': 48000, 'max_output': 4096, 'require_change': True},
             'recovery': {'strategy': 'adaptive', 'max_actions': 6, 'repeat_limit': 2, 'write_roots': ['.']},
-            'verification_repair_attempts': 3, 'preserve_repair_candidates': True, 'require_diagnostic_inspection': True,
+            'verification_repair_attempts': 3, 'preserve_repair_candidates': True, 'require_diagnostic_inspection': False,
             'budget': {'max_wallclock': 1800, 'max_model_calls': 30, 'max_tokens': 180000, 'max_tool_calls': 80},
             'execution': {'backend': 'local'},
             'acceptance': [[sys.executable, str(verifier), '--task', str(task_dir.resolve()),
@@ -73,7 +73,9 @@ def config_for(task, task_dir, output, model_config, harness_python, environment
     return config
 
 
-def execute(root, task_dir, reference_dir, model_config, harness_python, output, *, mcp_config=None, localization_tool_steps=6, require_external_tool=False, local_exploration=False, resume_snapshot=None, saved_repo=None):
+def execute(root, task_dir, reference_dir, model_config, harness_python, output, *, mcp_config=None, localization_tool_steps=6, require_external_tool=False, local_exploration=False, resume_snapshot=None, saved_repo=None, diagnostic_inspection=False):
+    if type(diagnostic_inspection) is not bool:
+        raise ValueError('diagnostic_inspection must be boolean')
     if require_external_tool and not mcp_config:
         raise ValueError('--require-external-tool requires --mcp-config')
     # Local configuration/credential checks must precede checkout, output creation
@@ -125,6 +127,7 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
     model = FrozenModel(base_model, frozen)
     report = {'status': 'preparing', 'instance_id': task['instance_id'], 'official_resolved': None,
               'benchmark_ready': False, 'implementation': hashes,
+              'diagnostic_inspection': diagnostic_inspection,
               'scope': 'Exploratory public task; prior exposure unverified. Host agent and verifier launcher; official Docker harness executes tests.'}
     if policies:
         report['environment_policies']=policies
@@ -162,6 +165,7 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
             finally:
                 with_seed.ledger.close()
         config = config_for(task, task_dir, output, model_config, harness_python, overlay_path, policies)
+        config['require_diagnostic_inspection'] = diagnostic_inspection
         if continuation:
             config['continuation_context']=continuation
         if local_exploration:
@@ -214,6 +218,8 @@ def main():
     parser.add_argument('--harness-python', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--execute', action='store_true')
+    parser.add_argument('--diagnostic-inspection', choices=('required','off'), default='off',
+                        help='Experimental pre-edit inspection gate; off by default pending efficacy evidence')
     parser.add_argument('--resume-snapshot',type=Path)
     parser.add_argument('--saved-repo',type=Path)
     parser.add_argument('--mcp-config', type=Path, help='Explicit authorized tools; servers must target the trial workspace, not another repository')
@@ -230,7 +236,8 @@ def main():
         load_saved_repair(args.task, args.reference_grade, args.resume_snapshot, args.saved_repo)
     if not args.execute:
         print(json.dumps({'status': 'plan_only', 'instance_id': verify_task(args.task)['instance_id'], 'max_model_calls': 30,
-                          'max_agent_seconds': 1800, 'max_verification_rounds': 4, 'benchmark_ready': False}))
+                          'max_agent_seconds': 1800, 'max_verification_rounds': 4, 'benchmark_ready': False,
+                          'diagnostic_inspection': args.diagnostic_inspection == 'required'}))
         return 0
     docker = Path('D:/Docker/Desktop/resources/bin')
     if not shutil.which('docker') and (docker/'docker.exe').is_file():
@@ -240,7 +247,8 @@ def main():
                      mcp_config=args.mcp_config.resolve() if args.mcp_config else None,
                      localization_tool_steps=args.localization_tool_steps, require_external_tool=args.require_external_tool,
                      resume_snapshot=args.resume_snapshot.resolve() if args.resume_snapshot else None,
-                     saved_repo=args.saved_repo.resolve() if args.saved_repo else None)
+                     saved_repo=args.saved_repo.resolve() if args.saved_repo else None,
+                     diagnostic_inspection=args.diagnostic_inspection == 'required')
     print(json.dumps({key: value for key, value in report.items() if key != 'implementation'}, indent=2))
     return 0 if report['official_resolved'] is True else 1
 

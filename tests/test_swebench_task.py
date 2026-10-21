@@ -50,6 +50,12 @@ class SwebenchTaskTests(unittest.TestCase):
         return reference
 
     def test_recovered_policies_propagate_through_agent_verification_and_final_grade(self):
+        self.check_policy_propagation(True)
+
+    def test_inspection_ablation_disables_only_gate_and_retains_candidate_policy(self):
+        self.check_policy_propagation(False)
+
+    def check_policy_propagation(self, inspection):
         from examples.run_swebench_task import execute
         from types import SimpleNamespace
         with tempfile.TemporaryDirectory() as temp:
@@ -60,7 +66,10 @@ class SwebenchTaskTests(unittest.TestCase):
                  patch('examples.run_swebench_task.run',return_value={'status':'passed','budget':{}}) as agent, \
                  patch('examples.run_swebench_task.export_prediction'), \
                  patch('examples.run_swebench_task.grade',return_value={'status':'graded','official_resolved':True}) as grade:
-                report=execute(root,root/'task',reference,{'name':'test'},'python',root/'trial')
+                report=execute(root,root/'task',reference,{'name':'test'},'python',root/'trial',diagnostic_inspection=inspection)
+            self.assertEqual(agent.call_args.args[0]['require_diagnostic_inspection'],inspection)
+            self.assertTrue(agent.call_args.args[0]['preserve_repair_candidates'])
+            self.assertEqual(report['diagnostic_inspection'],inspection)
             acceptance=agent.call_args.args[0]['acceptance'][0]
             self.assertIn('--network-policy',acceptance);self.assertIn('--plugin-policy',acceptance)
             self.assertEqual(grade.call_args.kwargs['network_policy'],'no_pipeline')
@@ -114,6 +123,8 @@ class SwebenchTaskTests(unittest.TestCase):
             self.assertNotIn('SECRET', json.dumps(config))
             self.assertEqual(config['recovery']['strategy'], 'adaptive')
             self.assertEqual(config['verification_repair_attempts'], 3)
+            self.assertFalse(config['require_diagnostic_inspection'])
+            self.assertTrue(config['preserve_repair_candidates'])
             self.assertIn('swebench_verify_workspace.py', config['acceptance'][0][1])
             validate(config)
 

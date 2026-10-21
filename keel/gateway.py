@@ -10,7 +10,7 @@ from .core import PolicyDenied
 
 TOOLS = {
     "list_files": "{} -> repository file names",
-    "search_code": '{"query": "literal text"} -> matches and ledger reference',
+    "search_code": '{"query": "literal text", "paths": ["optional/relative/file.py"]} -> literal matches and ledger reference; paths restrict the search',
     "read_file": '{"path": "relative/path"} -> ledger reference and text preview',
     "read_page": '{"path": "relative/path", "start_line": 1} -> source page capped at 80 lines/3000 characters; pass returned next_line as start_line for the next page',
     "read_lines": '{"path": "relative/path", "start_line": 1, "end_line": 40} -> bounded source window; oversized requests return a partial page capped at 80 lines/3000 characters; follow returned next_line',
@@ -19,7 +19,7 @@ TOOLS = {
 
 LOCAL_CONTRACTS = {
     'list_files': ({}, {}), 'read_file': ({'path': str}, {}),
-    'search_code': ({'query': str}, {}), 'find_symbol': ({'name': str}, {}),
+    'search_code': ({'query': str}, {'paths': list}), 'find_symbol': ({'name': str}, {}),
     'get_context': ({'file': str, 'line': int}, {}),
     'get_symbols_overview': ({'file': str}, {'depth': int, 'offset': int, 'limit': int, 'max_bytes': int}),
     'replace': ({'path': str, 'old': str, 'new': str}, {}),
@@ -92,6 +92,8 @@ class ToolGateway:
                 arguments.update(properties={key: {'type': 'string' if kind is str else 'integer'}
                     for key, kind in {**required, **optional}.items()}, required=list(required),
                     additionalProperties=False)
+                if tool == 'search_code':
+                    arguments['properties']['paths'] = {'type':'array','minItems':1,'maxItems':32,'items':{'type':'string'}}
                 if tool == 'read_lines':
                     for name in ('start_line', 'end_line'):
                         arguments['properties'][name]['minimum'] = 1
@@ -224,7 +226,7 @@ class ToolGateway:
         elif tool == "search_code":
             if not isinstance(args["query"], str) or not args["query"].strip():
                 raise ValueError("query must be nonempty text")
-            value = self.ws.search(args["query"], role=self.role)
+            value = self.ws.search(args["query"], role=self.role, **({"paths":args["paths"]} if "paths" in args else {}))
             kind = "symbol"
         elif tool == "find_symbol":
             value = self.ws.find_symbol(args["name"], role=self.role)

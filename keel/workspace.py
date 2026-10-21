@@ -180,8 +180,14 @@ class Workspace:
         path.write_bytes(updated.encode("utf-8"))
         self.trace.emit("implementer", "tool_call", tool="replace", path=relative)
 
-    def search(self, query: str, limit=30, role="scout"):
-        if self.compass_enabled:
+    def search(self, query: str, limit=30, role="scout", *, paths=None):
+        scoped = None
+        if paths is not None:
+            if (not isinstance(paths, list) or not 1 <= len(paths) <= 32 or
+                    any(not isinstance(name, str) for name in paths) or len(set(paths)) != len(paths)):
+                raise ValueError('Search paths must be 1..32 unique relative paths')
+            scoped = [(name, self.path(name)) for name in paths]
+        if self.compass_enabled and scoped is None:
             from compass.retrieval import Retriever, routing_from_dict
             with self._compass_index(role) as index:
                 result = Retriever(index, routing=routing_from_dict(self.retrieval.get("routing")),
@@ -193,7 +199,7 @@ class Workspace:
             return result
         def compute(snapshot):
             matches = []
-            for name, path in self.files():
+            for name, path in (scoped if scoped is not None else self.files()):
                 self.budget.check()
                 if path.stat().st_size > 1_000_000:
                     continue
@@ -210,7 +216,10 @@ class Workspace:
                     break
             return {"tier": "T0", "confidence": None, "index_ref": digest(snapshot),
                     "matches": matches, "truncated": len(matches) >= limit}
-        value, metadata = self._memoized("search_code", {"query": query, "limit": limit}, compute, role)
+        arguments = {"query": query, "limit": limit}
+        if paths is not None:
+            arguments['paths'] = paths
+        value, metadata = self._memoized("search_code", arguments, compute, role)
         result = {**value, **metadata}
         self.trace.emit(role, "tool_call", tool="search_code", matches=len(result["matches"]), **metadata)
         return result
