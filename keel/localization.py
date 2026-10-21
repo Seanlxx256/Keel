@@ -32,10 +32,12 @@ def selection_request(goal, settings, *, stage, data, keys, instruction, structu
     schema = {'type': 'object', 'properties': {
         key: {'type': 'array', 'minItems': 0 if stage.endswith('-page') else 1, 'maxItems': 8, 'items': {'type': 'string'}}
         for key in keys}, 'required': list(keys), 'additionalProperties': False}
-    if stage.endswith('-page'):
-        if keys == ('files',) and isinstance(data.get('paths'), list):
-            allowed_ids = list(dict.fromkeys([*data['paths'], *data.get('previous_selection', [])]))
-        elif keys == ('locations',) and isinstance(data.get('structure'), list):
+    if keys == ('files',) and isinstance(data.get('paths'), list):
+        allowed_ids = list(dict.fromkeys([*data['paths'],
+            *(data.get('previous_selection', []) if stage.endswith('-page') else [])]))
+        schema['properties']['files']['items']['enum'] = allowed_ids
+    elif stage.endswith('-page'):
+        if keys == ('locations',) and isinstance(data.get('structure'), list):
             allowed_ids = list(dict.fromkeys([
                 *(f"{row['path']}:{symbol[0]}" for row in data['structure'] for symbol in row['symbols']),
                 *data.get('previous_selection', [])]))
@@ -219,6 +221,8 @@ def explore_for_localization(model, workspace, goal, settings, steps):
 
 
 def localize(model, workspace, goal, settings, *, allowed_files=None):
+    marker = '\nHost selection error (untrusted data): '
+    host_feedback = goal.split(marker, 1)[1][:500] if marker in goal else None
     steps = getattr(workspace, 'localization_tool_steps', 0)
     exploration = None
     if steps:
@@ -243,6 +247,15 @@ def localize(model, workspace, goal, settings, *, allowed_files=None):
         files = preferred + [name for name in files if name not in preferred_set]
         workspace.trace.emit('scout', 'localization_observed_paths_prioritized', files=preferred,
                              scope='Navigation hints only; selection and write policy remain enforced')
+    if not files:
+        raise InvalidSelection('Empty writable source catalog')
+    # Observed tests can remain navigation evidence without becoming edit choices.
+    read_only = [name for name in exploration.get('observed_source_paths', []) if name not in files] if exploration else []
+    selection_data = {'paths': files, 'selection_purpose': 'writable_edit_targets',
+                      'read_only_evidence_paths': read_only[:8],
+                      'omitted_read_only_evidence_paths': max(0, len(read_only)-8)}
+    if host_feedback:
+        selection_data['host_selection_feedback'] = host_feedback
     candidates = exploration['summary'].get('files') if exploration and exploration['summary'] else None
     if (isinstance(candidates, list) and 1 <= len(candidates) <= 8 and
             all(isinstance(name, str) and name in files for name in candidates) and
@@ -250,10 +263,12 @@ def localize(model, workspace, goal, settings, *, allowed_files=None):
         selected = candidates
         workspace.trace.emit('scout', 'localization_candidate_files_accepted', files=selected)
     else:
-        selected = select(model, workspace, goal, settings, stage='file-selection', data={'paths': files}, keys=('files',),
+        selected = select(model, workspace, goal, settings, stage='file-selection', data=selection_data, keys=('files',),
         instruction='Select 1..8 existing Python source paths ONLY from the supplied paths catalog. '
-                    'The catalog contains writable source targets. Test paths shown in verification failures are '
-                    'read-only evidence, not writable targets; never select them unless present in this catalog. Return files only.')['files']
+                    'This response selects edit targets, not files to read. The paths catalog and output enum contain '
+                    'writable choices only. read_only_evidence_paths and Scout findings are navigation evidence, '
+                    'not extra choices. Test paths shown in verification failures are read-only evidence, '
+                    'never additional edit choices. Return files only.')['files']
     if not set(selected) <= set(files):
         invalid = [name for name in selected if name not in files]
         raise InvalidSelection('Invalid localization: selected paths outside the writable source catalog: '+

@@ -122,6 +122,21 @@ class AdaptiveTests(unittest.TestCase):
         self.assertIn('+    return 4', str(observation['current_changes']))
         self.assertEqual(len(result['recovery']['diagnoses']), 2)
 
+    def test_explicit_extended_rounds_can_reach_fifth_verification_without_budget_reset(self):
+        root = self.workspace(); config = self.config()
+        config['verification_repair_attempts'] = 4
+        replies = [{'files': ['pkg/actual.py']}, {'locations': ['pkg/actual.py:1']}, self.patch('actual', 1, 2)]
+        for before, after in ((2, 4), (4, 5), (5, 6), (6, 3)):
+            replies.extend([{'action': 'repair', 'reason': 'Observed candidate still fails; revise within scope'},
+                            self.patch('actual', before, after)])
+        model = self.model(replies)
+        result = run(config, root, root/'.keel/run', model=model)
+        self.assertEqual(result['status'], 'passed', result.get('failure'))
+        self.assertEqual(len(result['verification_attempts']), 5)
+        self.assertEqual(result['budget']['model_calls'], 11)
+        self.assertEqual(result['budget']['limits']['max_model_calls'], 20)
+        self.assertEqual(result['recovery']['used_actions'], 4)
+
     def test_progress_feedback_binds_prior_question_to_real_receipts_without_extra_calls(self):
         root = self.workspace()
         config = self.config()

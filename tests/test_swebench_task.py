@@ -13,6 +13,24 @@ from keel.runtime import validate
 
 
 class SwebenchTaskTests(unittest.TestCase):
+    def test_extended_budget_is_explicit_and_keeps_default_limits(self):
+        from examples.run_swebench_task import trial_budget
+        self.assertEqual(trial_budget()['max_tokens'], 180000)
+        extended = trial_budget(profile='extended')
+        self.assertEqual(extended, {'max_model_calls': 60, 'max_tokens': 400000,
+                                    'max_tool_calls': 160, 'max_wallclock': 3600})
+        with self.assertRaises(ValueError):
+            trial_budget({'max_model_calls': 60})
+        with self.assertRaises(ValueError):
+            trial_budget({'max_tokens': 400001}, profile='extended')
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = config_for(self.task(root), root/'task', root/'trial', {}, 'python', budget_profile='extended')
+            self.assertEqual(config['recovery']['max_actions'], 12)
+            self.assertEqual(config['recovery']['repeat_limit'], 2)
+            self.assertEqual(config['verification_repair_attempts'], 8)
+            validate(config)
+
     def test_missing_or_invalid_credentials_fail_before_any_experiment_work(self):
         import os
         from examples.run_swebench_task import execute
@@ -58,7 +76,10 @@ class SwebenchTaskTests(unittest.TestCase):
     def test_progress_monitor_is_an_explicit_independent_toggle(self):
         self.check_policy_propagation(False, progress=True)
 
-    def check_policy_propagation(self, inspection, progress=False):
+    def test_extended_profile_reaches_runtime_and_report(self):
+        self.check_policy_propagation(False, progress=True, budget_profile='extended')
+
+    def check_policy_propagation(self, inspection, progress=False, budget_profile='standard'):
         from examples.run_swebench_task import execute
         from types import SimpleNamespace
         with tempfile.TemporaryDirectory() as temp:
@@ -70,12 +91,15 @@ class SwebenchTaskTests(unittest.TestCase):
                  patch('examples.run_swebench_task.export_prediction'), \
                  patch('examples.run_swebench_task.grade',return_value={'status':'graded','official_resolved':True}) as grade:
                 report=execute(root,root/'task',reference,{'name':'test'},'python',root/'trial',
-                               diagnostic_inspection=inspection,recovery_progress=progress)
+                               diagnostic_inspection=inspection,recovery_progress=progress,budget_profile=budget_profile)
             self.assertEqual(agent.call_args.args[0]['require_diagnostic_inspection'],inspection)
             self.assertTrue(agent.call_args.args[0]['preserve_repair_candidates'])
             self.assertEqual(report['diagnostic_inspection'],inspection)
             self.assertEqual(agent.call_args.args[0]['recovery']['monitor_progress'], progress)
             self.assertEqual(report['recovery_progress'], progress)
+            self.assertEqual(report['budget_profile'], budget_profile)
+            self.assertEqual(agent.call_args.args[0]['budget'], report['limits'])
+            self.assertGreaterEqual(report['trial_wallclock_seconds'], 0)
             acceptance=agent.call_args.args[0]['acceptance'][0]
             self.assertIn('--network-policy',acceptance);self.assertIn('--plugin-policy',acceptance)
             self.assertEqual(grade.call_args.kwargs['network_policy'],'no_pipeline')

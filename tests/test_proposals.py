@@ -10,6 +10,17 @@ from keel.runtime import run
 
 
 class ProposalTests(unittest.TestCase):
+    def test_proposal_schema_enumerates_current_evidenced_targets(self):
+        from keel.proposals import proposal_request
+        evidence = [{'path': 'current.py', 'windows': []}]
+        for structured in (True, False):
+            messages, schema, _ = proposal_request('Historical target: previous.py',
+                ['current.py', 'previous.py'], evidence, {}, structured=structured)
+            self.assertEqual(schema['properties']['edits']['items']['properties']['path']['enum'], ['current.py'])
+            self.assertEqual(json.loads(messages[1]['content'])['allowed_files'], ['current.py'])
+            if not structured:
+                self.assertIn('"enum": ["current.py"]', messages[0]['content'])
+
     def test_lf_proposal_matches_crlf_source_and_preserves_file_bytes(self):
         (self.root/'app.py').write_bytes(b'VERSION = 1\r\n# untouched\r\n')
         result, _ = self.execute([{'path': 'app.py', 'old': 'VERSION = 1\n',
@@ -139,10 +150,11 @@ class ProposalTests(unittest.TestCase):
         self.assertEqual(result['failure']['category'], 'model_error')
         self.assertEqual((self.root/'app.py').read_text(), 'VERSION = 1\n')
 
-    def test_undeclared_target_is_denied(self):
+    def test_undeclared_writable_target_is_rejected_without_writes(self):
         (self.root/'other.py').write_text('VERSION = 1\n')
         result, _ = self.execute([{'path': 'other.py', 'old': '1', 'new': '2'}])
-        self.assertEqual(result['failure']['category'], 'policy_denied')
+        self.assertEqual(result['failure']['category'], 'model_error')
+        self.assertIn('outside current evidence scope', result['failure']['message'])
         self.assertEqual((self.root/'other.py').read_text(), 'VERSION = 1\n')
 
     def test_source_change_during_generation_is_denied(self):

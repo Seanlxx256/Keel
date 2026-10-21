@@ -847,3 +847,72 @@ Terminal inventory precedes candidate restoration. The default remains off; larg
 Critic input must still fit the existing context/budget caps. Validate plumbing
 separately from actual task efficacy and freeze a new plan for any comparison.
 See docs/recovery-progress.md and tests/test_recovery_progress.py.
+
+## Freeze a reduced-budget recovery-feedback pair before another full task
+
+run_recovery_progress_comparison delegates to the shared task runner, with equal
+12-call / 80,000-token / 900-Agent-second ceilings and feedback as the only
+treatment. New task-runner overrides can only shrink defaults and are reported.
+Verify completed-arm receipts against trial, final grading and trace before reuse;
+preserve interrupted outputs and stop on model/infra errors without paid retry.
+Count actual Critic dispatches with progress context so a flag with zero exposure
+cannot be called an effectiveness measurement. Keep fixed order, seen-task scope,
+independent final grading cost and changed budgets explicit; historical runs with
+different implementation/limits are not substitute controls. Freeze after all code
+changes/tests, then validate inputs again before execution. Preparation is not a
+real-model result. See tests/test_recovery_progress_comparison.py.
+
+Preparation exposed a system-Python versus configured-venv mismatch: only the
+latter had MCP/LangGraph. When a profile is enabled, check the actual host's MCP
+client before freezing, not just the server's separate interpreter. Preserve the
+unused earlier plan as invalidated and prepare a new identity under the intended
+interpreter. No dependency installation or paid retry is implied by this check.
+
+## User-authorized larger-budget exploration (2026-10-21)
+
+After the short pair failed, the user explicitly requested one higher-budget
+attempt before cost optimization. The shared task runner now has an opt-in extended
+profile (60 calls / 400,000 tokens / 160 tools / 3,600 Agent seconds), twelve
+recovery actions and eight adaptive verification repairs. Standard defaults stay
+unchanged; overrides only shrink the selected profile. Adaptive runtime accepts
+up to eight repair attempts explicitly; non-adaptive modes retain the prior cap.
+Keep repeated-failure guards, provenance, audit and independent acceptance intact.
+Record actual costs, stop reasons and total elapsed time; increased allowance is
+not permission for an automatic sequence of new attempts. Existing frozen pairs
+remain historical. Prepare a fresh single-run identity and preserve all failures.
+Validate credentials before output creation; missing tool-process credentials do
+not imply the user's configured terminal lacks them. If a successful trajectory
+is found, treat it as development evidence and validate cost-cutting ideas rather
+than hardcoding its path or claiming a new benchmark rate.
+
+## Separate writable selections from readable evidence (2026-10-21)
+
+An extended run stopped on repeated protected-test selection before editing;
+global budget was not exhausted. Error wording alone did not prevent recurrence.
+Single-request file-selection schemas now enumerate the actual writable catalog,
+as pages already did. Host-observed paths outside that catalog are explicitly
+read-only navigation evidence; host correction is a separate bounded field.
+Keep host validation even with schema constraints, since JSON-object providers can
+ignore them. Never silently filter an invalid selection or choose surviving paths
+on the model's behalf. Count the schema in capacity/paging calculations. Actual
+offline replay of 510 paths changes one 33,213-byte request into two bounded
+46,782/20,198-byte requests; this is overhead, not a cost-savings claim. Keep
+frozen prior attempts and validate real-model behavior separately. See
+docs/writable-localization-contract.md and tests/test_writable_selection_contract.py.
+
+## Proposal target handoff and bounded correction (2026-10-21)
+
+The extended-v2 run ended on an Implementer proposal targeting a historical file
+omitted from the current Scout selection. The write guard correctly prevented the
+edit, but treated a writable-source scope mismatch as a terminal security violation.
+Proposal schemas now enumerate only current evidenced targets (including the
+schema embedded for JSON-object providers). Host validation still checks every
+path and the entire batch before writing. Protected, escaping, internal and
+hard-linked paths, stale source and audit failures remain terminal. A writable
+out-of-scope target is an InvalidProposal: existing recovery may regenerate the
+batch against unchanged, current evidence, with shared budgets and repeat guards.
+No file is automatically added, retained, read or edited on the model's behalf.
+This repairs an execution contract; it does not establish better localization,
+causal diagnosis or task success. Preserve the historical policy-denied score.
+Checks: tests/test_proposals.py and tests/test_recovery_controller.py, including
+mixed-batch atomicity, correction, protected paths and repeated-mismatch stopping.

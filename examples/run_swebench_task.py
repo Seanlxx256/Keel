@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from compass.preparation import prepare_snapshot
@@ -55,13 +56,34 @@ def reference_policies(reference_dir):
     return policies
 
 
-def config_for(task, task_dir, output, model_config, harness_python, environment_overlay_path=None, policies=None):
+BUDGET_PROFILES = {
+    'standard': {'max_wallclock': 1800, 'max_model_calls': 30, 'max_tokens': 180000, 'max_tool_calls': 80},
+    'extended': {'max_wallclock': 3600, 'max_model_calls': 60, 'max_tokens': 400000, 'max_tool_calls': 160},
+}
+
+
+def trial_budget(overrides=None, *, profile='standard'):
+    if not isinstance(profile, str) or profile not in BUDGET_PROFILES:
+        raise ValueError('Unknown trial budget profile')
+    limits = dict(BUDGET_PROFILES[profile])
+    if overrides is not None:
+        if (not isinstance(overrides, dict) or set(overrides)-limits.keys()
+                or any(type(value) is not int or not 1 <= value <= limits[key]
+                       for key, value in overrides.items())):
+            raise ValueError('Trial budget overrides must be positive integers no larger than selected profile')
+        limits.update(overrides)
+    return limits
+
+
+def config_for(task, task_dir, output, model_config, harness_python, environment_overlay_path=None, policies=None, *, budget_limits=None, budget_profile='standard'):
     verifier = Path(__file__).with_name('swebench_verify_workspace.py').resolve()
     config = {'mode': 'localized-proposal', 'goal': task['problem_statement'], 'model': model_config,
             'agent': {'max_steps': 12, 'max_context_bytes': 48000, 'max_output': 4096, 'require_change': True},
-            'recovery': {'strategy': 'adaptive', 'max_actions': 6, 'repeat_limit': 2, 'write_roots': ['.']},
-            'verification_repair_attempts': 3, 'preserve_repair_candidates': True, 'require_diagnostic_inspection': False,
-            'budget': {'max_wallclock': 1800, 'max_model_calls': 30, 'max_tokens': 180000, 'max_tool_calls': 80},
+            'recovery': {'strategy': 'adaptive', 'max_actions': 12 if budget_profile == 'extended' else 6,
+                         'repeat_limit': 2, 'write_roots': ['.']},
+            'verification_repair_attempts': 8 if budget_profile == 'extended' else 3,
+            'preserve_repair_candidates': True, 'require_diagnostic_inspection': False,
+            'budget': trial_budget(budget_limits, profile=budget_profile),
             'execution': {'backend': 'local'},
             'acceptance': [[sys.executable, str(verifier), '--task', str(task_dir.resolve()),
                             '--output-root', str((output/'verifications').resolve()),
@@ -73,7 +95,9 @@ def config_for(task, task_dir, output, model_config, harness_python, environment
     return config
 
 
-def execute(root, task_dir, reference_dir, model_config, harness_python, output, *, mcp_config=None, localization_tool_steps=6, require_external_tool=False, local_exploration=False, resume_snapshot=None, saved_repo=None, diagnostic_inspection=False, recovery_progress=False):
+def execute(root, task_dir, reference_dir, model_config, harness_python, output, *, mcp_config=None, localization_tool_steps=6, require_external_tool=False, local_exploration=False, resume_snapshot=None, saved_repo=None, diagnostic_inspection=False, recovery_progress=False, budget_limits=None, budget_profile='standard'):
+    started = time.monotonic()
+    limits = trial_budget(budget_limits, profile=budget_profile)
     if type(diagnostic_inspection) is not bool:
         raise ValueError('diagnostic_inspection must be boolean')
     if type(recovery_progress) is not bool:
@@ -131,6 +155,11 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
               'benchmark_ready': False, 'implementation': hashes,
               'diagnostic_inspection': diagnostic_inspection,
               'recovery_progress': recovery_progress,
+              'limits': limits,
+              'budget_profile': budget_profile,
+              'recovery_limits': {'max_actions': 12 if budget_profile == 'extended' else 6,
+                                  'verification_repair_attempts': 8 if budget_profile == 'extended' else 3,
+                                  'repeat_limit': 2},
               'scope': 'Exploratory public task; prior exposure unverified. Host agent and verifier launcher; official Docker harness executes tests.'}
     if policies:
         report['environment_policies']=policies
@@ -167,7 +196,8 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
                     with_seed.path(name,write=True)
             finally:
                 with_seed.ledger.close()
-        config = config_for(task, task_dir, output, model_config, harness_python, overlay_path, policies)
+        config = config_for(task, task_dir, output, model_config, harness_python, overlay_path, policies,
+                            budget_limits=limits, budget_profile=budget_profile)
         config['require_diagnostic_inspection'] = diagnostic_inspection
         config['recovery']['monitor_progress'] = recovery_progress
         if continuation:
@@ -210,6 +240,7 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
     finally:
         stop.set()
         thread.join(timeout=1)
+        report['trial_wallclock_seconds'] = round(time.monotonic()-started, 3)
         save()
     return report
 
@@ -226,12 +257,20 @@ def main():
                         help='Experimental pre-edit inspection gate; off by default pending efficacy evidence')
     parser.add_argument('--recovery-progress', action='store_true',
                         help='Experimental round evidence inventory and Critic feedback; no extra model calls')
+    parser.add_argument('--max-model-calls', type=int)
+    parser.add_argument('--budget-profile', choices=tuple(BUDGET_PROFILES), default='standard',
+                        help='Explicit extended exploration budget; default limits remain unchanged')
+    parser.add_argument('--max-tokens', type=int)
+    parser.add_argument('--max-agent-seconds', type=int)
     parser.add_argument('--resume-snapshot',type=Path)
     parser.add_argument('--saved-repo',type=Path)
     parser.add_argument('--mcp-config', type=Path, help='Explicit authorized tools; servers must target the trial workspace, not another repository')
     parser.add_argument('--localization-tool-steps', type=int, choices=range(1, 13), default=6)
     parser.add_argument('--require-external-tool', action='store_true', help='Integration validation: require an authorized MCP attempt before local fallback')
     args = parser.parse_args()
+    limits = trial_budget({key: value for key, value in (
+        ('max_model_calls', args.max_model_calls), ('max_tokens', args.max_tokens),
+        ('max_wallclock', args.max_agent_seconds)) if value is not None}, profile=args.budget_profile)
     if args.require_external_tool and not args.mcp_config:
         parser.error('--require-external-tool requires --mcp-config')
     check_reference(args.task, args.reference_grade)
@@ -241,8 +280,10 @@ def main():
         from keel.saved_repair import load_saved_repair
         load_saved_repair(args.task, args.reference_grade, args.resume_snapshot, args.saved_repo)
     if not args.execute:
-        print(json.dumps({'status': 'plan_only', 'instance_id': verify_task(args.task)['instance_id'], 'max_model_calls': 30,
-                          'max_agent_seconds': 1800, 'max_verification_rounds': 4, 'benchmark_ready': False,
+        print(json.dumps({'status': 'plan_only', 'instance_id': verify_task(args.task)['instance_id'], 'max_model_calls': limits['max_model_calls'],
+                          'max_agent_seconds': limits['max_wallclock'], 'limits': limits,
+                          'max_verification_rounds': 9 if args.budget_profile == 'extended' else 4,
+                          'budget_profile': args.budget_profile, 'benchmark_ready': False,
                           'diagnostic_inspection': args.diagnostic_inspection == 'required',
                           'recovery_progress': args.recovery_progress}))
         return 0
@@ -256,7 +297,7 @@ def main():
                      resume_snapshot=args.resume_snapshot.resolve() if args.resume_snapshot else None,
                      saved_repo=args.saved_repo.resolve() if args.saved_repo else None,
                      diagnostic_inspection=args.diagnostic_inspection == 'required',
-                     recovery_progress=args.recovery_progress)
+                     recovery_progress=args.recovery_progress, budget_limits=limits, budget_profile=args.budget_profile)
     print(json.dumps({key: value for key, value in report.items() if key != 'implementation'}, indent=2))
     return 0 if report['official_resolved'] is True else 1
 

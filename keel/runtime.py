@@ -122,8 +122,8 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
     if recovery_config.get('max_actions', 0) and not (proposal_mode or agent_mode):
         raise ValueError('recovery requires a model-driven mode')
     repair_attempts = config.get('verification_repair_attempts', 3 if recovery_config.get('max_actions', 0) else 0)
-    if type(repair_attempts) is not int or not 0 <= repair_attempts <= 3 or (repair_attempts and not (proposal_mode or agent_mode)):
-        raise ValueError('verification_repair_attempts requires a model-driven mode and integer 0..3')
+    if type(repair_attempts) is not int or not 0 <= repair_attempts <= (8 if adaptive else 3) or (repair_attempts and not (proposal_mode or agent_mode)):
+        raise ValueError('verification_repair_attempts requires a model-driven mode and integer 0..3 (adaptive: 0..8)')
     settings = config.get("agent", {})
     if not isinstance(settings, dict) or set(settings) - {"max_steps", "max_output", "require_evidence", "max_work_items", "max_context_bytes", "require_change"} or any(
             type(v) is not int or v <= 0 for key, v in settings.items() if key not in {"require_evidence", "require_change"}) or any(

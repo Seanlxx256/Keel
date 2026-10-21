@@ -22,4 +22,21 @@ by default and recorded in plan/trial reports. It adds context but no model call
 permissions or budget. See [recovery progress](recovery-progress.md) for verification
 comparison rules and limits; it does not certify execution of a semantic next_check.
 
+## Explicit larger-budget exploration
+
+`--budget-profile extended` is an opt-in exploration profile: 60 model calls,
+400,000 tokens, 160 tools and 3,600 Agent seconds. It also allows twelve shared
+recovery actions and eight verification repairs (at most nine intermediate
+verification rounds). The repeat guard remains two and all audit/write boundaries
+are retained. Success ends repair through the existing verifier/auditor path;
+the run may stop earlier for repeated failure or other blockers. Preparation and
+independent final grading are outside Agent timing; trial_wallclock_seconds also
+records elapsed execute time. Defaults remain the standard profile, and numeric
+overrides can only reduce the selected profile's limits.
+
+This profile is for an explicit single development exploration, not indefinite
+retry until success. Preserve earlier failed runs. If successful, analyze the
+trajectory and validate proposed cost reductions in new controlled experiments;
+one lucky or heavily debugged trajectory is not a generalized policy.
+
 Validation: five task-runner tests cover configuration boundary, reference-preflight rejection, no-patch rejection, stripping setup/reference-test-patch text from feedback, and real git diff/HEAD binding. Bridge tests independently cover actual loader/transport contracts and mocked grading. No live Keel inference or repair success is claimed until the operator executes this runner.

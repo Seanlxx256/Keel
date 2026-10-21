@@ -11,6 +11,47 @@ from keel.runtime import run
 
 
 class RecoveryTests(unittest.TestCase):
+    def test_repeated_stale_target_stops_under_existing_recovery_limit(self):
+        root = self.workspace()
+        (root/'previous.py').write_text('VALUE = 1\n')
+        stale = {'summary': 'stale', 'edits': [{'path': 'previous.py', 'old': '1', 'new': '3'}]}
+        model = self.model([{'files': ['library.py']}, {'locations': ['library.py:1']}, stale, stale])
+        result = run(self.config(), root, root/'.keel/run', model=model)
+        self.assertEqual(result['failure']['category'], 'budget_exhausted')
+        self.assertEqual(result['budget']['model_calls'], 4)
+        self.assertEqual((root/'previous.py').read_text(), 'VALUE = 1\n')
+
+    def test_stale_target_batch_is_corrected_without_widening_scope(self):
+        root = self.workspace()
+        other = root/'previous.py'
+        other.write_text('VALUE = 1\n')
+        rejected = {'summary': 'stale target', 'edits': [
+            {'path': 'library.py', 'old': 'return 1', 'new': 'return 2'},
+            {'path': 'previous.py', 'old': '1', 'new': '3'}]}
+        model = self.model([{'files': ['library.py']}, {'locations': ['library.py:1']},
+                            rejected, self.edit('return 1', 'return 3')])
+        result = run(self.config(), root, root/'.keel/run', model=model)
+        self.assertEqual(result['status'], 'passed', result.get('failure'))
+        self.assertEqual(other.read_text(), 'VALUE = 1\n')
+        self.assertEqual(result['budget']['model_calls'], 4)
+        self.assertEqual([a['action'] for a in result['recovery']['actions']], ['correct_proposal'])
+        self.assertIn('allowed targets', model.calls[-1][1]['content'])
+
+    def test_protected_proposal_target_remains_terminal(self):
+        root = self.workspace()
+        (root/'tests').mkdir()
+        target = root/'tests/test_value.py'
+        target.write_text('assert False\n')
+        model = self.model([{'files': ['library.py']}, {'locations': ['library.py:1']},
+            {'summary': 'bad', 'edits': [
+                {'path': 'library.py', 'old': 'return 1', 'new': 'return 3'},
+                {'path': 'tests/test_value.py', 'old': 'False', 'new': 'True'}]}])
+        result = run(self.config(), root, root/'.keel/run', model=model)
+        self.assertEqual(result['failure']['category'], 'policy_denied')
+        self.assertEqual(result['budget']['model_calls'], 3)
+        self.assertIn('return 1', (root/'library.py').read_text())
+        self.assertEqual(target.read_text(), 'assert False\n')
+
     def workspace(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)

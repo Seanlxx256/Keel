@@ -156,7 +156,8 @@ class RecoveryController:
             raise InputCapacityExceeded('Critic observation exceeds context cap')
         output = min(settings.get('max_output', 1024), 1024)
         self.ws.budget.allow_model(size, output)
-        self.ws.trace.emit('critic', 'llm_call_started', input_bytes=size, strategy='recovery-route')
+        self.ws.trace.emit('critic', 'llm_call_started', input_bytes=size, strategy='recovery-route',
+                           recovery_progress_context=bool(observation.get('previous_check_observations')))
         try:
             structured = callable(getattr(model, 'complete_json', None))
             reply = (model.complete_json(messages, schema=schema, timeout=self.ws.budget.remaining, max_output=output)
