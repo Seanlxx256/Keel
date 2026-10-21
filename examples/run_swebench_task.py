@@ -95,7 +95,7 @@ def config_for(task, task_dir, output, model_config, harness_python, environment
     return config
 
 
-def execute(root, task_dir, reference_dir, model_config, harness_python, output, *, mcp_config=None, localization_tool_steps=6, require_external_tool=False, local_exploration=False, resume_snapshot=None, saved_repo=None, diagnostic_inspection=False, recovery_progress=False, targeted_source_review=False, budget_limits=None, budget_profile='standard'):
+def execute(root, task_dir, reference_dir, model_config, harness_python, output, *, mcp_config=None, localization_tool_steps=6, require_external_tool=False, local_exploration=False, resume_snapshot=None, saved_repo=None, diagnostic_inspection=False, recovery_progress=False, targeted_source_review=False, diagnosis_supervision=False, budget_driven_recovery=False, record_model_transcript=False, budget_limits=None, budget_profile='standard'):
     started = time.monotonic()
     limits = trial_budget(budget_limits, profile=budget_profile)
     if type(diagnostic_inspection) is not bool:
@@ -104,6 +104,8 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
         raise ValueError('recovery_progress must be boolean')
     if type(targeted_source_review) is not bool or (targeted_source_review and not recovery_progress):
         raise ValueError('targeted_source_review requires recovery_progress and a boolean value')
+    if type(diagnosis_supervision) is not bool:
+        raise ValueError('diagnosis_supervision must be boolean')
     if require_external_tool and not mcp_config:
         raise ValueError('--require-external-tool requires --mcp-config')
     # Local configuration/credential checks must precede checkout, output creation
@@ -152,18 +154,25 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
             raise ValueError('Reference policies changed during execution')
         if overlay is not None and file_hash(output/'environment-overlay.json') != report['environment_overlay_sha256']:
             raise ValueError('Trial environment overlay changed during execution')
-    model = FrozenModel(base_model, frozen)
+    model = FrozenModel(base_model, frozen, output/'model-transcript.jsonl' if record_model_transcript else None)
     report = {'status': 'preparing', 'instance_id': task['instance_id'], 'official_resolved': None,
               'benchmark_ready': False, 'implementation': hashes,
               'diagnostic_inspection': diagnostic_inspection,
               'recovery_progress': recovery_progress,
               'targeted_source_review': targeted_source_review,
+              'diagnosis_supervision': diagnosis_supervision,
+              'budget_driven_recovery': budget_driven_recovery,
+              'record_model_transcript': record_model_transcript,
               'limits': limits,
               'budget_profile': budget_profile,
               'recovery_limits': {'max_actions': 12 if budget_profile == 'extended' else 6,
                                   'verification_repair_attempts': 8 if budget_profile == 'extended' else 3,
                                   'repeat_limit': 2},
               'scope': 'Exploratory public task; prior exposure unverified. Host agent and verifier launcher; official Docker harness executes tests.'}
+    if budget_driven_recovery:
+        report['recovery_limits'] = {'mode': 'global_budget_driven',
+            'verification_repair_ceiling': limits['max_model_calls'],
+            'local_repeat_and_action_caps_active': False}
     if policies:
         report['environment_policies']=policies
         report['environment_scope']='Reconstructed reference-verified conditions; not original-condition score'
@@ -204,6 +213,8 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
         config['require_diagnostic_inspection'] = diagnostic_inspection
         config['recovery']['monitor_progress'] = recovery_progress
         config['recovery']['targeted_source_review'] = targeted_source_review
+        config['recovery']['diagnosis_supervision'] = diagnosis_supervision
+        config['recovery']['budget_driven'] = budget_driven_recovery
         if continuation:
             config['continuation_context']=continuation
         if local_exploration:
@@ -263,6 +274,10 @@ def main():
                         help='Experimental round evidence inventory and Critic feedback; no extra model calls')
     parser.add_argument('--targeted-source-review', action='store_true',
                         help='Opt-in named-definition read and at most one additional Critic call per decision; requires --recovery-progress')
+    parser.add_argument('--diagnosis-supervision', action='store_true',
+                        help='Opt-in evidence consistency review with at most one correction and recheck; shares all budgets')
+    parser.add_argument('--budget-driven-recovery', action='store_true', help='Use global budgets instead of local retry ceilings; permission checks remain')
+    parser.add_argument('--record-model-transcript', action='store_true', help='Persist full model messages and replies locally; excludes provider headers/config')
     parser.add_argument('--max-model-calls', type=int)
     parser.add_argument('--budget-profile', choices=tuple(BUDGET_PROFILES), default='standard',
                         help='Explicit extended exploration budget; default limits remain unchanged')
@@ -290,11 +305,15 @@ def main():
     if not args.execute:
         print(json.dumps({'status': 'plan_only', 'instance_id': verify_task(args.task)['instance_id'], 'max_model_calls': limits['max_model_calls'],
                           'max_agent_seconds': limits['max_wallclock'], 'limits': limits,
-                          'max_verification_rounds': 9 if args.budget_profile == 'extended' else 4,
+                          'max_verification_rounds': (limits['max_model_calls'] + 1 if args.budget_driven_recovery
+                                                     else 9 if args.budget_profile == 'extended' else 4),
+                          'budget_driven_recovery': args.budget_driven_recovery,
+                          'record_model_transcript': args.record_model_transcript,
                           'budget_profile': args.budget_profile, 'benchmark_ready': False,
                           'diagnostic_inspection': args.diagnostic_inspection == 'required',
                           'recovery_progress': args.recovery_progress,
-                          'targeted_source_review': args.targeted_source_review}))
+                          'targeted_source_review': args.targeted_source_review,
+                          'diagnosis_supervision': args.diagnosis_supervision}))
         return 0
     docker = Path('D:/Docker/Desktop/resources/bin')
     if not shutil.which('docker') and (docker/'docker.exe').is_file():
@@ -307,9 +326,10 @@ def main():
                      saved_repo=args.saved_repo.resolve() if args.saved_repo else None,
                      diagnostic_inspection=args.diagnostic_inspection == 'required',
                      recovery_progress=args.recovery_progress, targeted_source_review=args.targeted_source_review,
-                     budget_limits=limits, budget_profile=args.budget_profile)
+                     diagnosis_supervision=args.diagnosis_supervision, budget_driven_recovery=args.budget_driven_recovery, record_model_transcript=args.record_model_transcript, budget_limits=limits, budget_profile=args.budget_profile)
     print(json.dumps({key: value for key, value in report.items() if key != 'implementation'}, indent=2))
-    return 0 if report['official_resolved'] is True else 1
+    return 0 if (report['official_resolved'] is True and
+                 (not args.budget_driven_recovery or report.get('runtime_status') == 'passed')) else 1
 
 
 if __name__ == '__main__':

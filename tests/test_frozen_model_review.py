@@ -18,10 +18,14 @@ class FrozenReviewTests(unittest.TestCase):
                 calls = 0
                 def complete_json(self, *args, **kwargs):
                     self.calls += 1
-                    return Reply(json.dumps({f: 'stop' if f == 'action' else 'unverified' for f in fields}), 30)
+                    value = {f: 'stop' if f == 'action' else 'unverified' for f in fields}
+                    value['evidence'] = 'x'*1023
+                    return Reply(json.dumps(value), 30)
             model = Model(); report = execute(path, root/'out', model=model)
             self.assertEqual(model.calls, 1)
             self.assertEqual(len(report['records']), 1)
+            self.assertEqual(len(report['records'][0]['response']['evidence']), 1023)
+            self.assertEqual(report['records'][0]['response_warnings'][0]['characters'], 1023)
 
     def prepare(self, root):
         fields = ['action', 'reason', 'hypothesis', 'evidence', 'next_check', 'previous_attempt_assessment']
@@ -69,6 +73,7 @@ class FrozenReviewTests(unittest.TestCase):
             record = json.loads((root/'out/summary.json').read_text())
             self.assertEqual(record['raw_response'], '{}')
             self.assertEqual(record['budget']['tokens'], 10)
+            self.assertIn('expected exactly', record['validation_error'])
 
 
 if __name__ == '__main__':

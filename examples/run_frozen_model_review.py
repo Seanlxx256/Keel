@@ -12,6 +12,7 @@ from compass.progress import atomic_json
 from keel.core import Budget, Limits, ModelError
 from keel.evaluation_protocol import file_hash
 from keel.models import from_config
+from keel.recovery import validate_critic_decision, critic_length_warnings
 
 
 def execute(plan_path, output, *, model=None):
@@ -71,15 +72,14 @@ def execute(plan_path, output, *, model=None):
                 budget.charge_tokens(reply.tokens if reply.tokens is not None else size+len(reply.content.encode()))
                 budget.check()
                 value = json.loads(reply.content)
-                if (not isinstance(value, dict) or set(value) != set(request['schema']['required']) or
-                        value.get('action') not in {'repair', 'replan', 'stop'} or
-                        any(not isinstance(v, str) or not v.strip() or len(v) > 1000 for v in value.values())):
-                    raise ValueError('Invalid Critic response')
-                record.update(status='completed', response=value)
+                validate_critic_decision(value)
+                record.update(status='completed', response=value, response_warnings=critic_length_warnings(value))
             except Exception as error:
                 if isinstance(error, ModelError) and error.tokens is not None:
                     budget.charge_tokens(error.tokens)
                 record.update(status='failed', error_type=type(error).__name__)
+                if isinstance(error, ValueError):
+                    record['validation_error'] = str(error)[:600]
                 raise
             finally:
                 record['budget'] = budget.report()

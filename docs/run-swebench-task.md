@@ -24,6 +24,13 @@ comparison rules and limits; it does not certify execution of a semantic next_ch
 
 ## Explicit larger-budget exploration
 
+`--diagnosis-supervision` opts into independent-context evidence consistency review
+of Critic diagnoses. One reviewer call normally; at most one correction plus a
+final recheck for cited conflicts, using existing budgets. Persistent conflict
+stops. Reviewer citation validity is checked, but reviewer semantics are fallible;
+only ordinary verification/audit can establish runtime success. It is off by
+default, independent of forced inspection. See [diagnosis supervision](diagnosis-supervision.md).
+
 Optional `--targeted-source-review --recovery-progress` enables a read-only
 named-definition follow-up after a Critic replan decision. The model's next_check
 must explicitly name a Python definition in the current plan or previously observed
@@ -51,3 +58,13 @@ trajectory and validate proposed cost reductions in new controlled experiments;
 one lucky or heavily debugged trajectory is not a generalized policy.
 
 Validation: five task-runner tests cover configuration boundary, reference-preflight rejection, no-patch rejection, stripping setup/reference-test-patch text from feedback, and real git diff/HEAD binding. Bridge tests independently cover actual loader/transport contracts and mocked grading. No live Keel inference or repair success is claimed until the operator executes this runner.
+
+## Budget-driven development exploration
+
+--budget-driven-recovery replaces local recovery action/repeat limits with the
+existing global budgets. It is opt-in and does not relax audit/write restrictions.
+--record-model-transcript preserves full model requests and replies in
+model-transcript.jsonl. Use examples/run_bounded_exploration.py with a frozen plan
+for a total deadline covering setup, Agent and final grading. Exit success requires
+both runtime pass and official acceptance pass in this mode. A model review verdict
+is not task acceptance. Timeouts preserve partial evidence without a pass claim.

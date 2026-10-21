@@ -963,9 +963,121 @@ and next target/question/support/refutation. Questions are included in JSON Sche
 descriptions and the system prompt for structured and JSON-object providers.
 Unknown is valid when the missing evidence is specified. Do not ask for private
 reasoning traces or let a filled checklist count as proof of correct reasoning.
-The six-field wire format and 1,000-character field bounds remain compatible.
-Host validation checks shape, action and length, not truth or complete semantic
+The six-field wire format remains compatible; the original 1,000-character hard
+field bound has been superseded by the soft-length policy below.
+Host validation checks shape and action, not truth or complete semantic
 coverage of every label. No keyword-based correctness score or automatic repair
 success follows. The next role receives the check's predictions as tentative
 criteria, not authority to edit outside its scope. New prompt efficacy needs a
 fresh frozen diagnostic review; previous plans and paid outputs remain historical.
+
+Use recovery.validate_critic_decision in both runtime and diagnostic review so
+shape/action errors are explicit. Preserve raw responses and validation_error on
+failure. The historical strict-length experiment rejected evidence with 1,023
+characters vs 1,000. Preserve that frozen measurement; do not repair it by
+truncating text or replacing the failure with a successful completion receipt.
+
+## Soft diagnostic length, hard resource boundaries (2026-10-21)
+
+Per-field length is a brevity target, not a correctness or security requirement.
+The live Critic schema no longer uses per-field maxLength. Nonempty string fields,
+exact keys and valid routing actions remain mandatory. Over 1,000 characters
+produces critic_length_warnings, recorded in runtime trace/report and review
+results, without truncation or automatic retries. Runtime still checks the complete
+serialized decision against configured max_context_bytes before routing; oversized
+replies remain in the ledger and stop explicitly. Model output limits, transport
+response limits, total token/time/tool budgets and downstream prompt caps remain.
+No automatic summarization or budget expansion was added.
+
+Revalidate saved outputs offline under a new, identified policy and retain the
+original file/hash/status. .keel/repair-review/soft-length-v1/offline-review.json
+shows the actual 1,023-character reply accepted unchanged by current Critic routing,
+with warning and zero new paid calls. This says nothing about the diagnosis being
+right or the task passing. Tests: test_critic_prompt and test_frozen_model_review,
+including actual routing, no extra calls, whole-context rejection and raw retention.
+
+## Preserve caller frames beside exception tails (2026-10-21)
+
+verification_feedback.failure_feedback now includes bounded failure_locations,
+separate from existing failure_excerpts. For each pytest failure block it keeps
+the first marked statement and following reported file/line, not just the final
+internal raising frame. ANSI is stripped, blocks remain separate, context omissions
+and omitted block counts are explicit. Unsupported/missing caller formats return
+not_established; do not fabricate a location. This is log navigation evidence,
+not proof of test phase, causality or permission to access a reported path.
+Reported coordinates belong to the graded snapshot, not necessarily current source.
+
+bounded_verification retains these structured fields, so both ordinary verification
+and saved-source continuation reach Critic with caller and exception evidence.
+Existing observed-output markers still exclude setup and applied test patches.
+Offline extraction from extended-v3 identified the first hdu.writeto call at the
+graded test line 2051. Prior artifacts remain unchanged. Tests cover internal
+frames, long passing tails, multiple blocks, absent callers and explicit omissions.
+Changing feedback cannot establish model improvement without a fresh review.
+
+## Optional evidence consistency supervision (2026-10-21)
+
+Use diagnosis_supervision.review_diagnosis rather than another repair runner.
+This separate-context request reviews the existing diagnosis and evidence catalog,
+including stderr. Validate exact claim/evidence quotations before accepting a
+conflict assessment. Quotation provenance is checkable; contradiction semantics
+are not a host-proven fact. Keep the feature opt-in, same configured model, no
+new tools or permissions. At most one correction and one recheck follow a conflict;
+persistent conflict stops. Insufficient evidence must not be promoted to a success.
+All calls share existing budgets and are recorded. Tests must demonstrate both
+successful control-flow recovery and bounded unresolved conflict, without claiming
+scripted-model success establishes live LLM effectiveness.
+
+For bounded live supervision review of an archived diagnosis, use
+examples/review_saved_diagnosis.py. It replays the initial diagnosis through the
+production controller without a provider call, then permits up to three new calls
+for review/correction/recheck. Budget model_calls includes one cached slot; report
+new_provider_calls separately to avoid misreporting new spend. Shared cap is
+60,000 tokens / 360 seconds, each live request at most 120 seconds. No source files
+or acceptance commands execute. Freeze input evidence/config/implementation and
+persist pending dispatch, ledger and report. Failed/interrupted outputs block
+automatic paid retry; completed receipt-checked outputs reuse without dispatch.
+Credential preflight happens before output creation. Test this with scripted
+models and measure actual request capacity before giving the launcher to a user.
+
+Observed supervision protocol failure: consistent plus nonempty no-conflict
+findings, wrong claim field and added quotation marks. Schema descriptions must
+say findings contains contradictions only and is [] otherwise. Enumerate evidence
+IDs, validate raw exact substrings in their named origin and persist the specific
+validation_error. Do not normalize away a bad reference or promote a failed review
+to a successful one. A format-correct consistent verdict still requires qualitative
+assessment; successful parsing cannot establish semantic supervision quality.
+
+## Global-budget exploration (2026-10-22)
+
+Explicit budget_driven recovery disables local repeat/action ceilings, while
+keeping global calls/tokens/tools/time and write/audit rules. Supervisor protocol
+errors receive validation feedback and may correct within that same budget.
+Default recovery behavior remains bounded as before. Use
+examples/run_bounded_exploration.py for one frozen attempt with an outer deadline
+including preparation and final grading. Preserve console/watchdog artifacts and
+never restart a prior dispatch. Reserve grading time within the outer cap.
+Timeout stops the child process tree; Docker cleanup is not independently certified.
+--record-model-transcript durably records full model messages/schema and replies,
+not provider configuration, headers or hidden reasoning. Normal tool evidence,
+patch candidates, verification artifacts and traces remain in the trial output.
+
+## Windows Docker startup: verify requested rights, not just file writability
+
+See [the verified local incident](docker-wsl-recovery-20261022.md). A VHDX can be
+writable under Modify while WSL attach fails: the captured wslservice.exe request
+included WRITE_DAC under an impersonated user. Back up the ACL and identify the
+actual process, identity and requested rights before recommending a scoped grant.
+Do not copy machine-specific account/path commands into automatic recovery rules.
+No recursive ACL reset, Everyone grant, VHD deletion or filesystem repair follows
+from an E_ACCESSDENIED string alone. Bare attach/unmount provides a separate check;
+successful attach is not evidence of filesystem integrity or a healthy engine.
+
+Distinguish STATUS_COMMITMENT_LIMIT from access denial and distinguish a missing
+Linux block device after attach failure from a missing host file. Confirm a new
+backend start time after a full Desktop exit; reopening the GUI may keep the failed
+backend alive. Engine health requires Server readiness, not just a running client.
+Future runner integration must test infrastructure-error routing separately from
+code repair: preserve the candidate, bound recovery by the shared deadline, and
+verify that unavailable Docker does not spend code-repair rounds. These runner
+changes/regression tests are proposed, not established by this manual incident.

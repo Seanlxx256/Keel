@@ -141,6 +141,10 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
         from .adapters.langgraph import require_dependencies
         require_dependencies()
     budget = Budget(Limits(**config.get("budget", {})))
+    if recovery_config.get('budget_driven'):
+        # Each further repair requires a model call. This derived ceiling adds
+        # no stage-specific cutoff before the existing global call budget.
+        repair_attempts = budget.limits.max_model_calls
     output = output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     ledger = Ledger(output / "ledger.sqlite", check_same_thread=engine != "langgraph")

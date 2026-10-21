@@ -79,7 +79,10 @@ class SwebenchTaskTests(unittest.TestCase):
     def test_extended_profile_reaches_runtime_and_report(self):
         self.check_policy_propagation(False, progress=True, budget_profile='extended')
 
-    def check_policy_propagation(self, inspection, progress=False, budget_profile='standard'):
+    def test_supervision_toggle_reaches_runtime_without_forcing_progress_or_inspection(self):
+        self.check_policy_propagation(False, supervision=True)
+
+    def check_policy_propagation(self, inspection, progress=False, budget_profile='standard', supervision=False):
         from examples.run_swebench_task import execute
         from types import SimpleNamespace
         with tempfile.TemporaryDirectory() as temp:
@@ -91,12 +94,15 @@ class SwebenchTaskTests(unittest.TestCase):
                  patch('examples.run_swebench_task.export_prediction'), \
                  patch('examples.run_swebench_task.grade',return_value={'status':'graded','official_resolved':True}) as grade:
                 report=execute(root,root/'task',reference,{'name':'test'},'python',root/'trial',
-                               diagnostic_inspection=inspection,recovery_progress=progress,budget_profile=budget_profile)
+                               diagnostic_inspection=inspection,recovery_progress=progress,
+                               diagnosis_supervision=supervision,budget_profile=budget_profile)
             self.assertEqual(agent.call_args.args[0]['require_diagnostic_inspection'],inspection)
             self.assertTrue(agent.call_args.args[0]['preserve_repair_candidates'])
             self.assertEqual(report['diagnostic_inspection'],inspection)
             self.assertEqual(agent.call_args.args[0]['recovery']['monitor_progress'], progress)
             self.assertEqual(report['recovery_progress'], progress)
+            self.assertEqual(agent.call_args.args[0]['recovery']['diagnosis_supervision'], supervision)
+            self.assertEqual(report['diagnosis_supervision'], supervision)
             self.assertEqual(report['budget_profile'], budget_profile)
             self.assertEqual(agent.call_args.args[0]['budget'], report['limits'])
             self.assertGreaterEqual(report['trial_wallclock_seconds'], 0)

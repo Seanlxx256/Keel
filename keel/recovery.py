@@ -9,7 +9,7 @@ import difflib
 
 from pathlib import PurePosixPath
 
-from .core import BudgetExceeded, InputCapacityExceeded, InvalidSelection, ModelError, PolicyDenied, digest
+from .core import BudgetExceeded, InputCapacityExceeded, InvalidSelection, ModelError, PolicyDenied, RecoveryStopped, digest
 
 
 CRITIC_QUESTIONS = {
@@ -31,8 +31,31 @@ CRITIC_QUESTIONS = {
 }
 
 
+CRITIC_FIELD_TARGET = 1000
+
+
+def critic_length_warnings(value):
+    return [{'field': field, 'characters': len(value[field]), 'soft_target': CRITIC_FIELD_TARGET}
+            for field in CRITIC_QUESTIONS if len(value[field]) > CRITIC_FIELD_TARGET]
+
+
+def validate_critic_decision(value):
+    """Validate the wire contract, not the truth of the diagnosis."""
+    fields = {'action', *CRITIC_QUESTIONS}
+    if not isinstance(value, dict) or set(value) != fields:
+        raise ValueError('Invalid Critic response: expected exactly action, reason, hypothesis, '
+                         'evidence, next_check and previous_attempt_assessment')
+    if not isinstance(value['action'], str) or value['action'] not in {'repair', 'replan', 'stop'}:
+        raise ValueError('Invalid Critic response: action must be repair, replan or stop')
+    for field in CRITIC_QUESTIONS:
+        text = value[field]
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError(f'Invalid Critic response: {field} must be a nonempty string')
+    return value
+
+
 def validate_recovery(config):
-    if (not isinstance(config, dict) or set(config) - {'max_actions', 'repeat_limit', 'strategy', 'write_roots', 'monitor_progress', 'targeted_source_review'} or
+    if (not isinstance(config, dict) or set(config) - {'max_actions', 'repeat_limit', 'strategy', 'write_roots', 'monitor_progress', 'targeted_source_review', 'diagnosis_supervision', 'budget_driven'} or
             type(config.get('max_actions', 0)) is not int or not 0 <= config.get('max_actions', 0) <= 12 or
             type(config.get('repeat_limit', 2)) is not int or not 1 <= config.get('repeat_limit', 2) <= 3):
         raise ValueError('recovery requires max_actions 0..12 and repeat_limit 1..3')
@@ -54,6 +77,14 @@ def validate_recovery(config):
         raise ValueError('targeted_source_review must be boolean')
     if config.get('targeted_source_review') and not config.get('monitor_progress'):
         raise ValueError('targeted_source_review requires monitor_progress')
+    if type(config.get('diagnosis_supervision', False)) is not bool:
+        raise ValueError('diagnosis_supervision must be boolean')
+    if config.get('diagnosis_supervision') and config.get('strategy') != 'adaptive':
+        raise ValueError('diagnosis_supervision requires adaptive recovery')
+    if type(config.get('budget_driven', False)) is not bool:
+        raise ValueError('budget_driven must be boolean')
+    if config.get('budget_driven') and config.get('strategy') != 'adaptive':
+        raise ValueError('budget_driven requires adaptive recovery')
     return config
 
 
@@ -83,6 +114,9 @@ def bounded_verification(verification):
             target['error'] = str(structured.get('error') or '')[:600]
             target['failed_tests'] = [str(row)[:350] for row in structured.get('failed_tests', [])[:10]]
             target['failure_excerpts'] = [str(row)[:1000] for row in structured.get('failure_excerpts', [])[:4]]
+            from .verification_feedback import bounded_failure_locations
+            target['failure_locations'] = bounded_failure_locations(structured.get('failure_locations', []))
+            target['omitted_failure_locations'] = structured.get('omitted_failure_locations', 0)
             target['observed_test_output_tail'] = str(structured.get('observed_test_output_tail', ''))[-1000:]
     return result
 
@@ -96,9 +130,13 @@ class RecoveryController:
         self.actions = []
         self.failures = {}
         self.decisions = []
+        self.response_warnings = []
         from .recovery_progress import RecoveryProgress
         self.progress = RecoveryProgress(workspace) if config.get('monitor_progress') else None
         self.targeted_review = config.get('targeted_source_review', False)
+        self.supervision = config.get('diagnosis_supervision', False)
+        self.supervision_reviews = []
+        self.budget_driven = config.get('budget_driven', False)
 
     def change_evidence(self, originals):
         """Read actual current changes, not model summaries, with explicit omissions."""
@@ -117,7 +155,7 @@ class RecoveryController:
                 'scope': 'Actual base-to-current diff; truncated entries require source inspection, not guessing.'}
 
     def decide(self, model, goal, plan, verification, settings, *, feedback=None, changes=None, _review_stop=True,
-               _targeted_review=True, source_review=None):
+               _targeted_review=True, source_review=None, _supervise=True, _finalize=True, supervision_feedback=None):
         """Critic selects a route; it cannot edit, invoke tools or grant scope."""
         schema = {'type': 'object', 'properties': {
             'action': {'type': 'string', 'enum': ['repair', 'replan', 'stop']},
@@ -127,7 +165,7 @@ class RecoveryController:
             'required': ['action', 'reason', 'hypothesis', 'evidence', 'next_check', 'previous_attempt_assessment'],
             'additionalProperties': False}
         for field, question in CRITIC_QUESTIONS.items():
-            schema['properties'][field].update(description=question, minLength=1, maxLength=1000)
+            schema['properties'][field].update(description=question, minLength=1)
         regressions = []
         for entry in verification:
             try:
@@ -161,6 +199,12 @@ class RecoveryController:
                     'Unchanged failures do not rule out useful diagnostic progress; more reads do not prove it.')
         if feedback:
             observation['host_decision_error'] = feedback[:700]
+        if supervision_feedback:
+            observation['consistency_review'] = supervision_feedback
+            observation['consistency_instruction'] = (
+                'Reconsider the quoted claim against cited evidence. The reviewer is another fallible model, '
+                'not an authority. Correct unsupported assertions or explain why the apparent conflict is '
+                'unresolved. Do not invent observations, change acceptance or claim a probe executed.')
         if source_review:
             observation['targeted_source_review'] = source_review
             observation['targeted_review_instruction'] = (
@@ -179,6 +223,9 @@ class RecoveryController:
             'Stop only with a specific blocker, unsafe action, or evidence of no meaningful remaining progress; '
             'a different failing input alone is not such a blocker. '
             'Answer every question in the field descriptions, using the named labels inside each string. '
+            'Aim for at most 1000 characters per field; this is a soft brevity target, not a reason '
+            'to omit essential evidence or check predictions. Overall output and resource limits still apply. '
+            'Use short clauses per label and omit repeated background, not required answers. '
             'Give concise findings and checkable predictions, not private chain-of-thought. '
             'Unknown is allowed: identify the precise missing evidence instead of fabricating an answer. '
             'First locate the failing call and test phase; an exception tail alone does not establish them. '
@@ -218,18 +265,20 @@ class RecoveryController:
         self.ws.budget.charge_tokens(reply.tokens if reply.tokens is not None else size + len(reply.content.encode()))
         self.ws.budget.check()
         fact = self.ws.ledger.add('decision', 'critic', 'Untrusted recovery route', reply.content)
+        self._last_decision_fact = fact
         self.ws.trace.emit('critic', 'llm_call_finished', fact_id=fact, tokens=reply.tokens,
                            response_metadata=getattr(reply, 'metadata', None))
         try:
             decision = json.loads(reply.content)
-            fields = set(schema['required'])
-            if (not isinstance(decision, dict) or set(decision) != fields or
-                    decision['action'] not in {'repair', 'replan', 'stop'} or
-                    any(not isinstance(decision[key], str) or not decision[key].strip() or len(decision[key]) > 1000
-                        for key in fields - {'action'})):
-                raise ValueError('Expected action repair/replan/stop and nonempty diagnosis fields <=1000 characters')
+            validate_critic_decision(decision)
         except (ValueError, TypeError) as error:
             raise InvalidSelection('Invalid Critic decision: ' + str(error)) from None
+        if len(json.dumps(decision).encode()) > settings.get('max_context_bytes', 12000):
+            raise InputCapacityExceeded('Complete Critic decision exceeds configured context capacity; raw response retained')
+        warnings = critic_length_warnings(decision)
+        if warnings:
+            self.response_warnings.append({'decision_fact_id': fact, 'warnings': warnings})
+            self.ws.trace.emit('critic', 'response_length_advisory', decision_fact_id=fact, warnings=warnings)
         self.decisions.append(decision)
         if self.targeted_review and _targeted_review and decision['action'] == 'replan':
             paths = [name for item in plan for name in item.get('files', [])]
@@ -247,7 +296,28 @@ class RecoveryController:
                         fact_ids=[entry['fact_id'] for entry in source['windows']])
                     return self.decide(model, goal, plan, verification, settings, changes=changes,
                         feedback='Reassess your preceding diagnosis using the requested source definitions.',
-                        _review_stop=False, _targeted_review=False, source_review=source)
+                        _review_stop=False, _targeted_review=False, source_review=source,
+                        _supervise=_supervise, _finalize=_finalize)
+        if self.supervision and _supervise and decision['action'] != 'stop':
+            from .diagnosis_supervision import review_diagnosis
+            review = review_diagnosis(model, self.ws, decision, observation, settings, recovery=self if self.budget_driven else None)
+            self.supervision_reviews.append({'decision_fact_id': fact, **review})
+            corrections = 0
+            while review['verdict'] == 'conflict':
+                if corrections and not self.budget_driven:
+                    raise RecoveryStopped('Diagnosis still conflicts with cited evidence after one correction; no review loop')
+                self.permit('correct_diagnosis_conflict', 'Diagnosis conflicts with cited evidence',
+                            {'decision': decision, 'findings': review['findings']})
+                corrections += 1
+                _review_stop = False  # Do not start another reconsideration chain after correction.
+                decision = self.decide(model, goal, plan, verification, settings, changes=changes,
+                    _review_stop=False, _targeted_review=False, source_review=source_review,
+                    _supervise=False, _finalize=False, supervision_feedback=review)
+                fact = self._last_decision_fact
+                if decision['action'] == 'stop':
+                    break
+                review = review_diagnosis(model, self.ws, decision, observation, settings, recovery=self if self.budget_driven else None)
+                self.supervision_reviews.append({'decision_fact_id': fact, **review})
         if (_review_stop and decision['action'] == 'stop' and regressions and
                 any(row.get('diff') for row in (changes or {}).get('changes', []))):
             # One bounded reconsideration, not a forced action rewrite. Genuine
@@ -259,8 +329,8 @@ class RecoveryController:
                          'Unproven causality calls for inspection, not an assumption of unrelatedness. '
                          'Choose replan/repair if a useful permitted check remains; otherwise identify a concrete '
                          'blocker and retain stop. Do not claim the regression is patch-caused without evidence.',
-                _review_stop=False, _targeted_review=False)
-        if self.progress:
+                _review_stop=False, _targeted_review=False, _supervise=_supervise, _finalize=_finalize)
+        if self.progress and _finalize:
             self.progress.begin(decision, verification, fact)
         return decision
 
@@ -268,7 +338,7 @@ class RecoveryController:
         self.ws.budget.check()
         fingerprint = digest({'kind': kind, 'error': str(error), 'state': state})
         count = self.failures.get(fingerprint, 0) + 1
-        if len(self.actions) >= self.limit or count > self.repeat_limit:
+        if not self.budget_driven and (len(self.actions) >= self.limit or count > self.repeat_limit):
             self.ws.trace.emit('critic', 'recovery_stopped', reason='action_limit' if len(self.actions) >= self.limit else 'no_progress',
                                failure_fingerprint=fingerprint)
             raise BudgetExceeded('Recovery action budget exhausted or repeated failure without progress')
@@ -324,6 +394,11 @@ class RecoveryController:
         report = {'max_actions': self.limit, 'used_actions': len(self.actions), 'actions': self.actions,
                 'diagnoses': self.decisions,
                 'scope': 'Shared runtime recovery budget; model/tool/token/wall-clock limits still apply'}
+        if self.response_warnings:
+            report['response_warnings'] = self.response_warnings
+        if self.supervision_reviews:
+            report['supervision_reviews'] = self.supervision_reviews
+        report['budget_driven'] = self.budget_driven
         if self.progress:
             report['progress'] = self.progress.report()
         return report
