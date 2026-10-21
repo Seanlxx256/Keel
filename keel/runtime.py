@@ -105,6 +105,9 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
                 or not isinstance(continuation['changes'],dict) or not isinstance(continuation['provenance'],dict)
                 or len(json.dumps(continuation).encode())>24000):
             raise ValueError('Continuation requires adaptive recovery and bounded verification/change evidence')
+    preserve_candidates = config.get('preserve_repair_candidates', False)
+    if type(preserve_candidates) is not bool or (preserve_candidates and not (adaptive and localized_mode)):
+        raise ValueError('preserve_repair_candidates requires adaptive localized-proposal mode')
     if adaptive and not (agent_mode or localized_mode):
         raise ValueError('adaptive recovery requires agent or localized-proposal mode')
     if adaptive:
@@ -149,6 +152,8 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
     workspace.localization_tool_steps = scout_steps
     workspace.localization_require_external = require_external
     recovery = RecoveryController(recovery_config, workspace) if recovery_config.get('max_actions', 0) else None
+    from .repair_checkpoints import RepairCheckpoints
+    candidates = RepairCheckpoints(workspace, output) if preserve_candidates else None
     result = {"run_id": output.name, "goal": config["goal"], "mode": config.get('mode', 'explicit'), "status": "running",
               "work_items": [], "baseline_verification": [], "verification": [], "failure": None}
     originals = {}
@@ -167,6 +172,9 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
     def scout_phase():
         nonlocal initial, specs, model, impact, scout_session, proposal_evidence, proposal_dependencies, proposal_scope, active_goal
         if continuation is not None and not result.get('continuation_review'):
+            if candidates is not None:
+                candidates.observe(continuation['verification'],
+                    continuation['provenance'].get('source_files', {}), 'saved-seed')
             enter_role('critic')
             if model is None:
                 from .models import from_config
@@ -438,6 +446,10 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
         verification = workspace.verify(config['acceptance'], phase='final' if number == 0 else f'repair-{number}')
         result['verification'] = verification
         attempts.append({'attempt': number, 'verification': verification})
+        if candidates is not None:
+            audit_before_recovery()
+            names = set(originals) | set(continuation['provenance'].get('source_files', {}) if continuation else {})
+            candidates.observe(verification, names, f'verification-{number}')
         failed = len(verification) != len(config['acceptance']) or any(row['returncode'] != 0 for row in verification)
         if failed and number < repair_attempts:
             recovery_snapshot = audit_before_recovery()
@@ -586,6 +598,17 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
             record_failure()
         lifecycle.finish(result["status"])
         result["state_machine"] = lifecycle.report()
+        if candidates is not None and result['status']=='failed' and result.get('failure',{}).get('category') in {
+                'budget_exhausted','recovery_stopped','verification_failed'}:
+            try:
+                audit_before_recovery()
+                selected = candidates.restore_on_failure(originals)
+                if selected is not None:
+                    result['selected_repair_candidate'] = selected
+                    trace.emit('runtime','repair_candidate_selected',
+                               label=selected['selected_label'],restored_files=selected['restored_files'])
+            except (ValueError, OSError, PolicyDenied, AuditFailed) as error:
+                result['repair_candidate_selection_error'] = type(error).__name__+': '+str(error)
         patch = []
         for name, before in originals.items():
             path = workspace.path(name)

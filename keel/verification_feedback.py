@@ -1,5 +1,7 @@
 """Bounded failure-first feedback; full reports remain authoritative artifacts."""
 import re
+import hashlib
+import json
 
 
 def failure_feedback(status, observed):
@@ -20,7 +22,10 @@ def failure_feedback(status, observed):
             errors = [i for i, line in enumerate(lines) if re.match(r'^E\s', line)]
             excerpt = '\n'.join(lines[max(0, errors[0]-5):errors[-1]+2]) if errors else section
             excerpts.append(excerpt[-1000:])
-    return {'test_counts': counts, 'failed_tests': failed[:10],
+    universe = {group: sorted(set(str(test) for ids in values.values() for test in ids))
+                for group, values in (status or {}).items()}
+    return {'test_universe_sha256': hashlib.sha256(json.dumps(universe, sort_keys=True).encode()).hexdigest(),
+            'test_counts': counts, 'failed_tests': failed[:10],
             'omitted_failed_tests': max(0, len(failed)-10),
             'failure_excerpts': excerpts[:4], 'omitted_failure_excerpts': max(0, len(excerpts)-4),
             'observed_test_output_tail': observed[-1000:]}

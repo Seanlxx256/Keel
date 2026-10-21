@@ -624,3 +624,29 @@ bounded correction space within the configured context cap. Tests cover a local
 turn limit after protected/source reads, source-first display with other candidates
 retained, protected-path exclusion, enum membership and bounded page sizes. No
 real-task success is claimed before another model/harness attempt.
+
+## Preserve tested repair candidates rather than exporting only the last edit
+
+The Astropy transfer attempt executed three verification rounds but finished with
+2 preservation failures versus 1 in the saved seed, then exhausted the next-call
+budget. Do not turn this into success by rerunning or reporting only the issue test.
+The task runner enables preserve_repair_candidates for adaptive localized repair.
+Failure feedback includes a hash of the complete grouped tested-ID universe;
+only completed grading with matching identity and per-group totals is comparable.
+Each candidate's declared source bytes, hashes and observed verification are
+archived separately. A conservative explicit ordering minimizes PASS_TO_PASS
+failure count first, then FAIL_TO_PASS failures; ties retain the earlier version.
+This is a policy tradeoff, not universal quality or proof that every test improved.
+
+On budget exhaustion, deliberate recovery stop or verification failure, validate
+scope/audit and checkpoint hashes before restoring the retained source. New files
+first touched after that checkpoint revert to their recorded pre-edit bytes.
+Historical attempts remain in the report, runtime remains failed, and independent
+final grading evaluates the selected workspace afresh. Do not restore after
+policy/audit failures or claim that inherited source gained retrospective audit.
+Mixed/incomplete/unknown test evidence is not ranked. Checkpoints are local run
+artifacts, not conversation resume or changed global budgets. Tests cover CRLF
+byte restoration, keeping failed attempt evidence and failed status, rejecting a
+different test universe and refusing tampered checkpoint bytes. Real Astropy
+transfer effectiveness remains untested after this change. This does not yet
+enforce that a Critic next_check was performed: that is a separate remaining gap.
