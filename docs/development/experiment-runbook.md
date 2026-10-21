@@ -573,3 +573,54 @@ without a trial directory or final grade. Plan-only remains credential-independe
 The regression covers missing and whitespace-invalid values, zero subprocess /
 Agent / harness calls, and no secret value in the error. Local presence checks do
 not establish remote credential validity or guarantee later service availability.
+
+## Catalog paging can defer selection and correct an invalid page response
+
+A saved repair produced a useful Critic diagnosis but stopped before modification:
+Scout repeatedly selected IDs absent from the displayed page. Previously every
+intermediate page required at least one ID and the generic retry restarted the
+catalog, although relevant files could appear later. Intermediate pages now allow
+an empty carry; the final catalog result must still be nonempty. One invalid-ID
+response receives explicit same-page feedback and one correction, under the same
+model/token/time budget. Page construction reserves correction prompt space;
+repeated invalid IDs still fail closed. No unseen ID is admitted and no task answer
+is supplied. Regression checks cover empty early pages reaching a later candidate,
+same-page correction, and rejecting a repeated invalid response. This mechanism
+is tested synthetically; a fresh real repair is needed to establish task success.
+
+## Exact proposal application across LF/CRLF transport
+
+The saved-source repair reached Implementer, but its first proposal matched zero
+raw substrings because model JSON used LF and the checkout used CRLF. Read-only
+replay found all three first-proposal edits uniquely match after line-terminator
+alignment; another proposal still has a genuine content mismatch. Proposal
+validation now aligns old/new LF/CRLF terminators to uniform source style, then
+performs the original exact unique match, AST/audit checks and atomic batch
+validation. The actual writes use those validated aligned strings. Unchanged
+regions are never rewritten; mixed/lone-CR source remains strict exact matching,
+without guessing a dominant style. Newline-only proposals are not effective edits.
+Normalization indices are recorded with proposal validation. Tests cover both
+newline directions, byte preservation, ambiguity, atomic rejection, no-op and real
+content mismatch. Historical proposal replay is not fresh Agent execution or
+proof of official repair success. Preserve all old artifacts and use a new output
+for the next model/harness run.
+
+## Preserve inspected source as navigation hints after an exploration turn limit
+
+The next real continuation again failed catalog selection despite explicit
+same-page correction. Scout had read relevant source but used all exploration
+turns, so its final summary was absent; the full alphabetical catalog restarted
+without preserving inspected paths. Exploration now records host read_file /
+read_lines paths only when their source hashes match the exploration snapshot.
+These paths are filtered through the full writable Python catalog and any
+caller-supplied allowed scope, then displayed first without excluding other
+candidates. They are navigation hints, not automatic repair targets. Paths are
+not extracted from model prose or arbitrary MCP payloads. Cached evidence is
+reused only under the existing unchanged-source/goal check.
+Paged selection schemas now enumerate exactly the displayed page plus carried
+IDs. Host validation remains authoritative for noncompliant providers. Pagination
+capacity checks include the same enum schema used by actual calls and reserve
+bounded correction space within the configured context cap. Tests cover a local
+turn limit after protected/source reads, source-first display with other candidates
+retained, protected-path exclusion, enum membership and bounded page sizes. No
+real-task success is claimed before another model/harness attempt.

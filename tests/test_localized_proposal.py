@@ -20,6 +20,34 @@ class Model:
 
 
 class LocalizedProposalTests(unittest.TestCase):
+    def test_turn_limit_preserves_read_paths_as_validated_navigation_hints(self):
+        (self.root/'aaa.py').write_bytes(b'def unrelated():\n    return 0\n')
+        (self.root/'tests').mkdir()
+        (self.root/'tests/test_fixture.py').write_bytes(b'assert True\n')
+        owner = self
+        class Investigating:
+            def __init__(self): self.calls = 0
+            def complete_json(self, messages, **kwargs):
+                self.calls += 1
+                if self.calls <= 2:
+                    name = 'tests/test_fixture.py' if self.calls == 1 else 'module.py'
+                    value = {'tool':'read_lines','arguments':{'path':name,'start_line':1,'end_line':2}}
+                elif self.calls == 3:
+                    data = json.loads(messages[1]['content'])
+                    owner.assertEqual(data['paths'][0], 'module.py')
+                    owner.assertNotIn('tests/test_fixture.py', data['paths'])
+                    owner.assertIn('aaa.py', data['paths'])
+                    value = {'files':['module.py']}
+                elif self.calls == 4:
+                    value = {'locations':['module.py:1']}
+                else:
+                    value = {'summary':'Update', 'edits':[{'path':'module.py','old':'return 1','new':'return 2'}]}
+                return Reply(json.dumps(value),100)
+        result = run({**self.config,'localization_tool_steps':2,
+            'budget':{**self.config['budget'],'max_model_calls':5}},self.root,self.root/'.keel/hints',model=Investigating())
+        self.assertEqual(result['status'],'passed',result.get('failure'))
+        self.assertEqual(result['budget']['model_calls'],5)
+
     def test_external_validation_success_is_reported_and_missing_tools_rejected(self):
         for config in ({'localization_require_external': True},
                        {'localization_require_external': True, 'localization_tool_steps': 2}):

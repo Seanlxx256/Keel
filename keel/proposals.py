@@ -181,6 +181,21 @@ def propose(model, workspace, goal, files, evidence, settings, *, dependencies=N
                     proposal_bytes=feedback['proposal_bytes'])
 
 
+def source_newline_edit(before, old, new):
+    """Align proposal line terminators to a uniform source, without fuzzy matching.
+
+    Mixed/lone-CR source is left exact: no dominant-style guessing or whole-file
+    rewrite. Whitespace, content and unique-match validation remain unchanged.
+    """
+    without_crlf = before.replace('\r\n', '')
+    if '\r' in without_crlf or ('\r\n' in before and '\n' in without_crlf):
+        return old, new
+    if '\n' not in before:
+        return old, new
+    newline = '\r\n' if '\r\n' in before else '\n'
+    return tuple(value.replace('\r\n', '\n').replace('\n', newline) for value in (old, new))
+
+
 def _propose_once(model, workspace, goal, files, evidence, settings, *, dependencies=None):
     files = evidence_scope(files, evidence)
     structured = callable(getattr(model, 'complete_json', None))
@@ -217,7 +232,7 @@ def _propose_once(model, workspace, goal, files, evidence, settings, *, dependen
                 raise PolicyDenied('Source changed after proposal evidence collection')
             shadow[source['path']] = current
         # Validate the entire sequence before performing its first write.
-        effective, unchanged = [], []
+        effective, unchanged, newline_aligned = [], [], []
         for index, edit in enumerate(edits):
             if not isinstance(edit, dict) or set(edit) != {'path', 'old', 'new'} or any(
                     not isinstance(edit[key], str) for key in ('path', 'old', 'new')):
@@ -229,6 +244,10 @@ def _propose_once(model, workspace, goal, files, evidence, settings, *, dependen
             before = shadow[name]
             if not old:
                 raise ValueError(f'Edit {index}: old text must be nonempty')
+            aligned_old, aligned_new = source_newline_edit(before, old, new)
+            if (aligned_old, aligned_new) != (old, new):
+                newline_aligned.append(index)
+            old, new = aligned_old, aligned_new
             matches = before.count(old)
             if matches != 1:
                 raise ValueError(f'Edit {index}: old text matched {matches} occurrences; expected exactly one')
@@ -242,13 +261,13 @@ def _propose_once(model, workspace, goal, files, evidence, settings, *, dependen
             if findings:
                 raise AuditFailed(findings)
             shadow[name] = after
-            effective.append(edit)
+            effective.append({'path': name, 'old': old, 'new': new})
         if not effective:
             raise ValueError('Proposal contains no effective changes')
     except (ValueError, TypeError, KeyError, SyntaxError) as error:
         raise InvalidProposal('Invalid patch proposal: ' + str(error), reply.content) from None
     normalization = {'proposed_edits': len(edits), 'effective_edits': len(effective),
-                     'ignored_unchanged_indices': unchanged}
+                     'ignored_unchanged_indices': unchanged, 'newline_aligned_indices': newline_aligned}
     fact = workspace.ledger.add('decision', 'implementer', 'Validated proposal normalization', normalization)
     workspace.trace.emit('implementer', 'proposal_validated', fact_id=fact, **normalization)
     for edit in effective:

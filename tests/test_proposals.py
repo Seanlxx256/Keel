@@ -10,6 +10,47 @@ from keel.runtime import run
 
 
 class ProposalTests(unittest.TestCase):
+    def test_lf_proposal_matches_crlf_source_and_preserves_file_bytes(self):
+        (self.root/'app.py').write_bytes(b'VERSION = 1\r\n# untouched\r\n')
+        result, _ = self.execute([{'path': 'app.py', 'old': 'VERSION = 1\n',
+                                  'new': 'VERSION = 2\nEXTRA = True\n'}])
+        self.assertEqual(result['status'], 'passed', result.get('failure'))
+        self.assertEqual((self.root/'app.py').read_bytes(),
+                         b'VERSION = 2\r\nEXTRA = True\r\n# untouched\r\n')
+
+    def test_crlf_proposal_preserves_lf_source(self):
+        (self.root/'app.py').write_bytes(b'VERSION = 1\n# untouched\n')
+        result, _ = self.execute([{'path': 'app.py', 'old': 'VERSION = 1\r\n',
+                                  'new': 'VERSION = 2\r\n'}])
+        self.assertEqual(result['status'], 'passed', result.get('failure'))
+        self.assertEqual((self.root/'app.py').read_bytes(),b'VERSION = 2\n# untouched\n')
+
+    def test_newline_alignment_keeps_ambiguity_and_atomic_batch_checks(self):
+        before=b'VERSION = 1\r\n# repeated\r\n# repeated\r\n'
+        (self.root/'app.py').write_bytes(before)
+        result, _ = self.execute([
+            {'path':'app.py','old':'VERSION = 1\n','new':'VERSION = 2\n'},
+            {'path':'app.py','old':'# repeated\n','new':'# changed\n'}])
+        self.assertIn('matched 2 occurrences',result['failure']['message'])
+        self.assertEqual((self.root/'app.py').read_bytes(),before)
+
+    def test_newline_only_proposal_is_not_an_effective_change(self):
+        before=b'VERSION = 1\r\n'
+        (self.root/'app.py').write_bytes(before)
+        result, _ = self.execute([{'path':'app.py','old':'VERSION = 1\n','new':'VERSION = 1\r\n'}])
+        self.assertIn('no effective changes',result['failure']['message'])
+        self.assertEqual((self.root/'app.py').read_bytes(),before)
+
+    def test_mixed_newlines_are_not_guessed_and_content_is_not_fuzzy(self):
+        from keel.proposals import source_newline_edit
+        old,new='VERSION = 1\n','VERSION = 2\n'
+        self.assertEqual(source_newline_edit('VERSION = 1\r\n# mixed\n',old,new),(old,new))
+        before=b'VERSION = 1\r\n'
+        (self.root/'app.py').write_bytes(before)
+        result, _ = self.execute([{'path':'app.py','old':'VERSION  = 1\n','new':new}])
+        self.assertIn('matched 0 occurrences',result['failure']['message'])
+        self.assertEqual((self.root/'app.py').read_bytes(),before)
+
     def test_definition_anchor_includes_function_tail_without_fabricating_source(self):
         from keel.proposals import source_evidence, proposal_request
         from keel.core import BudgetExceeded
