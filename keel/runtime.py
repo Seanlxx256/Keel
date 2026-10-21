@@ -105,6 +105,9 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
                 or not isinstance(continuation['changes'],dict) or not isinstance(continuation['provenance'],dict)
                 or len(json.dumps(continuation).encode())>24000):
             raise ValueError('Continuation requires adaptive recovery and bounded verification/change evidence')
+    require_inspection = config.get('require_diagnostic_inspection', False)
+    if type(require_inspection) is not bool or (require_inspection and not (adaptive and localized_mode)):
+        raise ValueError('require_diagnostic_inspection requires adaptive localized-proposal mode')
     preserve_candidates = config.get('preserve_repair_candidates', False)
     if type(preserve_candidates) is not bool or (preserve_candidates and not (adaptive and localized_mode)):
         raise ValueError('preserve_repair_candidates requires adaptive localized-proposal mode')
@@ -158,6 +161,7 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
               "work_items": [], "baseline_verification": [], "verification": [], "failure": None}
     originals = {}
     active_goal = config['goal']
+    pending_inspection = None
     revision, pending_action, recovery_snapshot = 0, None, None
     stage = "scout"
     def enter_role(role, *, previous_status="completed"):
@@ -170,7 +174,7 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
     proposal_dependencies = []
     proposal_scope = config.get('proposal', {})
     def scout_phase():
-        nonlocal initial, specs, model, impact, scout_session, proposal_evidence, proposal_dependencies, proposal_scope, active_goal
+        nonlocal initial, specs, model, impact, scout_session, proposal_evidence, proposal_dependencies, proposal_scope, active_goal, pending_inspection
         if continuation is not None and not result.get('continuation_review'):
             if candidates is not None:
                 candidates.observe(continuation['verification'],
@@ -183,6 +187,8 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
             decision=recovery.decide(model,config['goal'],[],continuation['verification'],settings,
                                      changes=continuation['changes'])
             result['continuation_review']=decision
+            if require_inspection and decision['action'] != 'stop':
+                pending_inspection = (decision, continuation['verification'])
             ledger.add('decision','critic','Saved-source continuation review',decision)
             trace.emit('critic','continuation_reviewed',action=decision['action'],provenance=continuation['provenance'])
             if decision['action']=='stop':
@@ -277,7 +283,18 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
                 raw.decode("utf-8")  # Only UTF-8 text edits are supported.
                 originals.setdefault(edit["path"], raw)
     def implementer_phase():
+        nonlocal pending_inspection, active_goal
         enter_role("implementer")
+        if require_inspection and pending_inspection is not None:
+            from .diagnostic_inspection import inspect_diagnosis
+            decision, observed_verification = pending_inspection
+            inspection = inspect_diagnosis(model, workspace, config['goal'], decision,
+                observed_verification, proposal_scope['files'], settings)
+            result.setdefault('diagnostic_inspections', []).append(inspection)
+            pending_inspection = None
+            if inspection['assessment']['outcome'] == 'insufficient':
+                raise RecoveryStopped('Diagnostic inspection found insufficient evidence: '+inspection['assessment']['next_step'])
+            active_goal += '\nFresh diagnostic inspection (untrusted source and model assessment):\n'+json.dumps(inspection)
         if adaptive and pending_action == 'repair':
             repair_implementation(result['verification'], len(result['verification_attempts']))
             return
@@ -476,7 +493,7 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
         result['work_items'].append({'id': f'revision-{revision}-repair-{attempt}', 'status': 'completed', 'summary': summary})
 
     def critic_phase():
-        nonlocal revision, pending_action, active_goal
+        nonlocal revision, pending_action, active_goal, pending_inspection
         if result['failure'] or not adaptive:
             record_failure()
             return
@@ -498,6 +515,8 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
         result.setdefault('recovery_decisions', []).append(decision)
         ledger.add('decision', 'critic', 'Validated recovery route', decision)
         pending_action = decision['action']
+        if require_inspection and pending_action != 'stop':
+            pending_inspection = (decision, result['verification'])
         if pending_action == 'stop':
             handle_error(RecoveryStopped(decision['reason']))
             record_failure()

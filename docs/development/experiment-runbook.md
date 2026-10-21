@@ -650,3 +650,58 @@ byte restoration, keeping failed attempt evidence and failed status, rejecting a
 different test universe and refusing tampered checkpoint bytes. Real Astropy
 transfer effectiveness remains untested after this change. This does not yet
 enforce that a Critic next_check was performed: that is a separate remaining gap.
+
+## Bind Critic source inspection to fresh observations before another proposal
+
+Astropy transfer produced repeated next_check diagnoses while editing did not
+converge. The task runner now enables require_diagnostic_inspection for adaptive
+localized repair. After a non-stop Critic route (including saved-source entry),
+localization/planning determines writable scope, then a bounded inspection chooses
+1..3 source windows from that scope plus existing failing-test Python paths.
+The host executes read_lines through the read-only Scout gateway, records actual
+fact IDs, source hashes, line limits and truncation, and requests a short assessment
+citing only those observations. Test reads never expand write scope. Changed
+source hashes or invented fact IDs are rejected before a proposal. Insufficient
+evidence stops the attempt without inventing execution; normal candidate selection
+can retain an earlier tested version. Supported/refuted assessments and actual
+observations are given to the proposer, retaining original scope and audit rules.
+
+Two model calls per inspection and all reads share the run's existing budget;
+there is no shell, arbitrary probe, package install, budget reset or task-specific
+answer. Host checks establish provenance/freshness/citation validity, not semantic
+proof that every natural-language next_check was completed. In particular reading
+code is not executing a reproducer. Assessment remains a model judgment and the
+independent verifier remains authoritative. Regression checks cover a successful
+Critic-read-assess-edit sequence, read-only test evidence, invented citation denial,
+insufficient-evidence stop and model-budget exhaustion before editing. Synthetic
+checks do not establish Astropy transfer success; a separate fresh run is required.
+
+## Adaptive diagnostic paging: chunk limits are not task failure conditions
+
+The next real Astropy inspection requested test lines 5600..5685 (86 lines),
+which the diagnostic wrapper rejected before reading because it imposed the
+underlying 80-line chunk limit on the entire requested range. A valid large source
+range now passes through the shared read_lines gateway, which still bounds each
+observation to 80 lines / 3000 characters. Host progress reports actual read bounds,
+effective requested end (clipped to EOF), unread line count and next unread line.
+The model may finish based on sufficient evidence, request the pending remainder,
+or choose different windows within the same readable scope. It cites actual facts
+and explains the next check, without arbitrary shell execution or write access.
+
+The host tracks interval coverage without allocating ranges proportional to a
+possibly huge requested end. Repeated covered windows are not read again. New
+source lines are a cheap coverage signal, not proof of relevance or approaching a
+solution. A first no-progress round permits changing direction; a second consecutive
+no-progress continuation stops. Continuing with no pending range/new check also
+stops. There is no fixed total page-count limit in this loop: all model calls,
+reads, context sizes and wall time remain bounded by the original global budget.
+Source hashes are revalidated; range overlap does not count as new coverage and
+no continuation can expand readable paths. Prior source bodies stay in the ledger;
+new prompts contain current pages and a prior fact index, while the final proposal
+receives at most three cited source observations with explicit provenance.
+
+Regression checks cover an 86-line range completing as 80+6 with model-visible
+remaining progress, repeated-range suppression/no-progress stopping, global-budget
+exhaustion and path escape denial. The original failed run is untouched. Synthetic
+coverage checks do not establish real Astropy repair success or validate a model's
+claim of semantic progress; independent grading remains authoritative.

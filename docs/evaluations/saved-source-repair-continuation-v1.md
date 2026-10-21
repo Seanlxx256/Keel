@@ -36,3 +36,15 @@ This Astropy task has been used in prior development: it checks cross-task trans
 not held-out generalization. Do not aggregate the two attempts as a benchmark
 success rate. Real transfer outcome is pending; no model or Docker run was started
 by this preparation.
+
+## First Astropy transfer outcome
+
+Snapshot `.keel/swebench/astropy-transfer-snapshot-20261021-114134` was unresolved:
+FAIL_TO_PASS 1 passed, PASS_TO_PASS 173 passed / 1 failed, no infrastructure error.
+Attempt `.keel/swebench/astropy-transfer-repair-20261021-114707` actually edited
+source and executed three intermediate verifications, but finished unresolved:
+FAIL_TO_PASS 1 passed, PASS_TO_PASS 172 passed / 2 failed. Budget: 28 model calls,
+154,424 tokens, 35 tools, 893.235 Agent seconds. The next model-call token reserve
+could not fit. This is a failed transfer, not a second successful continuation.
+Subsequent development added tested-candidate retention and evidence-bound source
+inspection. Their real transfer outcome remains pending; preserve this failure.

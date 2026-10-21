@@ -60,7 +60,7 @@ def config_for(task, task_dir, output, model_config, harness_python, environment
     config = {'mode': 'localized-proposal', 'goal': task['problem_statement'], 'model': model_config,
             'agent': {'max_steps': 12, 'max_context_bytes': 48000, 'max_output': 4096, 'require_change': True},
             'recovery': {'strategy': 'adaptive', 'max_actions': 6, 'repeat_limit': 2, 'write_roots': ['.']},
-            'verification_repair_attempts': 3, 'preserve_repair_candidates': True,
+            'verification_repair_attempts': 3, 'preserve_repair_candidates': True, 'require_diagnostic_inspection': True,
             'budget': {'max_wallclock': 1800, 'max_model_calls': 30, 'max_tokens': 180000, 'max_tool_calls': 80},
             'execution': {'backend': 'local'},
             'acceptance': [[sys.executable, str(verifier), '--task', str(task_dir.resolve()),
@@ -182,6 +182,9 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
                       external_tool_calls=result.get('external_tool_calls', {}),
                       external_tool_validation=result.get('external_tool_validation', {}),
                       recovery=result.get('recovery'), verification_rounds=len(result.get('verification_attempts', [])))
+        report['diagnostic_inspections'] = [{'critic_next_check':row['critic_next_check'],
+            'checks':row['checks'],'assessment':row['assessment'],'scope':row['scope']}
+            for row in result.get('diagnostic_inspections', [])]
         if result.get('selected_repair_candidate'):
             report['selected_repair_candidate'] = {k:v for k,v in result['selected_repair_candidate'].items() if k != 'verification'}
         frozen()
