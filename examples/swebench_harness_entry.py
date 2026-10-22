@@ -19,6 +19,9 @@ if __name__ == '__main__':
     if os.environ.get('KEEL_HARNESS_PLUGIN_POLICY'):
         from keel.harness_plugins import install_plugin_policy
         install_plugin_policy(os.environ['KEEL_HARNESS_PLUGIN_POLICY'])
+    if os.environ.get('KEEL_HARNESS_CACHE_SCOPE'):
+        from keel.harness_cache import install_cache_scope
+        install_cache_scope(os.environ['KEEL_HARNESS_CACHE_SCOPE'])
     if os.name == 'nt':
         with linux_artifact_writes():
             runpy.run_module('swebench.harness.run_evaluation', run_name='__main__', alter_sys=True)

@@ -1081,3 +1081,176 @@ Future runner integration must test infrastructure-error routing separately from
 code repair: preserve the candidate, bound recovery by the shared deadline, and
 verify that unavailable Docker does not spend code-repair rounds. These runner
 changes/regression tests are proposed, not established by this manual incident.
+
+### Infrastructure routing now implemented (2026-10-22)
+
+`keel.verification_infrastructure` recognizes structured unavailable-verifier
+results separately from test failures. Runtime records these attempts outside code
+repair rounds, preserves the candidate, and retries only within configured 0..2
+attempts and the shared tool/time budgets. Persistent unavailability returns
+environment_blocked before Critic/Implementer routing. Arbitrary stderr strings or
+exit codes alone are not classified as infrastructure failures. An acceptance
+command changing the workspace is rejected rather than retried on changed source.
+
+`run_swebench_task.py --infrastructure-guard` checks Docker Server before checkout
+or inference and again before final grading; it enables one retry of unavailable
+verification with a two-second observable wait. A blocked runtime preserves export
+artifacts and skips redundant final grading. It does not restart Docker, change
+host ACLs, retrieve learned repairs or diagnose arbitrary new infrastructure errors.
+Use the existing bounded launcher so setup, checks and retries count in total time.
+
+Tests: test_verification_infrastructure and test_swebench_task verify zero model
+dispatch on preflight failure, no Critic/code edits after unavailable verification,
+same-candidate transient recovery, shared tool-budget exhaustion and skipped final
+grading. These synthetic checks are distinct from a live Docker recovery experiment.
+
+## Explicit model transport retries and retained instance images (2026-10-22)
+
+Use the shared `model_transport.invoke_with_retries` through FrozenModel with its
+bound runtime Budget. Roles already reserve the first dispatch; each extra dispatch
+must call allow_model again. Retry only typed ModelTransportError (compatible
+provider disconnect/reset/timeout/incomplete-read or HTTP 408/429/selected 5xx).
+Do not retry credentials, redirects, certificate failures, schema/usage errors or
+truncated/refused completions. Defaults remain zero retries; SWE opt-in requires
+the durable model transcript. Waits and per-dispatch timeouts use remaining shared
+time. Record every failed request; absence of usage is not absence of spend.
+Unknown failed usage consumes a conservative input-byte/output reservation, listed
+separately in budget reports; it is not a measured provider token or billing total.
+Known failed usage is charged once. This is bounded transport recovery, not a new
+model diagnosis or permission to restart a whole experiment.
+
+For SWE use `--retain-instance-image`: one fresh session scope is passed to every
+verifier and final grader. Inside the harness, apply cache naming AFTER environment
+policies; the cache tag hashes session, generated Dockerfile, setup scripts,
+environment/base image references and prior policy tag. Different setup recipes
+must not collide. Official --cache_level instance retains the resulting image;
+tests still execute in fresh containers with new run IDs and prediction hashes.
+No old test report is promoted to a new pass, no cached-score reuse, and no global
+Docker prune. The first build can still require network; this prevents redundant
+later builds, not all network failures. Reuse is session-scoped, not a proof of
+immutable upstream registries or dependencies across future experiments.
+
+Tests: test_model_transport (runtime binding, same-request recovery, finite retry,
+call/token/time limits, unknown usage, no protocol retry), test_harness_cache
+(same recipe/scope, changed recipe/environment/policy/scope), and SWE entry/bridge
+tests (same scope to verifier/final grader, retention flag, no fake score). Also
+instantiate real harness 3.0.0 TestSpec offline to check tag generation. Actual
+Docker reuse and live provider recovery still need experiment evidence.
+
+## Bind diagnostic handoffs to actual localization (2026-10-22)
+
+Legal writable IDs are not evidence that a selected edit scope addresses the
+pending diagnostic question. Paged selection may prune earlier candidates; trace
+retained_ids and discarded_previous_ids so the handoff can be reconstructed.
+Do not hard-pin task-specific paths or treat path overlap as causal proof.
+
+Opt-in recovery.diagnostic_handoff reviews the actual localized source definitions
+and the pending validated Critic check BEFORE planning mutations. Reuse the existing
+diagnostic inspection request/whole-definition readers. Include named read-only
+test paths as evidence, never as new edit permission. An aligned review must quote
+selected source; redirect must quote an observed replacement and select only from
+the original writable catalog. Redirect triggers fresh focused localization, not
+direct execution of a model-proposed path or patch. Preserve observations and raw
+replies, check freshness, and keep all reads/calls in the shared budgets. Propagate
+the concise assessment as untrusted context to the Implementer. blocked reports a
+specific missing capability/evidence rather than claiming a check was performed.
+
+The host verifies source quotation provenance and permission boundaries. The
+reviewer still judges relevance; it may approve a poor plan. A source/planning
+review does not execute the Critic's runtime probe and cannot establish test pass.
+Scope review presently covers diagnostic-driven re-localization, not every possible
+within-file edit or a complete semantic execution supervisor. Defaults stay off.
+
+For short live assessment, reuse run_frozen_model_review.py with response_contract
+diagnostic_handoff, arms drift/target. Validate using the production quote/scope
+validator; preserve pending/failed receipts and do not auto-retry a paid micro-run.
+Compare rejection of known drift with acceptance or concrete blocking of the
+target control; parsed JSON is not an automatic quality score. First audit frozen
+trajectories and test routing locally before another long, paid repair attempt.
+
+Source quotation provenance must tolerate CRLF/LF transport equivalence only.
+Use keel.source_quotes for LF display and validation; retain original byte hashes.
+Do not strip indentation, collapse whitespace, normalize quotation marks or use
+fuzzy matching. A valid saved response rejected by an older validator can be
+revalidated offline into a separate, hashed derivative artifact, without changing
+the failed receipt or paying for another model call. Freeze policy migrations
+explicitly; dispatch only the unfinished control under a new plan.
+Evidence: handoff-alignment-v1 drift quoted two exact source passages except for
+line endings; offline-review-newline-v1.json records both matches and zero calls.
+Regression: test_diagnostic_handoff accepts CRLF/LF and rejects changed source text.
+
+Conditional response-field invariants enforced by the host must be stated in the
+model instruction, including the empty-list case. diagnostic_handoff aligned and
+blocked require replacement_files=[]; redirect requires a changed permitted scope
+with replacement-source citation. Keep validation strict and errors actionable.
+Regression checks must cover prompt instructions as well as invalid replies.
+Evidence: target-v2 returned aligned with exact citations but repeated the current
+path in replacement_files; this is a protocol failure, not quote fabrication.
+
+## Diagnostic answers must not be forced into edits (2026-10-22)
+
+In diagnostic-handoff proposal recovery, pass the pending next_check and hypothesis
+as structured diagnostic_check. The proposal response must include diagnostic_answer
+in the SAME budgeted call. Use the shared keel.diagnostic_answer contract: exact
+pending question, explicit answer, hypothesis update, supplied fresh source-window
+citations and a specific missing-evidence field. An unknown answer requires edits=[]
+and an undetermined hypothesis; preserve the blocker before any write. Source-only
+answers do not certify runtime probe execution. No general shell capability is
+implicitly granted. Protocol errors use existing bounded/shared-budget correction.
+
+Do not require at least one edit when the responder cannot establish what to fix.
+For these diagnostic proposals, reject all-Python AST-identical batches (comments
+or formatting only) before writes. AST difference is only a necessary heuristic,
+not semantic progress: equivalent refactoring can still pass this gate. Preserve
+all raw replies, answer facts and check_execution=not_established; provenance is
+not a proof that the answer is correct. This currently covers proposal recovery
+with diagnostic_handoff enabled, not every AgentSession or non-Python edit.
+
+Evidence: bounded v4's first candidate only added comments despite unchanged test
+failure; subsequent candidates mainly rewrote equivalent expressions. Relevant
+scope review did not complete the diagnostic question. Regression checks:
+test_diagnostic_answer, test_diagnostic_handoff runtime redirect/proposal path,
+test_proposals and test_verification_repair. Live model compliance remains untested.
+
+For diagnostic-answer micro-reviews, reuse run_frozen_model_review with contract
+diagnostic_answer and production proposal_request/validate_response. Source files
+must be explicitly mapped and hashed in frozen_files, and evidence SHA must match
+before any paid dispatch. The reader cannot access unmapped paths. Preserve raw
+replies, costs and receipts; valid unknown is a completed protocol review, never
+task success. Report patch_validation=not_performed: do not silently apply patches
+or equate answer provenance with patch validity. Review source-answer and missing-
+execution controls separately; synthetic controls are not benchmark evidence.
+
+Rejected compatible-model completions must preserve finish_reason, refusal/tool
+flags, token breakdown and configured output allocation. Keep bounded rejected
+assistant content as untrusted diagnostic material; never accept it as a patch or
+retry it as a transport error. Use ModelCompletionError. Historical merged errors
+cannot retrospectively prove truncation. Frozen reviews can explicitly freeze a
+new output allocation within existing request/call/token budgets; preserve old
+failures, reuse completed arms, and record capacity changes as a new experiment.
+Tests: test_compatible_models and test_frozen_model_review cover rejected content,
+status distinction, single usage charge, explicit max_output and preserved failure.
+
+## Route unknown diagnostic answers through bounded source acquisition
+
+Under diagnostic_handoff proposal recovery, DiagnosticEvidenceNeeded records the
+validated unknown answer before writes. RecoveryController may call the existing
+inspect_diagnosis once per exact pending question, using its current verification
+and named readable source paths. Do not reset budgets or create a new model session
+budget. Existing search/read pagination, freshness and no-progress guards remain
+active. A single acquisition may contain several read/assessment steps, all under
+the original limits. It is not permission for arbitrary commands or runtime probes.
+
+Keep returned source windows in readonly_diagnostic_evidence, separate from patch
+targets. Exact fresh citations can use these windows, but edits still use only the
+original writable/evidenced files. Merge same-file windows only when SHA matches.
+Snapshot-check acquisition; record assessment/evidence in the recovery report.
+An insufficient inspection, absent citable windows or another unknown after this
+acquisition preserves its blocker and stops before edits. Supported/refuted source
+assessments remain untrusted; re-answer the original question before proposing a
+patch. Source reads alone never establish execution or task acceptance.
+
+Regression: test_diagnostic_acquisition exercises real search/read tools and shared
+inspection with fake model replies: unknown -> read test -> cited re-proposal,
+second unknown, insufficient inspection, unchanged global budget, and refusal to
+edit read-only tests. Live performance remains unverified.

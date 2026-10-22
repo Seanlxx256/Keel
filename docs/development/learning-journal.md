@@ -717,3 +717,297 @@ attach/卸载由失败变成功，重启后用户确认 Docker 恢复；不回�
 提交内存不足、数据盘 WDAC、旧 backend 残留四项的证据等级和处理步骤。
 本轮恢复由开发者指导用户操作完成，不是 Keel 自动学习/自动恢复；运行时
 基础设施故障分流仍待实现。未新增付费调用、未重跑任务、未重置/删除镜像盘。
+
+### 2026-10-22｜K23：回到 30 分钟实验前接入环境故障分流
+
+用户要求回到原实验推进。开发者新增共享 verification_infrastructure：根据验收
+结构化协议区分 unavailable 与 test_failure，环境错误单独入账、不进入 Critic
+改码；按配置最多重试 0..2 次，同一候选快照、共享工具/墙钟预算，持续失败为
+environment_blocked。SWE 入口新增 infrastructure-guard：模型推理前核查 Docker
+Server（不是只有 Client），新实验启用一次原样重验；运行时阻塞保留 prediction
+并跳过冗余最终评分。没有将本机账户、WDAC 命令或特定题答案写入恢复分支。
+
+59 项相关离线检查通过：环境失败不触发后续模型调用/改码，临时故障可重验同一
+候选，工具预算不重置，preflight 阻塞不 checkout/调用 Agent，最终评分不重复。
+这验证路由，不证明真实自愈或任务能通过。健康恢复目前只是有限原样重试，不含
+自动重启、权限修复或检索经验。工具进程 Docker 管道访问被拒绝，且无模型凭据；
+这是受限工具进程的观测，不推翻用户已恢复 Docker 的反馈。准备用户终端启动器
+bounded-30min-v2，保留 v1 全部成本与失败，仍用同一 mini、种子、参考环境和
+费用上限，1800 秒总时限/1500 秒 Agent 上限。尚未启动新付费实验。
+
+**v2 凭据预检查阻止派发：** 用户重启后新终端运行 launcher，缺少
+KEEL_MODEL_API_KEY；错误发生在 run.ps1 调用 watchdog 之前，未启动新实验或
+调用模型。临时进程环境变量不会因重启自动保留，应在用户终端掩码输入恢复，
+不在聊天、仓库或日志存储密钥。配置后可重用同一尚未派发的 v2 启动器，不需
+另建付费尝试；预检查失败不应被记作修复失败或模型支出。
+
+**v2 真实结果复核：** 用户派发后总 1,210.125 秒 unresolved；Docker 两次
+preflight 均 ready，得到一轮有效验收：F2P 1 成功0失败，P2P 173成功1失败，
+仍是 test_invalid_float_cards2。Agent 381.843 秒、18 次派发、103,892 记录
+Token、15 工具后 Scout RemoteDisconnected 中断，并非达到30分钟或调用上限。
+18 request / 17 response / 1 error 保存；失败派发 usage 未知，不能算免费。
+两次监督 consistent，没有纠错或根因确认；infrastructure_attempts=[]，本轮未
+实机触发新环境分流，不能将人工恢复 Docker 与新分流因果混淆。
+
+最终评分另花约 13.5 分钟：前次验收清理实例镜像，最终重新构建时 git clone
+遇到 GnuTLS(-9)、early EOF、exit128，未产出实例报告，official_resolved=null。
+因此最终错误是构建/网络错误，非额外测试失败。下一步先补共享模型传输故障
+恢复及同条件镜像保留/复用验证，再做新的付费探索；不要直接增加预算或改题。
+完整复核见 [v2 报告](../evaluations/bounded-30min-v2.md)。原轨迹保留，本轮0新增调用。
+
+### 2026-10-22｜K23：传输恢复和同轮实例缓存
+
+用户要求继续补。新增 ModelTransportError 类型，将兼容 HTTP provider 的瞬断、
+reset、timeout、incomplete-read 及指定临时 HTTP 状态与鉴权/协议错误分开。
+FrozenModel 绑定 runtime 原 Budget，额外派发累计调用次数、使用剩余时限，
+最多按配置追加 0..2 次；本轮新启动器取一次。失败请求 usage 未知时保守预留
+输入字节/输出配额，report 单列 unknown reservation，不把它当已测 Token 或
+免费调用。每次请求/错误/等待/回复均保存到原完整轨迹，未改模型或具体题答案。
+
+新增 retain-instance-image：同一轮所有验收/最终评分共享一次性 scope，harness
+基于 scope、实际 setup 脚本、Dockerfile、基础/环境镜像引用和已有 policy tag
+生成实例缓存标签，保留实例镜像而非删除。仍重新创建测试容器、应用当前补丁、
+产出新报告；更改配方/环境策略会换标签，后续实验 scope 不同。第一轮构建仍
+可能受网络影响，不能宣称解决全部 clone/TLS 故障或实现跨实验依赖不可变性。
+
+已离线实例化真实 harness 3.0.0 TestSpec，确认同配方同标签、改配方换标签，
+没有 Docker 构建或模型调用。共享预算、未知用量、重试上限、鉴权/协议不重试、
+新评分不复用旧报告均增加回归检查。实际网络瞬断自恢复与镜像复用尚待实机
+证据；准备 bounded-30min-v3 新计划，保留 v1/v2 历史，维持 mini/原种子/30分钟
+总时限及原费用上限，不自动派发新的付费尝试。
+
+本轮最终相关回归检查 103 项全部通过，另以真实 harness 3.0.0 TestSpec 离线
+验证缓存标签。新 v3 计划只读验证输入哈希与种子 provenance，父 v2 plan/trial
+哈希明确记录；plan-only 解析确认一次传输重试、实例镜像保留、环境分流均启用。
+旧实验未覆盖，尚无新的付费/容器运行结果。下一次应从实际轨迹判断是否减少
+非任务故障中断，不能仅凭通过离线检查声称修复成功率提升。
+
+**v3 实机结果：** 用户运行后总960.093秒，runtime885.578秒用完60调用，
+319,490 Token/108工具；不是时限或传输中断。60 request/60 response、无
+transport_failure，因此不能称重试已实机恢复网络。缓存则有直接证据：最终
+harness复用已有实例镜像，约53.86秒完成实例运行，无重建/clone。
+四轮验收和最终评分均 F2P1通过、P2P173通过1失败，official_resolved=false。
+
+主要问题回到执行方向：Critic重复要求 FITS检查/直接探针，分页候选先选card.py
+后丢弃该候选转向工具模块，实际修改dummy writer、dtype正则和ERFA导出，
+未建立与失败的因果关系；progress均 check_execution=not_established。
+监督多次consistent只证明其未报告诊断文本冲突，不证明执行对齐。Scout占
+42调用/240,376Token，约75.2%；四次无有效改动纠正、四次证据选择纠正和
+一次重定位纠正造成重复成本。5候选最终选回saved-seed，三文件额外修改恢复。
+详见 [v3复核](../evaluations/bounded-30min-v3.md)。下一步冻结轨迹审计交接/行动
+对齐，再改通用机制；本轮未新增模型调用或直接写题目答案。
+
+### 2026-10-22｜K23：从措辞一致性扩展到编辑范围交接
+
+用户要求继续后，先核对分页实现：carry=selected 允许后页淘汰前页，属于已有
+明确排序策略；问题不只是非法路径，而是合法但无证据的方向偏移。新增 trace
+保留/淘汰 IDs，不把此事直接定性为路径解析 bug。只读重放 v3 四个计划的诊断
+引用/选中路径，3个计划丢掉所有明确点名可写目标；结果存
+`.keel/repair-review/diagnostic-handoff-audit-v1/report.json`。这是元数据审计，
+不是模型质量或历史代码因果判断，旧轨迹未改。
+
+新增默认关闭的 diagnostic_handoff：复用 diagnostic_inspection.request 和完整
+定义读取，在诊断后重定位、计划写入前复核实际范围与 next_check；引用必须是
+当前提供源码原文，aligned 引用已选源码，redirect 引用替代源码并在原可写
+目录内重新定位，blocked 说明具体缺口。测试文件可读但不获得写权限；不硬编
+目标文件/修法；向 Implementer 交接简短、未验证的评估，不把它当实际运行探针。
+模型对范围相关性的判断仍可能错，host 只能核验来源/权限/快照。
+
+分批110项相关检查通过：包含真实本地断言的运行时集成，先选无关 helper，
+范围复核要求重新定位，最终只改目标文件、helper未变；共享模型预算不重置，
+伪造引文/只读重定向被拒绝，已有分页/诊断检查保持兼容。首次测试夹具把
+SQLite/trace写在源码根目录引发正确的快照保护失败；已将夹具产物移到源码外
+或 .keel，未放松生产快照守卫。
+
+短模型复核复用现有 frozen review 入口，增加 diagnostic_handoff 响应契约；
+不另造付费执行脚本。准备 drift/target 两个冻结请求，最多各一次 mini，先看
+真实模型是否会识别已知偏移，再决定下一轮完整探索。0新增付费模型调用，
+尚不能宣称诊断或修复成功率提升，也尚未添加任意运行时探针执行能力。
+
+已冻结 `.keel/repair-review/handoff-alignment-v1/run.ps1`：从 v3 verification-0
+候选提取目标源码，配合 base helper/测试线索，捕获生产 reviewer 生成的两组
+请求（12,777/11,790字节），每组1次mini/180秒/24,000Token上限/1024输出。
+只捕获请求，无 provider 派发；两组不是等量上下文成本对照。输入/实现哈希冻结，
+失败/未完成收据禁止自动重试，完成结果仍需人工复核语义。详见
+[交接审计](../evaluations/diagnostic-handoff-audit-v1.md)。下一步先验证真实识别
+能力再决定完整长测，避免每次机制微调直接消耗60次调用。
+# 2026-10-22: Handoff quotation transport false rejection
+
+The live handoff-alignment-v1 drift arm used one mini call (3,612 recorded tokens,
+8.891 seconds). It returned redirect to the named source target, but the host
+rejected both quotations: the catalog contained CRLF while the reply used LF.
+The target control was never dispatched. This is a developer protocol defect,
+not evidence that the model failed to recognize this drift.
+
+Added shared source_quotes with CRLF/LF equivalence only and LF source display;
+original byte hashes, indentation, source text, evidence IDs and writable scopes
+remain enforced. Offline replay accepted both citations as line_endings_only,
+preserved the original failed result hash, and made zero provider calls. Evidence:
+`.keel/repair-review/handoff-alignment-v1/offline-review-newline-v1.json`.
+Prepared a separately frozen target-only follow-up in handoff-alignment-target-v2;
+the already paid drift arm is not repeated. No task repair or acceptance success
+is established. Lesson: distinguish representation differences from fabricated
+evidence, and salvage recorded responses before buying a replacement attempt.
+
+
+### 2026-10-22: Target control exposes missing field instructions
+
+Target-v2 used one mini call, 3,228 tokens and 7.75 seconds. All four source quotations match exactly; the model returned aligned and cited the selected file, but also repeated the current path in replacement_files. The host correctly rejected the contradictory structure. Inspection is recorded in `.keel/repair-review/handoff-alignment-target-v2/inspection-v1.json`; the original failed reply is unchanged. The prompt omitted the validator rule that aligned/blocked require an empty replacement list. Added explicit conditional field instructions and actionable validation feedback, preserving strict scope validation. Eight handoff regression tests pass, including prompt coverage and rejection of aligned with a nonempty replacement list. Prepared contract-v3 as a separate one-call target control, not dispatched. No host rewriting of the reply and no repair/acceptance success established. Lesson: expose every response-field invariant to the model before treating its violation as reasoning failure.
+
+### 2026-10-22: Handoff target control completes; prepare bounded v4
+
+Contract-v3 target completed: one mini call, 3,190 recorded tokens, 10.016 seconds.
+It returned aligned, replacement_files=[], and two exact quotations of the selected
+formatter. Manual review accepts that this is a relevant investigation scope;
+the reply's phrase "causal connection" does NOT establish that this path caused
+the failing test. No runtime probe or repair was performed. Together with the
+preserved drift reply (accepted only in a separate newline-policy replay), these
+are limited development examples, not a reviewer accuracy benchmark. Three paid
+micro calls so far total 10,030 recorded tokens; prior failures remain failures.
+
+Prepared `.keel/repair-exploration/bounded-30min-v4/run.ps1`, not dispatched.
+It enables diagnostic-handoff with the same mini, saved seed, reference, 60-call /
+400k-token /160-tool caps, 1500-second Agent and 1800-second total deadline. Original
+input hashes match; current implementation and prior review are frozen separately.
+Twelve related local tests pass. Next inspect actual scope reviews, redirected
+localizations, unrelated edits, repeated questions and fresh test outcomes/costs;
+source alignment alone does not certify execution of the requested check. This
+is an exposed-task development follow-up, not evidence of a causal success gain.
+# 2026-10-22: Bounded v4 narrows scope without diagnostic progress
+
+Reviewed actual v4 artifacts: watchdog 820.062 seconds, runtime 747.125 seconds,
+58 calls /357,407 recorded tokens /77 tools. Scout stopped because the next call
+could not fit the remaining token reservation, not because 30 minutes elapsed.
+Three new verification rounds and final grading did not resolve the same P2P
+failure (F2P1 pass; P2P173 pass/1 fail). Three completed handoff reviews aligned
+to card.py; all saved candidates changed that file only. No successful redirect
+is recorded, so do not claim the supervisor demonstrably corrected a bad scope.
+The first candidate only adds comments; later ones mainly change comments and
+equivalent string-length expressions. All progress checks remain not_established.
+This supersedes the hope that scope alignment alone would yield a useful repair.
+
+Next investigate the diagnostic-question completion contract and actual evidence
+handoff, rather than adding a task answer or buying another identical long run.
+Also preserve the five repeated old-text-match failures as a separate correction
+loop issue. Compared with v3, tokens increased despite shorter elapsed time and
+fewer verifications; no repair-quality or cost improvement is established.
+Full review: [bounded v4](../evaluations/bounded-30min-v4.md). No new paid calls,
+source-task edits or automatic retries were dispatched in this review.
+
+# 2026-10-22: Remove the forced-edit diagnostic handoff
+
+Developer inspected v4's execution interface: the active goal requested inspection
+before editing, while proposal_request required 1..8 edits and told the responder
+it had no shell/tools. This creates conflicting incentives; it does not prove why
+the model generated each failed candidate. Added a generic diagnostic_answer
+contract in the SAME proposal call under diagnostic_handoff recovery. It copies
+the pending question, states an evidence-backed answer and hypothesis update, and
+quotes supplied fresh source windows. Unknown requires a specific evidence gap,
+undetermined hypothesis and edits=[]; records the answer and stops before writes.
+No task-specific symbols or fixes are introduced, and no runtime probe capability
+is granted by this change. Host still cannot certify semantic truth of an answer.
+
+Python AST-identical comment/format-only diagnostic batches are rejected before
+writes; equivalent refactorings with different AST can still pass, so this is a
+limited necessary gate, not a progress oracle. The contract is wired through
+RecoveryController.propose, including direct proposal repair with a current
+decision; ordinary proposals and AgentSession retain existing contracts.
+37 related checks passed (6 new answer tests, 8 handoff tests including runtime
+redirect plus a real local acceptance assertion, 19 proposal checks, 4 verification
+repair checks). An initial existing integration stub omitted the new answer and
+failed; updated the stub to obey the new protocol without weakening validation.
+No paid calls or full evaluation were dispatched. Next use a small frozen live
+proposal assessment to test answer quality/unknown behavior before another long
+run. Documentation and local tests are not runtime learning or proof of repair.
+
+# 2026-10-22: Freeze diagnostic-answer micro-review before another full run
+
+Extended the existing frozen model review runner with diagnostic_answer, sharing
+production proposal_request and validate_response. Frozen evidence/source mapping
+and hashes are checked before dispatch; answers read only mapped source files.
+No proposed edits are applied or scored; patch_validation is explicitly absent.
+Valid unknown completes a protocol review without implying task success. Reuse
+and failure receipts preserve paid calls; no automatic paid retries.
+
+Prepared `.keel/repair-review/diagnostic-answer-v1/run.ps1`: source arm is a small
+synthetic missing-uppercase control; execution arm replays the actual v4 first
+proposal goal/windows and pending Critic question against byte-identical saved
+source. No task answer, new test body or execution result was inserted. Request
+sizes 3,084 and 21,423 bytes; each <=1 model call /180 seconds /24k budgeted tokens
+/1024 output. The same configured mini is retained. These arms test different
+capabilities, not equal-context cost or causal improvement. Plan-only validation
+passed; tool process lacks the credential, so no paid call was made. User terminal
+launcher is prepared. Relevant local suites pass; live answer quality and whether
+it honestly requests missing execution evidence remain pending manual review.
+
+
+### 2026-10-22: Latest micro-review launch status check
+
+Read-only inspection of diagnostic-answer-v1 found only frozen-source, plan/hash and run.ps1 (created 13:42:50); no results directory, manifest, raw reply or report. Process inspection via Win32_Process was denied by host permissions, so running-process status is unverified. No evidence that this latest live test was dispatched; preparation and the prior 44 local tests must not be described as a completed live review. No new run dispatched in this status check.
+
+### 2026-10-22: Diagnostic-answer source succeeds; execution completion rejected
+
+User dispatched diagnostic-answer-v1: source completed in 11.937 seconds/964
+recorded tokens and correctly identified missing uppercasing with exact source
+quotation. Its summary misleadingly says Updated although no patch was applied;
+manual review accepts the source answer, not that execution claim. Execution arm
+failed at provider completion validation in 11.406 seconds/6,365 tokens. Old adapter
+merged refusal/truncation/incomplete and did not retain finish reason or partial
+content. Therefore exact failure cause cannot be reconstructed; output exhaustion
+is only a hypothesis. Total paid recorded usage 7,329 tokens, two calls; preserved.
+
+Added typed ModelCompletionError with status flags, token breakdown, output limit
+and rejected assistant content; no HTTP headers/credentials or automatic transport
+retry. Frozen review preserves this separately from accepted JSON. Plan may declare
+1..4096 output allocation, charged/reserved within the same 24k budget. Prepared
+execution-only v2 with 2048 allocation; same prompt/evidence, no repeat of completed
+source arm and no new dispatch. 23 adapter/runner/transport tests pass. This is a
+capacity/observability follow-up, not evidence of better task reasoning or repair.
+
+### 2026-10-22: Execution-arm answer correctly remains unknown
+
+Read diagnostic-answer-execution-v2/results/report.json: completed review, one
+mini call, 5,916 recorded tokens, 10.079 seconds. It returned edits=[], unknown,
+hypothesis_update=undetermined, and two exact fresh source quotations. It identified
+missing execution observation OR additional source from the exact verification/
+writeout path. Manual review accepts that this limited window does not establish
+the failing input's path; it did not invent a runtime probe or apply a patch.
+This demonstrates honest uncertainty on this frozen example, not autonomous
+acquisition of missing evidence or repair success. Its wording that source supports
+changed behavior is still a model interpretation, not observed execution.
+
+Supersedes the v2 prepared-only status above. Including v1 source and failed v1
+execution: three paid calls /13,245 recorded tokens; preserve the 6,365-token
+unclassified failed completion. Success with 2048 allocation does not retrospectively
+prove the earlier failure was truncation (stochastic new response, no old finish
+reason). No task evaluation ran. Next shared capability should route unknown to
+bounded read-only evidence acquisition, reusing existing diagnostic_inspection
+and failing-test navigation, before considering isolated execution. Unknown is
+not a successful terminal task, and current runtime still stops with its blocker.
+No new paid run or task edits were dispatched during this review.
+# 2026-10-22: Unknown now routes to existing bounded read-only inspection
+
+Implemented generic DiagnosticEvidenceNeeded in production proposals, preserving
+unknown facts before writes. Under diagnostic_handoff, RecoveryController records
+the latest validated decision's verification and invokes existing inspect_diagnosis
+once per exact pending question. Uses named readable paths plus failing-test
+navigation, original model/tool/token/time budgets, pagination, freshness and
+no-progress guards. It does not expand arbitrary execution capabilities.
+
+After supported/refuted source assessment, citable source windows are supplied as
+readonly_diagnostic_evidence for another answer/proposal. Patch scope stays with
+the original writable files. Same-file windows merge only with matching hashes.
+Snapshot protection checks the inspection; report stores evidence_acquisitions.
+Insufficient assessment or a second unknown stops with a concrete blocker. This
+supersedes the previous unconditional stop on the first unknown; it does not
+mean that unknown can always be resolved or a runtime probe is now available.
+
+66 related local tests pass: acquisition5, answer6, inspection16, handoff8,
+frozen review8, proposals19, verification repair4. New integration uses actual
+source search/read tools with scripted model outputs, reads a failing test and
+then changes only implementation; it also checks that read-only evidence grants
+no test-write permission and cannot reset a one-call budget. These are developer
+checks, not live-model success or a benchmark score. No new provider calls, task
+repair or full run dispatched this turn. Next validate the acquisition behavior
+with a bounded live assessment before claiming improved autonomous repair.
+

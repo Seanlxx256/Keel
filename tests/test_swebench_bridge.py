@@ -130,6 +130,19 @@ class SwebenchBridgeTests(unittest.TestCase):
             self.assertEqual(result['status'], 'grading_error')
             self.assertIsNone(result['official_resolved'])
 
+    def test_session_cache_retains_images_without_reusing_a_test_report(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); _, run = self.fixture(root)
+            export_prediction(root/'task', run, root/'export', 'keel')
+            with patch('examples.swebench_bridge.run_harness', return_value=SimpleNamespace(returncode=0)) as harness:
+                result = grade(root/'task', root/'export', root/'grading', instance_cache_scope='a'*32)
+            command = harness.call_args.args[0]
+            self.assertEqual(command[command.index('--cache_level')+1], 'instance')
+            self.assertEqual(json.loads((root/'grading/instance-cache.json').read_text())['scope'], 'a'*32)
+            self.assertEqual(result['instance_cache']['scope'], 'a'*32)
+            self.assertIsNone(result['official_resolved'])
+            self.assertEqual(result['status'], 'grading_error')
+
     def test_interruption_does_not_leave_running_status(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

@@ -68,3 +68,35 @@ model-transcript.jsonl. Use examples/run_bounded_exploration.py with a frozen pl
 for a total deadline covering setup, Agent and final grading. Exit success requires
 both runtime pass and official acceptance pass in this mode. A model review verdict
 is not task acceptance. Timeouts preserve partial evidence without a pass claim.
+
+`--infrastructure-guard` requires Docker Server readiness before Agent execution
+and final grading. Structured unavailable verification can retry once on the same
+candidate; persistent unavailability is environment_blocked and does not trigger
+code repair or redundant final grading. All failed attempt artifacts remain.
+This flag does not authorize host permission changes or restart Docker Desktop.
+
+`--model-transport-retries 1` permits one extra dispatch after a typed transient
+provider failure and requires `--record-model-transcript`. Extra calls consume the
+same global budgets; failed usage that is unknown is explicitly recorded and
+conservatively reserved, not reported as free. Credentials/protocol failures do not
+retry. `--retain-instance-image` keeps recipe-scoped images for this trial's
+verification and final grading; it does not reuse prior scores or skip tests.
+Both are opt-in; the selected model and default budget limits remain unchanged.
+
+`--diagnostic-handoff` adds an experimental source-based alignment review after
+diagnostic-driven localization and before writes. A quoted redirect re-localizes
+within the original writable catalog; a concrete blocked result stops explicitly.
+This adds model/tool cost under the same budgets. It is neither a runtime probe
+nor proof that the semantic diagnosis is right; test execution is still required.
+# Diagnostic question answers in proposal recovery
+
+With `--diagnostic-handoff`, subsequent diagnostic patch proposals must now answer
+the pending Critic question with fresh source-window citations before edits are
+applied. This adds a response field to the same proposal call, not a new call.
+An unknown answer must identify missing evidence and return no edits; the attempt
+preserves a concrete blocker. Source-only evidence does not certify an executed
+probe. Python batches whose AST is unchanged are rejected as diagnostic repairs;
+AST changes still do not prove semantic progress. Other execution modes retain
+their existing contracts. Old frozen implementation plans must not be rerun after
+this migration. No new live recovery result is implied by local test success.
+

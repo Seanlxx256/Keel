@@ -23,6 +23,9 @@ def run_harness(command, *, cwd, log_path, timeout, heartbeat=10):
     environment.pop('KEEL_HARNESS_ENV_OVERLAY', None)
     environment.pop('KEEL_HARNESS_NETWORK_POLICY', None)
     environment.pop('KEEL_HARNESS_PLUGIN_POLICY', None)
+    environment.pop('KEEL_HARNESS_CACHE_SCOPE', None)
+    if (cwd/'instance-cache.json').is_file():
+        environment['KEEL_HARNESS_CACHE_SCOPE'] = json.loads((cwd/'instance-cache.json').read_text(encoding='utf-8'))['scope']
     if (cwd/'plugin-policy.json').is_file():
         environment['KEEL_HARNESS_PLUGIN_POLICY'] = json.loads((cwd/'plugin-policy.json').read_text(encoding='utf-8'))['policy']
     if (cwd/'network-policy.json').is_file():
@@ -70,7 +73,10 @@ def run_harness(command, *, cwd, log_path, timeout, heartbeat=10):
                                                                'returncode': process.returncode}), encoding='utf-8')
 
 
-def grade(task_dir, export_dir, output, *, python=sys.executable, timeout=1800, environment_overlay=None, network_policy=None, plugin_policy=None):
+def grade(task_dir, export_dir, output, *, python=sys.executable, timeout=1800, environment_overlay=None, network_policy=None, plugin_policy=None, instance_cache_scope=None):
+    if instance_cache_scope is not None:
+        from keel.harness_cache import validate_scope
+        validate_scope(instance_cache_scope)
     if type(timeout) not in (int, float) or not 0 < timeout <= 86400:
         raise ValueError('Harness timeout must be positive and at most 86400 seconds')
     if network_policy not in (None, 'no_pipeline') or (network_policy and environment_overlay):
@@ -83,6 +89,8 @@ def grade(task_dir, export_dir, output, *, python=sys.executable, timeout=1800, 
             receipt['task_receipt_sha256'] != file_hash(task_dir/'task-receipt.json')):
         raise ValueError('Export inputs changed')
     output.mkdir(parents=True, exist_ok=False)
+    if instance_cache_scope is not None:
+        (output/'instance-cache.json').write_text(json.dumps({'scope': instance_cache_scope}), encoding='utf-8')
     if plugin_policy:
         (output/'plugin-policy.json').write_text(json.dumps({'policy':plugin_policy,'version':1}),encoding='utf-8')
     if network_policy:
@@ -96,11 +104,14 @@ def grade(task_dir, export_dir, output, *, python=sys.executable, timeout=1800, 
                '--dataset_name', str((output/'grader-input.json').resolve()),
                '--predictions_path', str((export_dir/'predictions.jsonl').resolve()),
                '--instance_ids', task['instance_id'], '--max_workers', '1', '--run_id', run_id]
-    if environment_overlay is not None or network_policy or plugin_policy:
+    if environment_overlay is not None or network_policy or plugin_policy or instance_cache_scope:
         command.extend(['--cache_level', 'instance'])
     result = {'status': 'running', 'official_resolved': None, 'runtime_status': receipt['runtime_status'],
               'command': command, 'run_id': run_id, 'benchmark_ready': False, 'timeout_seconds': timeout,
               'transport_adapter': 'LF-only shell/diff/patch writes on Windows; official harness via runpy'}
+    if instance_cache_scope is not None:
+        result['instance_cache'] = {'scope': instance_cache_scope, 'cache_level': 'instance',
+            'identity': 'Session plus generated setup recipe; excludes prediction patch. Test containers and scores remain fresh.'}
     if environment_overlay is not None:
         result['environment_scope'] = 'reconstructed packaging overlay; not unchanged official environment'
         result['environment_overlay_sha256'] = file_hash(output/'environment-overlay.json')

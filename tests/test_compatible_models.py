@@ -9,7 +9,7 @@ import unittest
 import urllib.error
 from unittest.mock import patch
 
-from keel.core import ModelError
+from keel.core import ModelError, ModelCompletionError
 from keel.models import CompatibleChatModel, NoRedirect, from_config
 from keel.runtime import run
 
@@ -101,6 +101,12 @@ class CompatibleModelTests(unittest.TestCase):
                 with self.assertRaises(ModelError) as caught:
                     self.model.complete([], timeout=1, max_output=64)
                 self.assertEqual(caught.exception.tokens, None if variant == 'usage' else 15)
+                if variant in ('length', 'refusal'):
+                    self.assertIsInstance(caught.exception, ModelCompletionError)
+                    self.assertEqual(caught.exception.content, '{}')
+                    self.assertEqual(caught.exception.diagnostics['finish_reason'],
+                                     'length' if variant == 'length' else 'stop')
+                    self.assertEqual(caught.exception.diagnostics['refusal_present'], variant == 'refusal')
 
     def test_errors_do_not_echo_credentials_or_retry(self):
         for status in [302, 401, 429, 500]:

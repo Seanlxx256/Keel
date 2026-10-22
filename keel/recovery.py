@@ -55,7 +55,7 @@ def validate_critic_decision(value):
 
 
 def validate_recovery(config):
-    if (not isinstance(config, dict) or set(config) - {'max_actions', 'repeat_limit', 'strategy', 'write_roots', 'monitor_progress', 'targeted_source_review', 'diagnosis_supervision', 'budget_driven'} or
+    if (not isinstance(config, dict) or set(config) - {'max_actions', 'repeat_limit', 'strategy', 'write_roots', 'monitor_progress', 'targeted_source_review', 'diagnosis_supervision', 'budget_driven', 'diagnostic_handoff'} or
             type(config.get('max_actions', 0)) is not int or not 0 <= config.get('max_actions', 0) <= 12 or
             type(config.get('repeat_limit', 2)) is not int or not 1 <= config.get('repeat_limit', 2) <= 3):
         raise ValueError('recovery requires max_actions 0..12 and repeat_limit 1..3')
@@ -85,6 +85,9 @@ def validate_recovery(config):
         raise ValueError('budget_driven must be boolean')
     if config.get('budget_driven') and config.get('strategy') != 'adaptive':
         raise ValueError('budget_driven requires adaptive recovery')
+    if type(config.get('diagnostic_handoff', False)) is not bool or (
+            config.get('diagnostic_handoff') and config.get('strategy') != 'adaptive'):
+        raise ValueError('diagnostic_handoff requires adaptive recovery and a boolean value')
     return config
 
 
@@ -136,6 +139,12 @@ class RecoveryController:
         self.targeted_review = config.get('targeted_source_review', False)
         self.supervision = config.get('diagnosis_supervision', False)
         self.supervision_reviews = []
+        self.diagnostic_handoff = config.get('diagnostic_handoff', False)
+        self.current_decision = None
+        self.current_verification = []
+        self.handoff_reviews = []
+        self.evidence_acquisitions = []
+        self.acquired_questions = set()
         self.budget_driven = config.get('budget_driven', False)
 
     def change_evidence(self, originals):
@@ -332,6 +341,9 @@ class RecoveryController:
                 _review_stop=False, _targeted_review=False, _supervise=_supervise, _finalize=_finalize)
         if self.progress and _finalize:
             self.progress.begin(decision, verification, fact)
+        if _finalize:
+            self.current_decision = decision
+            self.current_verification = verification
         return decision
 
     def permit(self, kind, error, state):
@@ -352,9 +364,31 @@ class RecoveryController:
     def localize(self, model, goal, settings, *, allowed_files=None):
         from .localization import localize
         current_goal = goal
+        focus = allowed_files
         while True:
             try:
-                return localize(model, self.ws, current_goal, settings, allowed_files=allowed_files)
+                scope = localize(model, self.ws, current_goal, settings, allowed_files=focus)
+                if self.diagnostic_handoff and self.current_decision is not None:
+                    from .proposals import collect_located_evidence
+                    from .diagnostic_handoff import review_handoff
+                    snapshot = self.ws.snapshot()
+                    evidence = collect_located_evidence(self.ws, scope)
+                    review = review_handoff(model, self.ws, self.current_decision, scope, evidence, settings,
+                                            allowed_files=allowed_files)
+                    if self.ws.snapshot() != snapshot:
+                        raise PolicyDenied('Workspace changed during diagnostic handoff review')
+                    self.handoff_reviews.append(review)
+                    if review['verdict'] == 'blocked':
+                        raise RecoveryStopped('Diagnostic handoff blocked: '+review['reason'])
+                    if review['verdict'] == 'redirect':
+                        self.permit('realign_diagnostic_handoff', review['reason'], scope)
+                        focus = review['replacement_files']
+                        current_goal = goal + '\nDiagnostic handoff requires revised localization (untrusted review): ' + json.dumps({
+                            'reason': review['reason'], 'answer': review['answer'], 'focus': focus})
+                        continue
+                    scope['_handoff_evidence'] = evidence
+                    scope['_handoff_review'] = {key: review[key] for key in ('verdict', 'reason', 'answer', 'citations')}
+                return scope
             except InvalidSelection as error:
                 self.permit('relocalize', error, self.ws.snapshot())
                 current_goal = goal + '\nHost selection error (untrusted data): ' + str(error)[:500]
@@ -362,7 +396,9 @@ class RecoveryController:
     def propose(self, model, workspace, goal, files, evidence, settings, *, dependencies=None):
         from .proposals import _propose_once, InvalidProposal
         from .repair import select_repair_evidence
+        from .diagnostic_answer import DiagnosticEvidenceNeeded
         current_goal, current_evidence = goal, evidence
+        readonly_evidence = []
         selection_feedback = None
         while True:
             try:
@@ -371,7 +407,39 @@ class RecoveryController:
                         {'files': files}, selection_feedback, settings)
                     selection_feedback = None
                 return _propose_once(model, workspace, current_goal, files, current_evidence, settings,
-                                     dependencies=dependencies)
+                                     dependencies=dependencies,
+                                     diagnostic_check=({key: self.current_decision[key] for key in ('next_check', 'hypothesis')}
+                                         if self.diagnostic_handoff and self.current_decision is not None else None),
+                                     readonly_evidence=readonly_evidence)
+            except DiagnosticEvidenceNeeded as error:
+                if not self.diagnostic_handoff or self.current_decision is None:
+                    raise
+                question = self.current_decision['next_check']
+                if question in self.acquired_questions:
+                    raise RecoveryStopped('Diagnostic evidence remains insufficient after read-only acquisition: ' + error.answer['missing_evidence'])
+                self.acquired_questions.add(question)
+                self.permit('acquire_diagnostic_evidence', error, workspace.snapshot())
+                from .diagnostic_inspection import inspect_diagnosis, check_freshness
+                from .diagnostic_handoff import referenced_paths
+                snapshot = workspace.snapshot()
+                readable = list(dict.fromkeys([*files, *referenced_paths(workspace, question)]))
+                inspection = inspect_diagnosis(model, workspace, goal,
+                    {**self.current_decision, 'missing_evidence': error.answer['missing_evidence']},
+                    self.current_verification, readable, settings)
+                if workspace.snapshot() != snapshot:
+                    raise PolicyDenied('Workspace changed during read-only evidence acquisition')
+                check_freshness(workspace, inspection['evidence'])
+                self.evidence_acquisitions.append(inspection)
+                if inspection['assessment']['outcome'] == 'insufficient':
+                    raise RecoveryStopped('Read-only diagnosis still blocked: ' + inspection['assessment']['next_step'])
+                readonly_evidence = []
+                for row in inspection['evidence']:
+                    if 'text' in row and 'start_line' in row and 'end_line' in row:
+                        readonly_evidence.append({'path': row['path'], 'sha256': row['source_sha256'],
+                            'windows': [{key: row[key] for key in ('start_line', 'end_line', 'text')}]})
+                if not readonly_evidence:
+                    raise RecoveryStopped('Read-only diagnosis did not return citable source windows')
+                current_goal = goal + '\nRead-only diagnostic assessment (untrusted source interpretation, not runtime execution):\n' + json.dumps(inspection['assessment'])
             except InputCapacityExceeded as error:
                 self.permit('reselect_evidence', error, current_evidence)
                 selection_feedback = {'capacity_error': str(error),
@@ -398,6 +466,10 @@ class RecoveryController:
             report['response_warnings'] = self.response_warnings
         if self.supervision_reviews:
             report['supervision_reviews'] = self.supervision_reviews
+        if self.handoff_reviews:
+            report['handoff_reviews'] = self.handoff_reviews
+        if self.evidence_acquisitions:
+            report['evidence_acquisitions'] = self.evidence_acquisitions
         report['budget_driven'] = self.budget_driven
         if self.progress:
             report['progress'] = self.progress.report()

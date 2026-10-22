@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import http.client
 import math
 import os
 import re
@@ -11,7 +12,7 @@ from dataclasses import dataclass
 from typing import Protocol
 from urllib.parse import urlsplit
 
-from .core import ModelError
+from .core import ModelError, ModelTransportError, ModelCompletionError
 
 
 @dataclass
@@ -157,7 +158,15 @@ class CompatibleChatModel:
             content = message.get('content')
             if (choice.get('finish_reason') != 'stop' or message.get('refusal') or message.get('tool_calls')
                     or message.get('role') != 'assistant' or not isinstance(content, str) or not content.strip()):
-                raise ModelError('Model completion was refused, truncated or incomplete', tokens=counts[2])
+                finish = choice.get('finish_reason')
+                raise ModelCompletionError('Model completion was refused, truncated or incomplete', tokens=counts[2],
+                    diagnostics={'finish_reason': finish if isinstance(finish, str) else None,
+                        'refusal_present': bool(message.get('refusal')),
+                        'tool_calls_present': bool(message.get('tool_calls')),
+                        'assistant_role': message.get('role') == 'assistant',
+                        'content_present': isinstance(content, str) and bool(content.strip()),
+                        'prompt_tokens': counts[0], 'completion_tokens': counts[1],
+                        'max_output': max_output}, content=content if isinstance(content, str) else None)
             metadata = {'provider': 'openai-compatible', 'requested_model': self.model}
             for field in ('model', 'system_fingerprint'):
                 if isinstance(result.get(field), str):
@@ -165,9 +174,12 @@ class CompatibleChatModel:
             return Reply(content, counts[2], metadata)
         except urllib.error.HTTPError as error:
             error.close()
-            raise ModelError(f'Model HTTP request failed with status {error.code}') from None
-        except (OSError, ValueError, KeyError, TypeError, IndexError, AttributeError) as error:
-            raise ModelError(f'Invalid or unavailable model response ({type(error).__name__})', tokens=known_tokens) from None
+            error_class = ModelTransportError if error.code in {408, 429, 500, 502, 503, 504} else ModelError
+            raise error_class(f'Model HTTP request failed with status {error.code}') from None
+        except (OSError, http.client.IncompleteRead, ValueError, KeyError, TypeError, IndexError, AttributeError) as error:
+            reason = error.reason if isinstance(error, urllib.error.URLError) else error
+            error_class = ModelTransportError if isinstance(reason, (TimeoutError, ConnectionError, http.client.RemoteDisconnected, http.client.IncompleteRead)) else ModelError
+            raise error_class(f'Invalid or unavailable model response ({type(error).__name__})', tokens=known_tokens) from None
 
 
 def from_config(config: dict) -> Model:

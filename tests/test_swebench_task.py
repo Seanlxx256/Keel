@@ -13,6 +13,74 @@ from keel.runtime import validate
 
 
 class SwebenchTaskTests(unittest.TestCase):
+    def test_diagnostic_handoff_option_reaches_runtime(self):
+        from examples.run_swebench_task import execute
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); row = self.task(root); reference = self.policy_reference(root,row)
+            repo = root/'repo'; repo.mkdir()
+            with patch('examples.run_swebench_task.subprocess.run',return_value=SimpleNamespace(stdout='3.0.0')), \
+                    patch('examples.run_swebench_task.prepare_snapshot',return_value=repo), \
+                    patch('examples.run_swebench_task.run',return_value={'status':'passed','budget':{}}) as agent, \
+                    patch('examples.run_swebench_task.export_prediction'), \
+                    patch('examples.run_swebench_task.grade',return_value={'status':'graded','official_resolved':True}):
+                report=execute(root,root/'task',reference,{'name':'test'},'python',root/'trial',diagnostic_handoff=True)
+            self.assertTrue(agent.call_args.args[0]['recovery']['diagnostic_handoff'])
+            self.assertTrue(report['diagnostic_handoff'])
+    def test_retained_image_scope_shared_by_verifier_and_final_grading(self):
+        from examples.run_swebench_task import execute
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); row = self.task(root); reference = self.policy_reference(root, row)
+            repo = root/'repo'; repo.mkdir()
+            with patch('examples.run_swebench_task.subprocess.run', return_value=SimpleNamespace(stdout='3.0.0')), \
+                    patch('examples.run_swebench_task.prepare_snapshot', return_value=repo), \
+                    patch('examples.run_swebench_task.run', return_value={'status': 'passed', 'budget': {}}) as agent, \
+                    patch('examples.run_swebench_task.export_prediction'), \
+                    patch('examples.run_swebench_task.grade', return_value={'status': 'graded', 'official_resolved': True}) as grade:
+                report = execute(root, root/'task', reference, {'name': 'test'}, 'python', root/'trial', retain_instance_image=True)
+            scope = report['instance_cache_scope']
+            self.assertEqual(len(scope), 32)
+            command = agent.call_args.args[0]['acceptance'][0]
+            self.assertEqual(command[command.index('--instance-cache-scope')+1], scope)
+            self.assertEqual(grade.call_args.kwargs['instance_cache_scope'], scope)
+
+    def test_infrastructure_preflight_stops_before_checkout_or_agent(self):
+        from examples.run_swebench_task import execute
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); row = self.task(root); reference = self.policy_reference(root, row)
+            with patch('examples.run_swebench_task.subprocess.run', return_value=SimpleNamespace(stdout='3.0.0')), \
+                    patch('keel.verification_infrastructure.docker_health', return_value={'ready': False}), \
+                    patch('examples.run_swebench_task.prepare_snapshot') as checkout, \
+                    patch('examples.run_swebench_task.run') as agent, \
+                    patch('examples.run_swebench_task.grade') as grade:
+                report = execute(root, root/'task', reference, {'name': 'test'}, 'python', root/'trial',
+                                 infrastructure_guard=True)
+            self.assertEqual(report['status'], 'environment_blocked')
+            self.assertIsNone(report['official_resolved'])
+            self.assertEqual(json.loads((root/'trial/trial.json').read_text())['status'], 'environment_blocked')
+            checkout.assert_not_called(); agent.assert_not_called(); grade.assert_not_called()
+
+    def test_unavailable_runtime_preserves_prediction_and_skips_final_grade(self):
+        from examples.run_swebench_task import execute
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); row = self.task(root); reference = self.policy_reference(root, row)
+            repo = root/'repo'; repo.mkdir()
+            with patch('examples.run_swebench_task.subprocess.run', return_value=SimpleNamespace(stdout='3.0.0')), \
+                    patch('keel.verification_infrastructure.docker_health', return_value={'ready': True}), \
+                    patch('examples.run_swebench_task.prepare_snapshot', return_value=repo), \
+                    patch('examples.run_swebench_task.run', return_value={'status': 'failed', 'budget': {},
+                        'failure': {'category': 'environment_blocked'}, 'infrastructure_attempts': [{'attempt': 0}]}), \
+                    patch('examples.run_swebench_task.export_prediction') as export, \
+                    patch('examples.run_swebench_task.grade') as grade:
+                report = execute(root, root/'task', reference, {'name': 'test'}, 'python', root/'trial',
+                                 infrastructure_guard=True)
+            self.assertEqual(report['status'], 'environment_blocked')
+            self.assertEqual(len(report['infrastructure_attempts']), 1)
+            export.assert_called_once(); grade.assert_not_called()
+
     def test_extended_budget_is_explicit_and_keeps_default_limits(self):
         from examples.run_swebench_task import trial_budget
         self.assertEqual(trial_budget()['max_tokens'], 180000)

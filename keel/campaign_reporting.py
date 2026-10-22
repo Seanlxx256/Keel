@@ -19,15 +19,20 @@ def trajectory(result, passed):
 
 class FrozenModel:
     """Reject code drift before a provider call and account for in-flight usage."""
-    def __init__(self, model, check, transcript=None):
+    def __init__(self, model, check, transcript=None, *, transport_retries=0):
         self.model, self.check, self.transcript = model, check, transcript
+        self.transport_retries, self.budget = transport_retries, None
+
+    def bind_budget(self, budget):
+        self.budget = budget
 
     def record(self, event, **payload):
         if self.transcript is not None:
             import json
             import os
+            import time
             with self.transcript.open('a', encoding='utf-8', newline='\n') as stream:
-                stream.write(json.dumps({'event': event, **payload}, ensure_ascii=False) + '\n')
+                stream.write(json.dumps({'event': event, 'time': time.time(), **payload}, ensure_ascii=False) + '\n')
                 stream.flush()
                 os.fsync(stream.fileno())
 
@@ -35,20 +40,25 @@ class FrozenModel:
         value = getattr(self.model, name)
         if name not in {'complete', 'complete_json'} or not callable(value):
             return value
-        def invoke(*args, **kwargs):
+        def dispatch(*args, **kwargs):
             from .core import ModelError
             self.check()
-            self.record('request', method=name, args=args, kwargs=kwargs)
+            self.record('request', method=name, args=args, kwargs=kwargs,
+                        dispatch_model_call=self.budget.model_calls if self.budget else None)
             try:
                 reply = value(*args, **kwargs)
             except Exception as error:
                 self.record('error', error_type=type(error).__name__)
                 raise
             if self.transcript is not None:
-                self.record('response', content=reply.content, tokens=reply.tokens)
+                self.record('response', content=reply.content, tokens=reply.tokens, metadata=getattr(reply, 'metadata', None))
             try:
                 self.check()
             except ModelError as error:
                 raise ModelError(str(error), tokens=reply.tokens) from None
             return reply
+        def invoke(*args, **kwargs):
+            from .model_transport import invoke_with_retries
+            return invoke_with_retries(dispatch, args, kwargs, budget=self.budget,
+                                      retries=self.transport_retries, record=self.record)
         return invoke

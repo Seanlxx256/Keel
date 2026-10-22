@@ -8,6 +8,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from compass.preparation import prepare_snapshot
@@ -95,8 +96,13 @@ def config_for(task, task_dir, output, model_config, harness_python, environment
     return config
 
 
-def execute(root, task_dir, reference_dir, model_config, harness_python, output, *, mcp_config=None, localization_tool_steps=6, require_external_tool=False, local_exploration=False, resume_snapshot=None, saved_repo=None, diagnostic_inspection=False, recovery_progress=False, targeted_source_review=False, diagnosis_supervision=False, budget_driven_recovery=False, record_model_transcript=False, budget_limits=None, budget_profile='standard'):
+def execute(root, task_dir, reference_dir, model_config, harness_python, output, *, mcp_config=None, localization_tool_steps=6, require_external_tool=False, local_exploration=False, resume_snapshot=None, saved_repo=None, diagnostic_inspection=False, recovery_progress=False, targeted_source_review=False, diagnosis_supervision=False, budget_driven_recovery=False, record_model_transcript=False, infrastructure_guard=False, model_transport_retries=0, retain_instance_image=False, diagnostic_handoff=False, budget_limits=None, budget_profile='standard'):
     started = time.monotonic()
+    if type(model_transport_retries) is not int or not 0 <= model_transport_retries <= 2:
+        raise ValueError('model_transport_retries must be an integer from 0 to 2')
+    if model_transport_retries and not record_model_transcript:
+        raise ValueError('Model transport retries require model transcript recording')
+    instance_cache_scope = uuid.uuid4().hex if retain_instance_image else None
     limits = trial_budget(budget_limits, profile=budget_profile)
     if type(diagnostic_inspection) is not bool:
         raise ValueError('diagnostic_inspection must be boolean')
@@ -154,15 +160,19 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
             raise ValueError('Reference policies changed during execution')
         if overlay is not None and file_hash(output/'environment-overlay.json') != report['environment_overlay_sha256']:
             raise ValueError('Trial environment overlay changed during execution')
-    model = FrozenModel(base_model, frozen, output/'model-transcript.jsonl' if record_model_transcript else None)
+    model = FrozenModel(base_model, frozen, output/'model-transcript.jsonl' if record_model_transcript else None, transport_retries=model_transport_retries)
     report = {'status': 'preparing', 'instance_id': task['instance_id'], 'official_resolved': None,
               'benchmark_ready': False, 'implementation': hashes,
               'diagnostic_inspection': diagnostic_inspection,
               'recovery_progress': recovery_progress,
               'targeted_source_review': targeted_source_review,
               'diagnosis_supervision': diagnosis_supervision,
+              'diagnostic_handoff': diagnostic_handoff,
               'budget_driven_recovery': budget_driven_recovery,
               'record_model_transcript': record_model_transcript,
+              'infrastructure_guard': infrastructure_guard,
+              'model_transport_retries': model_transport_retries,
+              'instance_cache_scope': instance_cache_scope,
               'limits': limits,
               'budget_profile': budget_profile,
               'recovery_limits': {'max_actions': 12 if budget_profile == 'extended' else 6,
@@ -194,6 +204,14 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
     thread = threading.Thread(target=heartbeat, daemon=True)
     thread.start()
     try:
+        if infrastructure_guard:
+            from keel.verification_infrastructure import docker_health
+            report['docker_preflight'] = docker_health()
+            save()
+            if not report['docker_preflight']['ready']:
+                report.update(status='environment_blocked', failure={'category': 'environment_blocked',
+                    'stage': 'preflight', 'message': 'Docker server unavailable; no Agent calls dispatched'})
+                return report
         repo = prepare_snapshot(task['repo'], task['base_commit'], output/'repo', timeout=180,
                                 **({'source':str(saved_repo.resolve())} if saved_repo else {}))
         if seed_patch:
@@ -210,10 +228,14 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
                 with_seed.ledger.close()
         config = config_for(task, task_dir, output, model_config, harness_python, overlay_path, policies,
                             budget_limits=limits, budget_profile=budget_profile)
+        if instance_cache_scope is not None:
+            config['acceptance'][0].extend(['--instance-cache-scope', instance_cache_scope])
+        config['verification_infrastructure_retries'] = 1 if infrastructure_guard else 0
         config['require_diagnostic_inspection'] = diagnostic_inspection
         config['recovery']['monitor_progress'] = recovery_progress
         config['recovery']['targeted_source_review'] = targeted_source_review
         config['recovery']['diagnosis_supervision'] = diagnosis_supervision
+        config['recovery']['diagnostic_handoff'] = diagnostic_handoff
         config['recovery']['budget_driven'] = budget_driven_recovery
         if continuation:
             config['continuation_context']=continuation
@@ -234,6 +256,7 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
         report.update(runtime_status=result['status'], failure=result.get('failure'), budget=result['budget'],
                       external_tool_calls=result.get('external_tool_calls', {}),
                       external_tool_validation=result.get('external_tool_validation', {}),
+                      infrastructure_attempts=result.get('infrastructure_attempts', []),
                       recovery=result.get('recovery'), verification_rounds=len(result.get('verification_attempts', [])))
         report['diagnostic_inspections'] = [{'critic_next_check':row['critic_next_check'],
             'checks':row['checks'],'assessment':row['assessment'],'scope':row['scope']}
@@ -242,10 +265,22 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
             report['selected_repair_candidate'] = {k:v for k,v in result['selected_repair_candidate'].items() if k != 'verification'}
         frozen()
         export_prediction(task_dir, output/'run', output/'prediction', 'keel',**({'source_repo':repo} if continuation else {}))
+        if (result.get('failure') or {}).get('category') == 'environment_blocked':
+            report['status'] = 'environment_blocked'
+            return report
+        if infrastructure_guard:
+            from keel.verification_infrastructure import docker_health
+            report['docker_before_final_grade'] = docker_health()
+            if not report['docker_before_final_grade']['ready']:
+                report.update(status='environment_blocked', failure={'category': 'environment_blocked',
+                    'stage': 'final_grading', 'message': 'Docker server unavailable; prediction preserved'})
+                return report
         report['status'] = 'final_grading'
         save()
         kwargs = {'environment_overlay': overlay} if overlay is not None else {}
         kwargs.update(policies)
+        if instance_cache_scope is not None:
+            kwargs['instance_cache_scope'] = instance_cache_scope
         final = grade(task_dir, output/'prediction', output/'final-grade', python=harness_python, **kwargs)
         report.update(status='completed' if final['status'] == 'graded' else 'grading_error',
                       official_resolved=final['official_resolved'], grading_error=final.get('error'))
@@ -278,6 +313,10 @@ def main():
                         help='Opt-in evidence consistency review with at most one correction and recheck; shares all budgets')
     parser.add_argument('--budget-driven-recovery', action='store_true', help='Use global budgets instead of local retry ceilings; permission checks remain')
     parser.add_argument('--record-model-transcript', action='store_true', help='Persist full model messages and replies locally; excludes provider headers/config')
+    parser.add_argument('--infrastructure-guard', action='store_true', help='Check Docker server before inference; retry unavailable acceptance once on the same candidate')
+    parser.add_argument('--model-transport-retries', type=int, choices=range(3), default=0, help='Explicit transient provider retries per call, charged to shared budgets; requires transcript')
+    parser.add_argument('--retain-instance-image', action='store_true', help='Retain recipe-scoped instance images within this trial; fresh test containers and scores')
+    parser.add_argument('--diagnostic-handoff', action='store_true', help='Review actual localized edit scope against the pending Critic check before planning writes')
     parser.add_argument('--max-model-calls', type=int)
     parser.add_argument('--budget-profile', choices=tuple(BUDGET_PROFILES), default='standard',
                         help='Explicit extended exploration budget; default limits remain unchanged')
@@ -289,6 +328,8 @@ def main():
     parser.add_argument('--localization-tool-steps', type=int, choices=range(1, 13), default=6)
     parser.add_argument('--require-external-tool', action='store_true', help='Integration validation: require an authorized MCP attempt before local fallback')
     args = parser.parse_args()
+    if args.model_transport_retries and not args.record_model_transcript:
+        parser.error('--model-transport-retries requires --record-model-transcript')
     if args.targeted_source_review and not args.recovery_progress:
         parser.error('--targeted-source-review requires --recovery-progress')
     limits = trial_budget({key: value for key, value in (
@@ -309,6 +350,9 @@ def main():
                                                      else 9 if args.budget_profile == 'extended' else 4),
                           'budget_driven_recovery': args.budget_driven_recovery,
                           'record_model_transcript': args.record_model_transcript,
+                          'infrastructure_guard': args.infrastructure_guard,
+                          'model_transport_retries': args.model_transport_retries,
+                          'retain_instance_image': args.retain_instance_image,
                           'budget_profile': args.budget_profile, 'benchmark_ready': False,
                           'diagnostic_inspection': args.diagnostic_inspection == 'required',
                           'recovery_progress': args.recovery_progress,
@@ -326,7 +370,7 @@ def main():
                      saved_repo=args.saved_repo.resolve() if args.saved_repo else None,
                      diagnostic_inspection=args.diagnostic_inspection == 'required',
                      recovery_progress=args.recovery_progress, targeted_source_review=args.targeted_source_review,
-                     diagnosis_supervision=args.diagnosis_supervision, budget_driven_recovery=args.budget_driven_recovery, record_model_transcript=args.record_model_transcript, budget_limits=limits, budget_profile=args.budget_profile)
+                     diagnosis_supervision=args.diagnosis_supervision, budget_driven_recovery=args.budget_driven_recovery, record_model_transcript=args.record_model_transcript, infrastructure_guard=args.infrastructure_guard, model_transport_retries=args.model_transport_retries, retain_instance_image=args.retain_instance_image, diagnostic_handoff=args.diagnostic_handoff, budget_limits=limits, budget_profile=args.budget_profile)
     print(json.dumps({key: value for key, value in report.items() if key != 'implementation'}, indent=2))
     return 0 if (report['official_resolved'] is True and
                  (not args.budget_driven_recovery or report.get('runtime_status') == 'passed')) else 1

@@ -11,6 +11,7 @@ from .core import AuditFailed, Budget, BudgetExceeded, Ledger, Limits, ModelErro
 from .execution import CommandRunner, normalize_acceptance, validate_execution
 from .workspace import Workspace
 from .state import RoleStateMachine
+from .verification_infrastructure import EnvironmentBlocked, verify_available
 
 
 def validate(config: dict):
@@ -56,6 +57,9 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
     if type(config.get("memoization", True)) is not bool:
         raise ValueError("memoization must be boolean")
     ordered = validate(config)
+    infrastructure_retries = config.get('verification_infrastructure_retries', 0)
+    if type(infrastructure_retries) is not int or not 0 <= infrastructure_retries <= 2:
+        raise ValueError('verification_infrastructure_retries must be an integer from 0 to 2')
     mutation_samples = config.get("mutation_samples", 0)
     if type(mutation_samples) is not int or not 0 <= mutation_samples <= 20:
         raise ValueError("mutation_samples must be an integer from 0 to 20")
@@ -141,6 +145,8 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
         from .adapters.langgraph import require_dependencies
         require_dependencies()
     budget = Budget(Limits(**config.get("budget", {})))
+    if model is not None and callable(getattr(type(model), 'bind_budget', None)):
+        model.bind_budget(budget)
     if recovery_config.get('budget_driven'):
         # Each further repair requires a model call. This derived ceiling adds
         # no stage-specific cutoff before the existing global call budget.
@@ -177,6 +183,9 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
     proposal_evidence = []
     proposal_dependencies = []
     proposal_scope = config.get('proposal', {})
+    def guarded_verify(commands, *, phase):
+        return verify_available(workspace, commands, phase=phase, retries=infrastructure_retries,
+                                attempts=result.setdefault('infrastructure_attempts', []))
     def scout_phase():
         nonlocal initial, specs, model, impact, scout_session, proposal_evidence, proposal_dependencies, proposal_scope, active_goal, pending_inspection
         if continuation is not None and not result.get('continuation_review'):
@@ -211,7 +220,7 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
             baseline = []
             for index, spec in enumerate(specs):
                 if spec["junit"]:
-                    baseline.append(workspace.verify([spec], phase=f"baseline-{index}")[0])
+                    baseline.append(guarded_verify([spec], phase=f"baseline-{index}")[0])
                 else:
                     baseline.append({"junit_required": False})
             result["baseline_verification"] = baseline
@@ -231,8 +240,11 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
                     allowed_files = writable_candidates() if adaptive else None
                     proposal_scope = (recovery.localize(model, active_goal, settings, allowed_files=allowed_files) if recovery else
                                       localize(model, workspace, active_goal, settings))
+                    handoff = proposal_scope.pop('_handoff_review', None)
+                    if handoff:
+                        active_goal += '\nSource/planning handoff review (untrusted model assessment, not executed probe or test success):\n' + json.dumps(handoff)
                 from .proposals import collect_evidence, collect_located_evidence
-                proposal_evidence = (collect_located_evidence(workspace, proposal_scope) if localized_mode
+                proposal_evidence = ((proposal_scope.pop('_handoff_evidence', None) or collect_located_evidence(workspace, proposal_scope)) if localized_mode
                     else collect_evidence(workspace, proposal_scope))
                 from .dependency_evidence import collect
                 proposal_dependencies = collect(workspace, proposal_scope.get('dependencies', []))
@@ -340,7 +352,7 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
         result["verification_attempts"] = []
         for attempt in range(repair_attempts + 1):
             stage = 'verifier'
-            verification = workspace.verify(config["acceptance"], phase='final' if attempt == 0 else f'repair-{attempt}')
+            verification = guarded_verify(config["acceptance"], phase='final' if attempt == 0 else f'repair-{attempt}')
             result["verification"] = verification
             result["verification_attempts"].append({'attempt': attempt, 'verification': verification})
             failed = len(verification) != len(config['acceptance']) or any(v['returncode'] != 0 for v in verification)
@@ -464,7 +476,7 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
         enter_role('verifier')
         attempts = result.setdefault('verification_attempts', [])
         number = len(attempts)
-        verification = workspace.verify(config['acceptance'], phase='final' if number == 0 else f'repair-{number}')
+        verification = guarded_verify(config['acceptance'], phase='final' if number == 0 else f'repair-{number}')
         result['verification'] = verification
         attempts.append({'attempt': number, 'verification': verification})
         if candidates is not None:
@@ -548,6 +560,7 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
         if isinstance(error, AuditFailed):
             result.setdefault("audit", {})["findings"] = error.findings
         category = "budget_exhausted" if isinstance(error, BudgetExceeded) else (
+            'environment_blocked' if isinstance(error, EnvironmentBlocked) else
             'recovery_stopped' if isinstance(error, RecoveryStopped) else
             "audit_failed" if isinstance(error, AuditFailed) else
             "policy_denied" if isinstance(error, PolicyDenied) else

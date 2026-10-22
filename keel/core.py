@@ -37,6 +37,18 @@ class InvalidSelection(ModelError):
     """A parsed selection violates the host's displayed selection contract."""
 
 
+class ModelTransportError(ModelError):
+    """A transient provider transport failure, not malformed model output."""
+
+
+class ModelCompletionError(ModelError):
+    """Rejected completion with observable status; never a transport retry."""
+    def __init__(self, message, *, tokens, diagnostics, content=None):
+        super().__init__(message, tokens=tokens)
+        self.diagnostics = diagnostics
+        self.content = content
+
+
 class RecoveryStopped(ModelError):
     """The recovery decision explicitly stops rather than claiming completion."""
 
@@ -89,9 +101,13 @@ class Budget:
         self.tool_calls += 1
 
     def report(self):
-        return {"tool_calls": self.tool_calls, "tokens": self.tokens, "model_calls": self.model_calls,
+        report = {"tool_calls": self.tool_calls, "tokens": self.tokens, "model_calls": self.model_calls,
                 "wallclock_seconds": round(time.monotonic() - self.started, 3),
                 "limits": asdict(self.limits)}
+        if getattr(self, 'transport_unknown_reservations', None):
+            report['transport_unknown_reservations'] = self.transport_unknown_reservations
+            report['token_scope'] = 'Reported usage plus conservative reservations for failed dispatches with unknown usage; not a billing total'
+        return report
 
 
 class Trace:

@@ -97,10 +97,12 @@ def paged_select(model, workspace, goal, settings, *, stage, data, keys, instruc
                 raise InvalidSelection('Paged selection contains an ID not displayed in this page or previous selection')
             feedback = (' Host validation rejected these IDs: '+json.dumps(invalid)[:max(0,correction_reserve-180)]+
                         '. Select only from this page and previous_selection, or return an empty array.')
+        discarded = [identifier for identifier in carry if identifier not in selected]
         carry = selected
         page += 1
         workspace.trace.emit('scout', 'localization_catalog_page', stage=stage, page=page,
-                             entries=len(entries), retained=len(carry), pruning='model-ranking')
+                             entries=len(entries), retained=len(carry), retained_ids=carry,
+                             discarded_previous_ids=discarded, pruning='model-ranking')
     for item in items:
         try:
             fits([*chunk, item])
