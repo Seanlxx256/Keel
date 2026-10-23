@@ -49,7 +49,8 @@ def recover_reference(task, export, failed, output, *, python, timeout, grader):
         report.update(status='reference_revalidation',plugin_policy=POLICY)
         save()
         print('[Reference recovery] verified collision; applying isolated policy and grading',flush=True)
-        remaining=deadline-time.monotonic()
+        # Addition/subtraction can round a zero-elapsed deadline above its original budget.
+        remaining=min(timeout,deadline-time.monotonic())
         if remaining<=0:
             raise TimeoutError('Recovery deadline exhausted')
         result=grader(task,export,output/'reference-grade',python=python,timeout=remaining,

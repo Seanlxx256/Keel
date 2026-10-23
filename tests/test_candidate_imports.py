@@ -98,7 +98,7 @@ class CandidateImportTests(unittest.TestCase):
                 self.assertEqual(package.value.__module__,'probe_fixture_package.api')
                 self.assertEqual(loaded[0]['sha256'],mapping['probe_fixture_package.api']['sha256'])
                 self.assertEqual(loaded[0]['status'],'executed')
-                self.assertEqual(Path(sys.modules['probe_fixture_package.api'].__file__),current/'api.py')
+                self.assertTrue(Path(sys.modules['probe_fixture_package.api'].__file__).samefile(current/'api.py'))
             self.assertNotIn('probe_fixture_package',sys.modules)
             self.assertEqual(before,(current/'api.py').read_bytes())
 

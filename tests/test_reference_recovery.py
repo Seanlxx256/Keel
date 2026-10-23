@@ -43,6 +43,16 @@ class ReferenceRecoveryTests(unittest.TestCase):
             self.assertEqual(grader.call_args.kwargs['network_policy'],'no_pipeline')
             self.assertLessEqual(grader.call_args.kwargs['timeout'],300)
 
+    def test_grading_timeout_never_exceeds_original_budget_after_float_rounding(self):
+        # (212.18 + 300) - 212.18 is 300.00000000000006.
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);failed=self.fixture(root)
+            grader=Mock(return_value={'status':'graded','official_resolved':True})
+            with patch('keel.reference_recovery.inspect_image',return_value=self.inspection()), patch('keel.reference_recovery.time.monotonic',return_value=212.18):
+                result=recover_reference(root/'task',root/'reference',failed,root/'recovery',python='python',timeout=300,grader=grader)
+            self.assertEqual(result['status'],'reference_verified_reconstructed')
+            self.assertEqual(grader.call_args.kwargs['timeout'],300)
+
     def test_required_provider_is_never_removed(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp);failed=self.fixture(root);grader=Mock()
