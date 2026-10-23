@@ -74,7 +74,7 @@ def paged_select(model, workspace, goal, settings, *, stage, data, keys, instruc
         raise InputCapacityExceeded(stage + ' cannot be paged: no supported catalog')
     base = {key: value for key, value in data.items() if key != field}
     carry, chunk, page = [], [], 0
-    page_instruction = instruction + ' This is one catalog page. Rank this page together with previous_selection and return up to 8 IDs from their union. Return an empty array when this page and previous_selection contain no useful candidate. Never return an ID mentioned only in the goal or tool evidence; wait until its catalog page is displayed. All catalog pages will be visited; omitted candidates are explicitly pruned by this ranking.'
+    page_instruction = instruction + ' This is one catalog page. Rank this page together with previous_selection and return up to 8 IDs from their union. An empty array means no update and retains previous_selection, not clear all. A nonempty selection replaces previous_selection and may prune candidates. Never return an ID mentioned only in the goal or tool evidence; wait until its catalog page is displayed. All catalog pages will be visited.'
     correction_reserve = min(1200, settings.get('max_context_bytes', 12000)//4)
     def payload(entries):
         return {**base, field: entries, 'previous_selection': carry, 'catalog_page': page + 1}
@@ -97,6 +97,10 @@ def paged_select(model, workspace, goal, settings, *, stage, data, keys, instruc
                 raise InvalidSelection('Paged selection contains an ID not displayed in this page or previous selection')
             feedback = (' Host validation rejected these IDs: '+json.dumps(invalid)[:max(0,correction_reserve-180)]+
                         '. Select only from this page and previous_selection, or return an empty array.')
+        if not selected and carry:
+            workspace.trace.emit('scout', 'localization_empty_page_preserved',
+                                 stage=stage, page=page+1, retained_ids=carry)
+        selected = page_selection(carry, selected)
         discarded = [identifier for identifier in carry if identifier not in selected]
         carry = selected
         page += 1
@@ -118,6 +122,11 @@ def paged_select(model, workspace, goal, settings, *, stage, data, keys, instruc
     if not carry:
         raise InvalidSelection('Empty localization catalog')
     return {keys[0]: carry}
+
+
+def page_selection(previous, selected):
+    """Empty page is a no-op; explicit nonempty ranking still replaces the carry."""
+    return list(selected if selected else previous)
 
 
 def select(model, workspace, goal, settings, *, stage, data, keys, instruction, _paginate=True):

@@ -10,6 +10,25 @@ from keel.runtime import run
 
 
 class ProposalTests(unittest.TestCase):
+    def test_bugfix_policy_rejects_comment_only_before_writes_or_verification(self):
+        self.config['agent']['require_python_ast_change']=True
+        result,_=self.execute([{'path':'app.py','old':'VERSION = 1',
+                               'new':'# clarified\nVERSION = 1'}])
+        self.assertIn('comments/formatting', result['failure']['message'])
+        self.assertEqual(result['verification'], [])
+        self.assertEqual((self.root/'app.py').read_text(),'VERSION = 1\n')
+
+    def test_bugfix_policy_accepts_real_syntax_change(self):
+        self.config['agent']['require_python_ast_change']=True
+        result,_=self.execute([{'path':'app.py','old':'VERSION = 1','new':'VERSION = 2'}])
+        self.assertEqual(result['status'],'passed')
+
+    def test_comment_updates_remain_allowed_without_bugfix_policy(self):
+        result,_=self.execute([{'path':'app.py','old':'VERSION = 1',
+                               'new':'# clarified\nVERSION = 1'}])
+        self.assertNotIn('comments/formatting',result.get('failure',{}).get('message',''))
+        self.assertIn('# clarified',(self.root/'app.py').read_text())
+
     def test_proposal_schema_enumerates_current_evidenced_targets(self):
         from keel.proposals import proposal_request
         evidence = [{'path': 'current.py', 'windows': []}]
@@ -18,6 +37,10 @@ class ProposalTests(unittest.TestCase):
                 ['current.py', 'previous.py'], evidence, {}, structured=structured)
             self.assertEqual(schema['properties']['edits']['items']['properties']['path']['enum'], ['current.py'])
             self.assertEqual(json.loads(messages[1]['content'])['allowed_files'], ['current.py'])
+            from keel.decision_guidance import DECISION_QUESTIONS
+            self.assertEqual(json.loads(messages[1]['content'])['decision_questions'], DECISION_QUESTIONS)
+            for label in ('FACTS', 'ALTERNATIVES', 'CHOICE', 'SUCCESS', 'SWITCH'):
+                self.assertIn(label, schema['properties']['summary']['description'])
             if not structured:
                 self.assertIn('"enum": ["current.py"]', messages[0]['content'])
 

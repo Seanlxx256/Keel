@@ -13,6 +13,36 @@ from keel.runtime import validate
 
 
 class SwebenchTaskTests(unittest.TestCase):
+    def test_diagnostic_execution_is_forwarded_in_saved_continuation(self):
+        from examples.run_swebench_task import execute
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);row=self.task(root);reference=self.policy_reference(root,row)
+            repo=root/'repo';repo.mkdir()
+            context={'verification':[{'returncode':1}], 'changes':{}, 'provenance':{}}
+            evidence={'report_sha256':'report-hash','observations':[{'historical':True}]}
+            comparison={'report_sha256':'comparison-hash','observations':[{'label':'baseline','status':'passed'}]}
+            probe_config={'execution':{'backend':'docker','image':'sha256:'+'b'*64},
+                          'python':'/python','max_model_calls':3}
+            with patch('examples.run_swebench_task.subprocess.run',return_value=SimpleNamespace(stdout='3.0.0')), \
+                    patch('examples.run_swebench_task.prepare_snapshot',return_value=repo), \
+                    patch('keel.saved_repair.load_saved_repair',return_value=('',context)), \
+                    patch('keel.diagnostic_evidence.load_diagnostic_evidence',return_value=evidence) as loader, \
+                    patch('keel.diagnostic_evidence.load_comparison_evidence',return_value=comparison), \
+                    patch('examples.run_swebench_task.run',return_value={'status':'passed','budget':{}}) as agent, \
+                    patch('examples.run_swebench_task.export_prediction'), \
+                    patch('examples.run_swebench_task.grade',return_value={'status':'graded','official_resolved':True}):
+                execute(root,root/'task',reference,{'name':'test'},'python',root/'trial',
+                        resume_snapshot=root/'snapshot',saved_repo=repo,diagnostic_report=root/'probe-report.json',
+                        diagnostic_execution=probe_config,comparison_plan=root/'comparison-plan.json',
+                        comparison_report=root/'comparison-report.json')
+            forwarded=agent.call_args.args[0]['continuation_context']
+            self.assertEqual(forwarded['changes']['diagnostic_evidence'],evidence)
+            self.assertEqual(forwarded['provenance']['diagnostic_report_sha256'],'report-hash')
+            self.assertTrue(any(call.args[1]==repo for call in loader.call_args_list))
+            self.assertEqual(agent.call_args.args[0]['diagnostic_execution'],probe_config)
+            self.assertEqual(forwarded['changes']['controlled_comparisons'],comparison)
+
     def test_diagnostic_handoff_option_reaches_runtime(self):
         from examples.run_swebench_task import execute
         from types import SimpleNamespace

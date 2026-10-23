@@ -101,6 +101,11 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
     from .recovery import RecoveryController, validate_recovery
     recovery_config = validate_recovery(config.get('recovery', {}))
     adaptive = recovery_config.get('strategy') == 'adaptive'
+    from .diagnostic_execution import validate_probe_config
+    probe_config = config.get('diagnostic_execution')
+    validate_probe_config(probe_config)
+    if probe_config is not None and not (adaptive and localized_mode):
+        raise ValueError('diagnostic_execution requires adaptive localized-proposal mode')
     continuation = config.get('continuation_context')
     if continuation is not None:
         if (not adaptive or not isinstance(continuation,dict)
@@ -129,10 +134,10 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
     if type(repair_attempts) is not int or not 0 <= repair_attempts <= (8 if adaptive else 3) or (repair_attempts and not (proposal_mode or agent_mode)):
         raise ValueError('verification_repair_attempts requires a model-driven mode and integer 0..3 (adaptive: 0..8)')
     settings = config.get("agent", {})
-    if not isinstance(settings, dict) or set(settings) - {"max_steps", "max_output", "require_evidence", "max_work_items", "max_context_bytes", "require_change"} or any(
-            type(v) is not int or v <= 0 for key, v in settings.items() if key not in {"require_evidence", "require_change"}) or any(
-            type(settings[key]) is not bool for key in ("require_evidence", "require_change") if key in settings):
-        raise ValueError("agent accepts positive integer max_steps/max_output/max_work_items/max_context_bytes and boolean require_evidence/require_change")
+    if not isinstance(settings, dict) or set(settings) - {"max_steps", "max_output", "require_evidence", "max_work_items", "max_context_bytes", "require_change", "require_python_ast_change"} or any(
+            type(v) is not int or v <= 0 for key, v in settings.items() if key not in {"require_evidence", "require_change", "require_python_ast_change"}) or any(
+            type(settings[key]) is not bool for key in ("require_evidence", "require_change", "require_python_ast_change") if key in settings):
+        raise ValueError("agent accepts positive integer max_steps/max_output/max_work_items/max_context_bytes and boolean require_evidence/require_change/require_python_ast_change")
     engine = config.get("orchestrator", "native")
     if engine not in {"native", "langgraph"}:
         raise ValueError("orchestrator must be native or langgraph")
@@ -172,6 +177,7 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
     originals = {}
     active_goal = config['goal']
     pending_inspection = None
+    pending_execution = None
     revision, pending_action, recovery_snapshot = 0, None, None
     stage = "scout"
     def enter_role(role, *, previous_status="completed"):
@@ -187,7 +193,7 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
         return verify_available(workspace, commands, phase=phase, retries=infrastructure_retries,
                                 attempts=result.setdefault('infrastructure_attempts', []))
     def scout_phase():
-        nonlocal initial, specs, model, impact, scout_session, proposal_evidence, proposal_dependencies, proposal_scope, active_goal, pending_inspection
+        nonlocal initial, specs, model, impact, scout_session, proposal_evidence, proposal_dependencies, proposal_scope, active_goal, pending_inspection, pending_execution
         if continuation is not None and not result.get('continuation_review'):
             if candidates is not None:
                 candidates.observe(continuation['verification'],
@@ -200,6 +206,8 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
             decision=recovery.decide(model,config['goal'],[],continuation['verification'],settings,
                                      changes=continuation['changes'])
             result['continuation_review']=decision
+            if probe_config is not None and decision['action'] != 'stop':
+                pending_execution = (decision, continuation['verification'])
             if require_inspection and decision['action'] != 'stop':
                 pending_inspection = (decision, continuation['verification'])
             ledger.add('decision','critic','Saved-source continuation review',decision)
@@ -208,6 +216,8 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
                 raise RecoveryStopped(decision['reason'])
             active_goal=config['goal']+'\nSaved-source failed verification (untrusted evidence):\n'+json.dumps({
                 'verification':continuation['verification'],'critic':decision,
+                'diagnostic_evidence':continuation['changes'].get('diagnostic_evidence'),
+                'controlled_comparisons':continuation['changes'].get('controlled_comparisons'),
                 'instruction':'Inspect current source to test the Critic hypothesis before editing. Preserve useful saved changes. Fresh localization is required; prior scopes and model claims are not trusted.'})
         enter_role("scout")
         if revision == 0:
@@ -299,8 +309,31 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
                 raw.decode("utf-8")  # Only UTF-8 text edits are supported.
                 originals.setdefault(edit["path"], raw)
     def implementer_phase():
-        nonlocal pending_inspection, active_goal
+        nonlocal pending_inspection, active_goal, pending_execution
         enter_role("implementer")
+        if pending_execution is not None:
+            from .diagnostic_execution import execute_check
+            from .proposals import collect_located_evidence, collect_evidence
+            import hashlib
+            decision, observed_verification = pending_execution
+            # A repair route may reuse localization after a previous edit; always
+            # reacquire current bytes rather than passing stale proposal windows.
+            anchors_current = all(hashlib.sha256(workspace.read(name, role='scout')['value'].encode()).hexdigest()
+                                  == proposal_scope['source_sha256'][name] for name in proposal_scope['files'])
+            current_probe_evidence = (collect_located_evidence(workspace, proposal_scope) if anchors_current
+                else collect_evidence(workspace, {'files':proposal_scope['files'], 'queries':[]}))
+            handoff = execute_check(model, workspace, config['goal'], decision,
+                observed_verification, current_probe_evidence, settings, probe_config,
+                controlled_comparisons=(continuation or {}).get('changes',{}).get('controlled_comparisons'))
+            result.setdefault('diagnostic_executions', []).append(handoff)
+            pending_execution = None
+            if handoff['closure']['state'] == 'blocked_verified':
+                raise EnvironmentBlocked('Diagnostic executor failed; see diagnostic_executions evidence')
+            if not any(row.get('outcome') == 'completed' for row in handoff['executions']):
+                raise RecoveryStopped('Diagnostic experiment did not complete; no patch authorized')
+            if handoff['assessment_unverified']['conclusion'] == 'unknown':
+                raise RecoveryStopped('Diagnostic question remains unresolved after execution; no patch authorized')
+            active_goal += '\nExecuted current diagnostic check (untrusted evidence):\n'+json.dumps(handoff)
         if require_inspection and pending_inspection is not None:
             from .diagnostic_inspection import inspect_diagnosis
             decision, observed_verification = pending_inspection
@@ -509,7 +542,7 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
         result['work_items'].append({'id': f'revision-{revision}-repair-{attempt}', 'status': 'completed', 'summary': summary})
 
     def critic_phase():
-        nonlocal revision, pending_action, active_goal, pending_inspection
+        nonlocal revision, pending_action, active_goal, pending_inspection, pending_execution
         if result['failure'] or not adaptive:
             record_failure()
             return
@@ -520,6 +553,8 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
         recovery.permit('assess_verification', observation, recovery_snapshot)
         decision_error = None
         changes = recovery.change_evidence(originals)
+        if continuation and continuation['changes'].get('controlled_comparisons'):
+            changes['controlled_comparisons']=continuation['changes']['controlled_comparisons']
         while True:
             try:
                 decision = recovery.decide(model, config['goal'], ordered, result['verification'], settings,
@@ -531,6 +566,8 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
         result.setdefault('recovery_decisions', []).append(decision)
         ledger.add('decision', 'critic', 'Validated recovery route', decision)
         pending_action = decision['action']
+        if probe_config is not None and pending_action != 'stop':
+            pending_execution = (decision, result['verification'])
         if require_inspection and pending_action != 'stop':
             pending_inspection = (decision, result['verification'])
         if pending_action == 'stop':

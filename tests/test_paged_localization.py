@@ -5,10 +5,28 @@ import unittest
 from keel.core import Budget, Limits, Ledger, Trace, InvalidSelection
 from keel.workspace import Workspace
 from keel.models import Reply
-from keel.localization import paged_select
+from keel.localization import paged_select, page_selection
 
 
 class PagedLocalizationTests(unittest.TestCase):
+    def test_empty_page_preserves_carry_but_explicit_replacement_still_prunes(self):
+        self.assertEqual(page_selection(['a.py','b.py'], []), ['a.py','b.py'])
+        self.assertEqual(page_selection(['a.py'], ['b.py']), ['b.py'])
+        self.assertEqual(page_selection([], []), [])
+
+    def test_later_empty_pages_cannot_clear_first_page_candidate(self):
+        workspace,_,paths=self.trial('empty')
+        class Model:
+            calls=0
+            def complete_json(self,messages,**kwargs):
+                self.calls+=1
+                return Reply(json.dumps({'files':[paths[0]] if self.calls==1 else []}),10)
+        model=Model()
+        result=paged_select(model,workspace,'Find target',{'max_context_bytes':4000},
+            stage='file-selection',data={'paths':paths},keys=('files',),instruction='Select source files.')
+        self.assertGreater(model.calls,1)
+        self.assertEqual(result['files'],[paths[0]])
+
     def trial(self, mode):
         temp=tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)

@@ -1011,3 +1011,1214 @@ checks, not live-model success or a benchmark score. No new provider calls, task
 repair or full run dispatched this turn. Next validate the acquisition behavior
 with a bounded live assessment before claiming improved autonomous repair.
 
+
+### 2026-10-22: Requested staging blocked by workspace permissions
+
+User explicitly requested git add --all. Attempt failed because this tool process cannot create D:/keel/.git/index.lock (Permission denied). No commit was attempted; successful staging is not established. The user can run the same staging command in their terminal. No lock file was removed and no Git permissions were changed.
+# 2026-10-22: Prepare bounded live acquisition from the saved unknown
+
+Extended existing review_saved_diagnosis with diagnostic_acquisition mode rather
+than another paid runner. It replays the saved unknown reply for zero provider
+usage (one host budget dispatch reservation), then calls the production recovery
+controller and real read-only inspection tools. Limits: four new mini calls,
+240-second shared time /80k tokens /20 tools, <=60 seconds and 2048 output per live
+call. Requests, replies, errors and rejected partial completions are persisted.
+All validated edits are held at the Workspace.replace boundary; source snapshot
+must remain unchanged. Report distinguishes held proposal, evidence blocker and
+incomplete review, with acceptance=not_executed.
+
+Three new runner tests and four existing saved-supervision tests passed: actual
+read/proposal validation with scripted model, no source write, repeat-result reuse,
+preserved second unknown, changed-source preflight, and shared replay/live usage.
+Prepared `.keel/repair-review/acquisition-live-v1/run.ps1`; plan-only check passed.
+Source is byte-identical original proposal plus test_header.py from preserved v4
+host repo. This is NOT the full official graded test patch, explicitly recorded
+in provenance. Saved unknown/candidate/verification and implementation hashes are
+frozen. Tool process lacks credentials; no new live call was dispatched. Next
+manual review must ask what new evidence was read and whether it answered the
+question; a source assessment or held proposal is not execution or task success.
+
+
+### 2026-10-22: Live acquisition reads evidence but repeats its hypothesis
+
+Actual acquisition-live-v1 result: four live calls/four responses, 22,527 recorded
+tokens, 9 tools, 36.656 seconds; host budget5 includes one saved zero-usage replay.
+Stop was model-call budget exhausted. No network error, source write or acceptance
+run. The final report retains pending_provider_call=4, but transcript proves that
+reply exists; do not mistake stale pending telemetry for a provider interruption.
+
+The system actually read test_header.py lines2020..2065 and the formatter across
+1280..1362. Test body contains distinct initial-write, deliberate file mutation,
+and expected-warning stages. Subsequent assessments did not distinguish these
+stages or revise the causal account. Reply4 again requested already-read formatter
+1325..1362. Acquisition routing/source delivery therefore worked, while evidence
+synthesis did not. No final inspection result or patch proposal was reached.
+This supersedes prepared-only live status above, not the earlier failure costs.
+
+Next prioritize generic observation-to-question synthesis and phase-aware reading
+of tests, rather than only buying a higher call cap. Existing no-progress guards
+had not fired before this deliberately small call budget. No task-specific fix
+or real execution cause is inferred. Full review:
+[acquisition live v1](../evaluations/acquisition-live-v1.md). No new paid calls or
+implementation changes were dispatched during this review.
+
+### 2026-10-22: Correct course: repeated prompt supervision is not measured repair progress
+
+User challenged the repeated recommendation to require concrete answers, evidence
+and hypothesis updates. Accepted: these requirements already exist in Critic
+questions, source handoff, diagnostic_answer and inspection assessment. Rephrasing
+them again without an intervention that changes observable behavior is not a
+demonstrated optimization. Local protocol tests and successful evidence delivery
+have not improved the repeated failing acceptance result. Earlier framing of each
+added gate as project progress must be limited to that gate's engineering function.
+
+Observed limits: mini still repeats a hypothesis after source delivery; proposal
+mode lacks runtime probe execution; new gates consume calls and may stop earlier.
+Relative contributions of model capability, evidence packaging and execution
+capability have not been isolated. Do not assert a proven model deficiency or fix.
+Next prioritize a frozen behavioral evaluation with explicit success criteria
+and an action-changing intervention (e.g. bounded isolated probe observations),
+compared with current behavior, under unchanged budgets. User preference remains
+mini; do not switch models or inject task answers. A true baseline-versus-treatment
+result is needed before promoting another default or claiming repair gains. This
+turn is explanation/correction only: no new code, paid call or task run.
+# 2026-10-22: Implement action-capability comparison, not another reflection gate
+
+After user requested continuation, inspected existing CommandRunner and reused
+its isolated Docker execution. Added experimental diagnostic_probe actions and
+diagnostic_probe_pair mode to the existing review entry. Model designs Python
+experiments; no task-specific branch or answer is supplied. Baseline and treatment
+share the source/read/search/answer loop, question and initial evidence; only the
+optional probe differs. Not enabled in production repair by default.
+
+Probe child has a 10-second limit, output-file hard size cap and bounded returned
+text; outer container timeout <=15 seconds and shared budget. Existing sandbox
+is network-disabled, read-only, non-root, capability/resource limited. Source
+snapshot guard remains. Image imports may use baseline code rather than mounted
+candidate; prompt/provenance explicitly require identifying the implementation
+exercised. Human review of script/output is necessary; no automatic causal score.
+
+Prepared probe-pair-v1: same mini, three delivered source windows from the failed
+acquisition run; two arms each <=3 calls /120 seconds /60k tokens /8 tools, 2048
+output. Probe arm at most one experiment. Image is prior retained local instance,
+resolved to ID before paid calls, no build/pull. Recorded success criteria require
+new distinguishing observations tied to candidate source, less repetition and
+honest cost reporting. No source edits or acceptance are run. Tool credentials
+remain unavailable, so only plan-only validation was dispatched.
+
+17 related tests passed: probe5, acquisition-review3, saved-supervision4,
+acquisition5. They use mocked Docker execution and scripted model replies, not
+live container/model evidence. Initial test exposed an invalid ledger kind;
+corrected to the existing decision kind instead of expanding the ledger schema.
+Next inspect actual paired results before promoting probe support into runtime.
+
+
+### 2026-10-22: Optional probe pair completes without using the probe
+
+Actual read_only: 1 call/5,902 tokens/9.750 seconds/0 tools/unknown.
+Actual probe-available: 1 call/5,909 tokens/18.204 seconds/0 tools/unknown.
+Total2 calls/11,811 recorded tokens. Both returned a final answer immediately;
+probe_used=false in both. No diagnostic container was executed, so only local
+image resolution is established, not live sandbox/interpreter behavior. Source
+unchanged; no repair or acceptance. Primary distinguishing-evidence criterion
+was not met. No evidence of diagnostic quality improvement or probe failure.
+
+Correct experimental interpretation: optional availability tests voluntary action
+selection; without tool use it does not test the benefit of execution evidence.
+Both replies incompletely distinguished initial-write and manually corrupted-input
+stages. Probe arm's claim about a legal lowercase scientific token is unsupported;
+unknown plus valid source IDs does not certify explanation quality. Next capability
+experiment, if pursued, should separately declare a mandated model-designed probe
+(or concrete inability) policy. Do not silently force the optional treatment after
+seeing its result, inject a task probe/answer, increase calls alone or claim success.
+Full review: [probe pair v1](../evaluations/probe-pair-v1.md). No new paid run or
+implementation change in this review.
+# 2026-10-22: Separate required-probe capability review from optional tool choice
+
+Implemented probe_policy=required as an explicit probe-only experiment in the
+existing runner; optional mode remains unchanged. Final answer before experiment
+is not accepted: one policy-feedback observation requests a model-designed probe
+or concrete blocked outcome; repeated early answer stops within shared limits.
+Blocked requires unknown and cited explanatory text, but is a model assessment,
+not host-verified incapability. No task-specific experiment/repair is provided.
+
+Prepared probe-required-v1, not dispatched: same mini/source/question and original
+per-arm caps3 calls /120 seconds /60k tokens /8 tools /2048 output. At most one
+probe, <=10 seconds inside existing Docker sandbox, <=15 outer. Reuses exact local
+image ID from prior optional run. Original read-only/optional results and costs
+are frozen parents; neither arm is repurchased. New predeclared criteria distinguish
+actual candidate experiment, reasoning from output, explicit blocker and irrelevant
+or falsely attributed package execution. Not a same-policy causal comparison.
+
+15 related tests passed (probe8, acquisition-review3, saved-supervision4), including
+early answer -> probe -> answer, explicit blocked, and bounded repeated abstention.
+These use mocked Docker/scripted models; no live execution success claimed. Plan-
+only validation passed; tool credentials unavailable, no new paid call dispatched.
+User terminal launcher `.keel/repair-review/probe-required-v1/run.ps1` is ready.
+
+
+### 2026-10-22: Required probe returns intention, not executable code
+
+Actual probe-required-v1: two live replies /12,027 recorded tokens /18.282 seconds,
+zero tool calls, source unchanged. Reply1 was premature answer; reply2 selected
+probe but code was empty and query contained an English experiment request. Host
+correctly rejected before Docker with the combined byte-bound error. This is
+empty argument payload, NOT oversized code, Docker failure or executed experiment.
+
+Updated action interface to spell out code/path/query requirements, added code
+schema description, and omit answer from the pre-experiment required-policy schema.
+Host still handles a premature answer with bounded feedback. Empty/misplaced probe
+arguments get at most one protocol correction within the original call budget;
+not marked probe_used and no tool charge until execution. Repeated identical
+action still stops; a new regression initially expected the more specific guard
+but the existing identical-action guard correctly fired first, and assertion was
+corrected without relaxing the guard. Ten probe tests plus four saved-review tests
+pass; these are interface checks, not reasoning gain.
+
+Prepared required-v2, same mini/source and3 calls/120seconds, no baseline repeat,
+no injected script or task answer. Frozen original failure and costs. Research
+stop rule: if this follow-up cannot obtain a useful model-designed experiment,
+do not automatically continue changing wording or buying extra calls. No paid
+call dispatched this turn; tool process lacks credentials.
+
+### 2026-10-22: Stop wording retries; executed probe lacked package context
+
+Required-v2 actually ran one Docker probe: two model replies /13,096 tokens /
+27.235 seconds. First probe read the mounted candidate but imported its file as
+a top-level module, so relative import failed. Child returncode1 despite wrapper
+returncode0. No formatter-output evidence obtained. Second model reply proposed
+a revised probe, but one-probe policy rejected it before execution (PolicyDenied),
+not because of elapsed time or exhausted model-call budget. The proposed revision
+is untested and still appears to lack an appropriate qualified module spec; no
+self-repair success is claimed. Source unchanged; no acceptance.
+
+User rightly challenged repeated failures and whether prompts were applied. They
+were present and action selection changed, but package execution context and
+failed-probe correction cannot be supplied by repeated reflection wording. The
+one-probe micro-policy created an artificial block on experimental correction.
+Prior 30-minute experiments were upper bounds on mixed agent/verification work,
+not proof of executed diagnostic probes; that capability did not exist then.
+
+Honor the predeclared stop rule: no further wording-only retry, new launcher or
+paid call this turn. Need execution-context fixtures and explicit failed-probe
+semantics before another live experiment; avoid task-specific repair. Report:
+[required probe v2](../evaluations/probe-required-v2.md).
+# 2026-10-22: Fix package context and finite failed-probe correction before paid tests
+
+Implemented generic candidate_context: qualified candidate imports come from
+hashed snapshot .py files; parent packages/dependencies remain image-provided.
+Register before package import so eagerly exported functions bind to candidate
+implementations. Reject preimported target package roots, preserve dependency
+fallback for candidate package initializers, compile verified current bytes, and
+record path/SHA plus loading/executed/failed state. The fixed probe wrapper now
+supports this context explicitly, with no Astropy names or repair branches.
+
+Probe results distinguish executor failure from child script failure/timeout.
+Opt-in correct_failed_probe permits one different script after the first child
+failure only, at most two attempts, original budgets unchanged. No retry after
+success or executor failure; identical action guard remains. New flags default
+off, so old frozen experiment policies/results are not silently rewritten.
+
+27 related local tests passed: candidate imports6, probe14, acquisition-review3,
+saved-supervision4. The generated worker was actually executed in a developer-
+authored local subprocess against a synthetic package: candidate relative imports
+and eager reexports produced candidate:dependency, with SHA import markers and
+unchanged source. Kernel output limits were mocked for this Windows check; it is
+not a Docker/model success. No untrusted model script runs on host.
+
+Read-only Docker image inspection failed in this tool process: permission denied
+to Docker Desktop pipe. Added optional zero-model test_probe_docker_fixture to
+exercise the same generic package in the actual configured container and preserve
+report/ledger/trace under .keel/probe-selfchecks. Default run skipped that one test;
+do not call it passed. No new paid run or launcher was dispatched. Next validate
+that Docker fixture from user terminal before any new model-based experiment.
+
+
+### 2026-10-22: Actual Docker generic-package fixture passes with zero model usage
+
+User ran zero-model Docker test. Read report at .keel/probe-selfchecks/
+178b1eaae0114055bd73debee366bcbc/report.json: passed, child and wrapper returncode0,
+stdout candidate:dependency, three qualified candidate modules marked executed
+with matching manifest SHA, source unchanged, one tool/zero tokens/zero model
+calls, recorded wall6.328s (unittest6.406s). This supersedes the prior skipped
+Docker-fixture status. It proves the synthetic package execution path, not model
+reasoning, general package compatibility or Astropy acceptance.
+
+Prepared probe-context-v1 with candidate_imports and correct_failed_probe enabled,
+same mini/source/question and3 calls/120s/60k tokens/8 tools. At most two probes
+only after first child failure; no extra budget or task-specific script. Parent
+selfcheck and old failure hashes frozen; no repeated baseline. This is an execution-
+context intervention after deterministic validation, not another wording retry.
+Tool credentials absent, so no paid dispatch. Next inspect actual imported modules,
+child outputs and hypothesis update before claiming any diagnostic benefit.
+
+### 2026-10-22: Live context review completes blocked; model bypassed candidate loader
+
+probe-context-v1:3 calls/21,255 tokens/32.625 seconds/2 tools, source unchanged,
+no acceptance. Both scripts failed on imports, both loader markers empty. First
+script inserted a file-loaded module into sys.modules; second manufactured fake
+packages/config and a duplicate /astropy/astropy path. Neither used normal imports
+through the generic candidate finder. Final blocked/unknown is a model judgment,
+not proof that the supplied environment cannot execute this candidate. Generic
+Docker fixture success also does not prove this actual package works.
+
+Observed improvement is limited to execution plus finite correction routing;
+no useful formatter observation, hypothesis update or repair gain. Primary live
+criterion remains unmet. Next zero-model check must import actual frozen edit
+modules normally in the same environment before any new paid trial. Do not build
+another prompt/paid loop around untested actual-package context; no task-specific
+answer or fake configuration should substitute for real dependencies. Full review:
+[probe context v1](../evaluations/probe-context-v1.md). No new paid run or code
+change during this review.
+
+### 2026-10-22: Actual-candidate normal-import preflight, zero model calls
+
+Added --check-imports to existing review_saved_diagnosis, using shared probe runner
+and candidate loader. It verifies historical plan identity and frozen source bytes,
+copies source into a separate workspace, imports explicitly selected modules by
+normal qualified names, and records current implementation/image/interpreter.
+Passing requires child completion, expected module file and matching executed
+loader SHA, not wrapper returncode alone. No model config/credentials are used.
+Output is new-only; old experiments and source are not overwritten.
+
+Four preflight tests, six candidate-loader tests and four saved-review tests pass.
+Actual tool attempt stored .keel/probe-selfchecks/actual-import-tool-v1/report.json:
+execution_unavailable due Docker pipe permission, zero model calls/tokens and
+unchanged source. This says nothing about actual package importability. Prepare
+user-terminal output actual-import-user-v1 using same original frozen candidate,
+image and interpreter; no task-specific probe/repair is supplied. No paid call
+or new model launcher dispatched.
+# 2026-10-22: Actual normal import fails; reproduce namespace shadowing locally
+
+Read actual-import-user-v1 report: zero model calls,7.047s, one Docker tool. The
+hashed candidate card.py is marked failed loading; normal import reaches it but
+`from . import conf` fails from a parent with unknown location. This shows the
+model's bypass was not the only possible defect; our loader context also lacks
+a valid actual-package result. No statement that the runtime is fully functional
+is justified by the earlier generic fixture alone.
+
+Added an ordinary package regression simulating a PEP660 editable finder AFTER
+PathFinder with a thin snapshot on sys.path. Before fix it fails: parent becomes
+a namespace and its initializer/reexport is absent. candidate_context now removes
+snapshot-derived sys.path entries while explicit hash-checked module mapping is
+active, restoring them on exit. This lets the real editable provider initialize
+the parent and dependencies instead of the partial mount shadowing it. No fake
+configuration or task-specific branch was added. Seven loader tests, four import
+preflight tests and fourteen probe tests pass (25). Parent origin/path diagnostics
+are now included on normal-import failure.
+
+Namespace shadowing is verified for the synthetic regression; it is a plausible
+explanation of the actual report, NOT yet proven to resolve actual Astropy imports.
+Next repeat only the zero-model actual-import check under new output user-v2,
+preserving user-v1 failure. No paid calls or model experiment dispatched. Pure
+namespace-only projects are not established as supported by this context loader.
+
+
+### 2026-10-22: Actual candidate normal import restored after namespace fix
+
+User ran actual-import-user-v2: passed, zero model tokens/calls, one Docker tool,
+1.640 recorded seconds. Verified actual module file /workspace/astropy/io/fits/card.py,
+package astropy.io.fits, loader status executed and candidate SHA63dd3079... match
+the frozen source; workspace unchanged. This supersedes the previous actual import
+unverified status and supports the loader correction for this image/snapshot.
+Original user-v1 import failure remains preserved. It does not establish that
+a formatter experiment, model diagnosis or task acceptance succeeds.
+
+Prepared probe-context-v2 under same mini/question/source and3 calls/120s budget,
+with corrected execution context and actual-import report frozen. Diagnostic
+policy/prompts unchanged; no injected script/repair. Old model failure/cost retained.
+No paid dispatch in this review. Next inspect candidate provenance, actual output
+and hypothesis discrimination before claiming any reasoning improvement.
+
+### 2026-10-22: First successful candidate experiment in this probe series
+
+probe-context-v2 completed:2 calls/13,590 tokens/23.640s/1 tool, source unchanged,
+no acceptance. Model designed ordinary qualified imports, called formatter and
+Card construction/stringification. Child0 and matching executed candidate SHA
+prove actual mounted-source use. Observed 0.009125 -> '0.009125' (8 chars), and
+5.0022221e-07 -> '5.0022221e-07' (13 chars), plus two length20 examples. No host
+task script was supplied. This supersedes the claim that no useful experiment
+has executed in this series, but not the unresolved task outcome.
+
+Final judgment still unknown; it cites outputs but does not probe write/verify
+or establish why the observed token is rejected. Short representation is not
+proof of format validity. Mechanical execution capability now has real evidence;
+diagnostic completion/repair gain does not. Current micro-policy permits a second
+probe after failure only, so it cannot support follow-up to a successful partial
+experiment. Do not silently treat that restriction as the full runtime design.
+No additional prompt change, model call or task edit this review. Full report:
+[context v2](../evaluations/probe-context-v2.md).
+# 2026-10-22: Budgeted follow-up after successful partial observation
+
+Added opt-in continue_successful_probe: one new different experiment after first
+success, citing the preceding execution observation; total probe attempts <=2,
+same original model/tool/time caps. It does not require a failure before further
+investigation. Host verifies IDs/code non-repetition, not relevance or causal truth.
+Original once-only trial results and default policy are preserved.
+
+Prepared probe-followup-v1 by reusing context-v2's actual successful script/output,
+not buying that experiment again. Historical receipt/report/transcript hashes,
+image ID and candidate source hashes are frozen and checked before new paid calls.
+One historical probe plus at most one NEW probe, <=3 NEW calls /120s/60k tokens/8
+tools. Reports separate prior/new attempts; old costs remain in parent report.
+Model receives original question and actual output, no developer task answer or
+experiment script for the follow-up. If it elects unknown without a new useful
+observation, that remains a negative capability result, not a repair pass.
+
+36 related tests pass (probe18, loader7, preflight4, saved-review4, acquisition-review3),
+including reuse without repeated execution, cited follow-up, and stale historical
+source rejection before dispatch. Offline initial request estimate25,530bytes fits
+32k context cap; zero provider calls. No new paid attempt launched in this turn.
+User-terminal command `.keel/repair-review/probe-followup-v1/run.ps1` is prepared.
+
+
+### 2026-10-22: Follow-up returns an incorrect refutation; stop serial paid tuning
+
+probe-followup-v1:1 call/7,250 tokens/9.969s/0 tools; reused historical probe1,
+new probe0. It answered refuted without using available follow-up execution.
+Manual review rejects this diagnosis: it says failure occurs after manual file
+corruption, while the supplied failure_locations statement/context marks the
+first hdu.writeto before corruption. It refutes expansion of0.009125 rather than
+the pending scientific-value legality/write-path question. Evidence was available;
+this is a semantic interpretation/goal-substitution failure, not unavailable tools.
+
+Do not treat valid JSON/cited IDs/refuted as verified facts. Prior actual probe
+outputs remain valid within scope; this new causal account does not. Stop this
+serial paid micro-adjustment line as predeclared: no new prompt tweak, launcher,
+budget increase or paid run in this review. Freeze as a negative evaluation case
+with separately reviewed phase/question labels, not task repair instructions.
+Future changes need a fixed independent behavioral evaluation and baseline.
+Full review: [follow-up v1](../evaluations/probe-followup-v1.md).
+
+### 2026-10-22: Clarify evidence-specific guidance versus hardcoded repair
+
+User asks whether trajectory-guided prompts are forbidden or simply ineffective.
+Clarification: evidence-specific correction is valid Agent work; avoiding hardcoded
+case repair does not prohibit pointing to the actual failure statement or asking
+why a new answer contradicts a preceding observation. Earlier broad framing could
+wrongly imply all targeted guidance is invalid. Distinguish runtime-generated
+feedback from developer manually supplying corrected interpretation; the latter
+is an assisted experiment and must be labeled, not an autonomous-success score.
+
+Existing prompts were delivered but semantic answers still failed. The frozen
+request contains a long nested/escaped goal/history dominated by the original
+issue and former diagnoses; the actual failure marker is present within it.
+This is an observed packaging property and plausible distraction, not proven
+causal explanation. More instruction text alone has not demonstrated benefit.
+A useful next prompt intervention would compact current objective, explicit
+failure location, prior observations and one discriminating question, rather
+than repeat generic reflection rules. Evaluate against frozen baseline and
+other cases, preserve old costs, and do not infer internal chain-of-thought.
+No new paid run or code change in this explanation turn.
+
+### 2026-10-22: Freeze one explicitly authorized human-assisted feedback trial
+
+User explicitly requests one targeted-feedback trial before extracting reusable
+prompt characteristics. Prepared `.keel/repair-review/targeted-feedback-v1/plan.json`
+and `run.ps1`, reusing the existing runner, mini model, immutable image and prior
+successful probe. Replaced the 9,929-character inherited goal with a 1,393-character
+current objective: correct the first-write versus post-corruption contradiction,
+retain the established decimal output, and investigate the outstanding initial
+write failure with one discriminating check. No repair code or answer supplied.
+
+This is human-assisted diagnostic evaluation, not autonomous learning or repair
+acceptance. Success requires a corrected phase account, a new relevant candidate
+execution, and an evidence-based updated judgment; valid JSON or repetition of
+the hint is insufficient. Limit: three new model calls, 120 seconds, 60k tokens,
+at most one new follow-up probe. Preserve the previous wrong answer and costs.
+Plan-only validation passed; no provider call dispatched because this tool
+environment lacks the configured credential. No implementation change or new
+quality result. Inspect the resulting trajectory before generalizing; one exposed
+case would only support a prompt-design hypothesis, requiring other-case checks.
+
+### 2026-10-22: Targeted feedback corrects phase account, but no new execution
+
+Reviewed `.keel/repair-review/targeted-feedback-v1/results/report.json`: one mini
+call, 4,404 tokens, 9.954 seconds, zero tool calls and zero new probes. The answer
+now correctly locates failure at the initial write, before manual corruption,
+and proposes an uncorrupted single-HDU write check. This is an observed corrected
+answer after human guidance, not independently established causal prompt benefit.
+It immediately answers `supported` without executing that check despite remaining
+budget. It also asks for the first-write exception already present in the saved
+failure evidence, and treats renderability as informative about validity without
+checking verification. Representable Card text does not establish FITS validity;
+a successful reduced reproduction would not by itself exclude formatting or
+validation in the original context.
+
+Predeclared diagnostic success was NOT met: phase correction yes; new execution
+no; result-grounded hypothesis update no. Acceptance not executed, workspace
+unchanged. Do not promote this prompt as a successful general strategy. Preserve
+the useful narrow observation: explicit contradiction feedback can elicit a
+corrected phase account here, but prose requests did not ensure action. A future
+general experiment should distinguish proposed checks from completed checks and
+require fresh relevant execution or a concrete blocker before a verified causal
+answer, without hardcoding this case or merely forcing `supported` labels. No
+new paid rerun or implementation change in this review.
+
+Clarification: in targeted-feedback-v1 the mini model itself proposed the write
+check inside its terminal `answer`. This was returned to the review runner and
+human reviewer, not dispatched as a `probe` action to an executor or another
+role. The review ended on that answer. No Scout/Implementer handoff happened;
+the gap is proposal-to-execution, not a pending check assigned to the user.
+
+Code inspection clarifies why termination was accepted: diagnostic_probe seeds
+`used_probe` from historical observations; the required-probe answer gate checks
+only `not used_probe`, not a new execution answering the revised question.
+`continue_successful_probe` makes a follow-up available, not mandatory. Thus a
+historical formatting probe permits final answer despite the new write-path
+question. Model chose answer; host accepted it. Remaining budget was not the
+cause. Prompt asks to design a check but does not unambiguously require executing
+it; no hidden model motivation can be inferred. This is a question/evidence
+completion-contract gap, not unavailable execution capability.
+
+### 2026-10-22: Enforce fresh execution citations in required diagnostic reviews
+
+Developer change at user request: diagnostic_probe now separates historical probe
+availability/accounting from this investigation's execution evidence. Required
+reviews exclude answer before a fresh execution and reject final answers that
+cite only source/history. One correction remains within the same budget; repeated
+violations stop, explicit blocked/unknown remains valid, optional mode unchanged.
+Prompt explicitly says execute the proposed check, not merely describe it. No
+task-specific repair, extra budget, paid retry or source modification added.
+
+27 local tests passed (probe20, saved-review4, acquisition3), including history-only
+early answer corrected to new execution and fresh execution omitted from answer
+citations corrected without rerunning it. These are deterministic mocked-provider
+regressions, not live mini/Docker success or semantic relevance certification.
+Existing frozen plans/results remain untouched; new live evaluation requires an
+explicit implementation-hash migration and a separate output. This gate enforces
+action/evidence linkage, not verified causality or successful task repair.
+
+User authorized one live run. Prepared targeted-feedback-v2 from v1 with one
+explicit implementation-hash migration (diagnostic_probe); retained identical
+feedback/model/source/image/budgets and separate output. Attempted --execute:
+credential preflight rejected missing KEEL_MODEL_API_KEY before provider dispatch.
+Zero paid calls or new diagnostic results. User-terminal run.ps1 is ready; no
+credential lookup outside this process and no automatic retry performed.
+
+### 2026-10-22: Fresh-execution gate prevents answer but unsupported blocker ends trial
+
+Reviewed targeted-feedback-v2/results/report.json: one call, 4,392 tokens, 10.5s,
+zero tools/new probes; action=blocked, conclusion=unknown. The model says the
+required initial-write observation is absent, without attempting the available
+probe or identifying a concrete capability restriction. This is not a verified
+execution blocker; missing evidence is the investigation target. The host accepted
+blocked/unknown structurally, so fresh-evidence answer gating worked narrowly but
+did not achieve execution or diagnostic success. No acceptance or source change.
+Earlier phrasing that the new gate would ensure execution was too strong: it also
+allows explicit blockers, whose validity is not semantically checked. Next design
+candidate: separate evidence-not-yet-collected from actual execution obstacles;
+challenge an unsupported blocker once within the same total correction/call
+budget, preserving legitimate blocked paths. No new paid run or code change here.
+
+User requests a portable problem statement rather than another patch. Clarified:
+this is a persistent diagnostic action/evidence closure failure, not established
+as the only unresolved project issue. Historical environment/interface defects
+were resolved or scoped, while this exposed case repeatedly fails to turn an
+identified uncertainty into execution and evidence-grounded revision. Summarize
+budget expansion, structured reflection, source handoff, goal/phase correction,
+supervision, sandbox/provenance fixes and required-execution gates, preserving
+their narrow successes and absent repair/generalization evidence. No new test.
+
+### 2026-10-22: Audit user proposal for orchestrator-owned termination
+
+Confirmed explicit JSON answer/blocked termination in diagnostic_probe; Scout has
+probe permissions. This is not a provider plain-text default. Runtime Critic uses
+textual next_check handoff, a distinct path lacking a common executable receipt.
+Accepted direction: host predicates, executable checks, typed evidence-bound
+blockers and compact hypothesis state. Corrections: distinguish diagnosis from
+repair acceptance, retain budget/cancellation exits and unknown failure phases,
+allow host preflight denials without executing forbidden calls, and reuse fresh
+tests instead of rerunning every reasoning turn. Semantic validity is not proven
+by records, hashes, or judge votes. Proposed staged design and metric definitions:
+[diagnostic closure](../diagnostic-closure-design.md). Documentation only, no new
+runtime feature, test result, paid call or quality claim.
+
+### 2026-10-22: First host-owned diagnostic terminal policy implemented
+
+Added diagnostic_closure and connected experimental probe reviews. Host computes
+acquire/diagnosis_ready/blocked_verified from cited current execution observations.
+Missing evidence/history/child script errors cannot certify an execution blocker;
+current outer executor nonzero status or timeout can, without certifying cause.
+Blocked and premature answer share one existing correction allowance; global
+budgets unchanged. Read-only optional answer behavior unchanged. No task branches
+or host-authored repair code. Default repair runtime remains unchanged, and host
+preflight blockers/identity ledger/hypothesis state remain future work.
+
+34 local tests passed (closure5, probe22, saved-review4, acquisition3). First run
+exposed a test fixture's missing blocked-answer text, corrected and rerun. Covers
+unsupported blocker redirect to probe, repeated false blocker stopping, real outer
+executor failure, child-vs-executor failure, history and fabricated citation.
+Mocked providers/executors only; no new live diagnosis/repair improvement proven.
+Legacy runner evidence_blocked after RecoveryStopped is not certified blocking;
+closure field distinguishes accepted terminal predicates. Prepared separate
+targeted-feedback-v3 plan/launcher with explicit code migration, unchanged mini,
+human feedback/source/image/budgets. Zero new paid calls; credential unavailable
+in this tool process, user-terminal launcher ready.
+
+### 2026-10-22: targeted-feedback-v3 executes current question and updates answer
+
+Reviewed real report: 2 mini calls, 10,260 tokens, 25.328s, 1 new Docker probe;
+prior probe1 preserved, current probe1, workspace unchanged, acceptance not run.
+Model authored a two-value initial HDU write comparison. Child/wrapper return0;
+candidate card SHA63dd3079021c3cbe7069a7e7311270527fb9dbc60402de28f685f6537d606a1f
+executed. It caught and printed VerifyError on scientific-value write while the
+decimal control wrote successfully. Final answer cited observation-4 and correctly
+excluded later manual corruption as the cause of this reproduced initial failure.
+Predeclared narrow success met: corrected phase, relevant new execution, grounded
+update. The script uses HDUList.writeto rather than the exact PrimaryHDU.writeto
+test call; observed signature matches but does not certify all test semantics.
+It establishes reproduction in verification, not the exact offending rule or a
+repair. No tests/source changed, no official acceptance or cross-case benefit.
+
+Useful design hypothesis: compact current question plus preserved prior output,
+explicit runnable action interface and host-owned terminal predicates can enable
+this closure. Multiple interventions changed across versions, one assisted exposed
+case, no repeats: cannot attribute gain solely to prompt or blocker policy. Next
+step should feed observed result into a generic hypothesis/check/repair handoff
+and separately evaluate held-out cases, not force another probe after the existing
+two-probe cap or declare default runtime integration complete.
+
+### 2026-10-22: Bind successful probe handoff to the correct saved candidate
+
+Before repair continuation, compared source identities: old continuation seed
+card SHA3d2da772... differs from probed card SHA63dd3079.... Found full workspace
+astropy-14508-bounded-30min-v4/repo matching both probe manifest files. Prepared
+probe-repair-handoff-v1/evidence.json with original raw execution, unverified model
+assessment, report hash and exact source hashes. No repair instructions supplied.
+Its run.ps1 checks inputs then invokes existing grade-snapshot on the matching
+workspace with the existing reference, 600s deadline, zero model calls. New output
+astropy-probe-matched-snapshot-v1, previous runs unchanged. This necessary grading
+step precedes a new source-seeded repair attempt; no claim of runtime evidence
+injection, default probe integration, grading result or repair success yet.
+Docker unavailable to this tool process; launcher prepared for user terminal.
+
+### 2026-10-22: Matched grading confirms regression; raw probe evidence handoff added
+
+Matched snapshot graded without infrastructure failure; patch applied, unresolved.
+load_saved_repair confirms the same PASS_TO_PASS invalid-float test failure. Saved
+card SHA63dd3079... matches new probe, eliminating the earlier seed mismatch.
+Added diagnostic_evidence loader and --diagnostic-report continuation option:
+report/receipt binding, safe manifest paths, exact saved/prepared source identity,
+executed loader markers, completed child/wrapper, bounded raw payload. Import
+script/output, not model diagnosis verdict. Critic receives it through changes;
+Scout receives it in saved-source active_goal. Frozen checks re-read evidence.
+This is historical evidence delivery, not automatic live probes or verified repair.
+
+29 local tests pass (evidence4, saved-repair2, SWE task/verification repair23 total
+across the remaining suites), including actual config handoff and prepared-source
+check. Real input validation: one transferable observation, continuation13279bytes,
+one preservation failure. No new provider calls. Prepared probe-informed-v1/run.ps1:
+same mini, matched snapshot/source, no compulsory external tool, model transcript,
+600s Agent/20calls/120k tokens, independent final grading, separate output. Grading
+may add time beyond Agent deadline. New assisted development attempt, not resumed
+conversation or first-attempt score; existing recovery guards may stop earlier.
+
+### 2026-10-22: Independent adviser versus existing same-model supervision
+
+Architecture audit: ordinary runtime passes one model interface across role calls;
+six roles do not imply six distinct models or an independent model jury. Optional
+diagnosis_supervision already makes a fresh claim/evidence review, using that same
+model object and shared budgets. It is narrower than an alternative-strategy
+adviser and is not necessarily enabled in each run. User's external second opinion
+identified an orchestrator-level exit issue after developer attention stayed on
+local prompt/protocol fixes. This supports testing independent framing, not a
+claim that adding another model will reliably improve repairs.
+
+Proposed adviser: trigger on unchanged failures/unsupported terminal proposals,
+not every step; first independently inspect compact raw evidence and unmet host
+predicates, then compare current diagnosis; output cited overlooked facts,
+alternative hypotheses, and an executable discriminating-check proposal. No direct
+write/acceptance authority or new budgets. Existing Scout/executor runs checks;
+host validates termination. Separate adviser context and optional separately
+configured model; keep mini default until an explicit model-choice experiment.
+Compare current supervision, clean-context same-mini adviser and optional different
+model under matched total costs on frozen and held-out checkpoints. No runtime
+change or paid call in this architecture discussion; existing repair trial remains
+unchanged. Adviser cannot replace executable handoff or independent verification.
+
+### 2026-10-22: Probe-informed repair consumes evidence but makes no functional fix
+
+Reviewed astropy-probe-informed-v1 report, model transcript and trace. Historical
+observation-4 present in six request records; initial Critic explicitly describes
+the two-value probe outcomes and correct initial-write phase. Transfer worked.
+Implementer changed a comment and replaced a local length variable with inline
+len calls: no demonstrated functional change; one verification retained the same
+preservation failure. Later Scout selected card/header then discarded all retained
+paths on the next page, causing Empty localization catalog. Runtime restored seed.
+
+9 calls/79,594 tokens/287.437s Agent; total478.109s including grading. Final stop
+was token admission, not 600s wall-clock or20-call maximum: Budget.allow_model
+requires remaining tokens to cover estimated input plus max output; localization
+passes serialized byte length as conservative input estimate. Remaining40,406
+tokens therefore does not guarantee another call fits. Exact blocked request size
+is not recorded; do not invent it. This estimate policy deserves separate analysis,
+not blind budget expansion or removing hard caps.
+
+No new candidate probe executor integrated in runtime; historical evidence delivery
+did not enforce current check completion or prevent equivalent edits. Current
+run has supervision/handoff/adviser disabled. No repair gain; preserve local
+diagnostic success separately. Next useful bounded work is independent checkpoint
+review and executable-check/nonfunctional-edit gating, rather than rerunning the
+same loop or attributing this solely to mini. No new paid run in this review.
+
+### 2026-10-22: Audit ineffective edit, page pruning and developer decision quality
+
+User challenges why fixes are chosen without broader causal review. Verified last
+page request includes previous_selection=[card.py,header.py], allowed in schema;
+model returned files=[] and paged_select assigned carry=selected, discarding both.
+This is explicit permitted ranking/pruning, not evidence that files vanished from
+context. Carry has identifiers without selection rationale/confidence. No host
+guard challenged collapse of a useful nonempty selection. Semantic model motive
+unknown. Simply unioning all pages is not a complete fix: exceeds bounded context
+and prevents legitimate pruning. Need tested retention/replacement semantics.
+
+Added source comment describes existing formatting intent, not an executable or
+persistent next-action instruction; no demonstrated diagnostic benefit. Textual
+source change passed as a proposal although observed edit is behavior-equivalent
+in this case. The production runtime still lacks the experimental execution loop;
+source handoff alone could not fix this. Correct developer self-assessment: local
+interfaces improved, but repeated next steps insufficiently separated competing
+causes, end-to-end capability gaps, and falsifiable success criteria. External
+review exposed this framing problem. Future decisions should record established
+facts, alternative explanations, cheapest discriminating action, expected update,
+and stop criteria; documentation is not proof this discipline is automated.
+No new paid run or code change during this explanation.
+
+### 2026-10-22: Deliver five decision questions to mini, not only the user
+
+User explicitly requests the same decision discipline inside model calls. Added
+shared decision_guidance questions: facts, alternatives, choice, success, switch.
+Critic uses existing fields: evidence for facts, hypothesis for alternatives,
+reason for choice/switch, next_check for method and observable success/refutation.
+Critic outputs already travel to runtime active_goal for Scout/Implementer; no new
+role or permission. Proposal model receives questions and summary descriptions
+requiring a concise five-part decision brief and expected behavioral difference;
+comment/equivalent rewrites are explicitly not repair progress. Experimental
+probe Scout receives the same questions in request/reason guidance. No additional
+response keys, paid calls, model change or budget expansion. Capability limits
+remain explicit: proposal model has no execution tool.
+
+68 local tests passed across Critic prompt, proposals, probe, verification repair
+and SWE task. Tests verify guidance delivery in structured/unstructured prompts,
+schema descriptions and request payloads. They do not prove semantic comparison,
+functional patch improvement, or automatic execution. Label-only validation is
+deliberately not presented as a completion predicate. No new live trial prepared
+or claimed; current source change invalidates earlier frozen implementation hashes.
+
+User asks which live test to run. Prepared probe-informed-v2 with same saved seed,
+reference, raw probe evidence, mini and20call/120k/600s Agent caps as v1, separate
+output. Only decision-guidance implementation intervention intended. Review actual
+alternatives/check choice, behavioral edits, preservation and target results, and
+cost; labels alone do not earn success. No provider dispatch in this turn; existing
+run_swebench_task will record current implementation identities. Official grading
+adds time beyond the Agent cap. One exposed-case follow-up, not generalization.
+
+### 2026-10-22: Five-question live follow-up fails behaviorally, not just acceptance
+
+Reviewed probe-informed-v2 transcript against v1:9calls/78,160tokens/290.234s
+Agent,477.875s total,14tools,1verification, same preservation failure. Model uses
+FACTS/ALTERNATIVES/CHOICE/SUCCESS/SWITCH labels but its actual edit only adds three
+comment lines. Summary explicitly proposes clarification as sufficient despite
+the prompt forbidding comments as repair; hypothesis also reintroduces already
+disproved decimal expansion. Its support/refute statements do not consistently
+discriminate the proposed cause. Thus the five-question prompt delivered but did
+not demonstrate better action or diagnosis. Small token/tool differences are not
+quality gains or reliable causal cost findings from a single trial.
+
+Scout again discarded all four retained relevant paths on last page, producing
+Empty localization catalog; token admission subsequently stopped. Selected seed
+restored; no new passing result. Known structural gaps were still present before
+this paid run. Developer should have fixed/isolated those rather than expecting
+prompt-only guidance to overcome them. Stop further same-loop paid reruns. Next
+bounded engineering should reject comment-only candidates before expensive
+verification and test explicit page-retention/replacement semantics; neither AST
+change nor retaining files guarantees semantic repair. Adviser remains a separate
+experiment, not a substitute for these deterministic fixes. No new live dispatch.
+
+User requests updated independent-review brief. Summarize current architecture,
+live negative/positive results, incomplete production integration, conservative
+byte-based token admission, explicit page pruning and comment-only edits. Separate
+observed behavior from suspected causes and proposed unimplemented fixes. Do not
+prime external reviewer with a single required root cause or hide assisted exposed
+case scope. No code change, test or model dispatch in this explanation turn.
+
+### 2026-10-22: Act on external review with zero-model replay and two narrow guards
+
+Accepted action-space mismatch/state retention as testable explanations, not
+proven exclusive causes. Corrections: v2 did not increase total tokens versusv1;
+larger budget failures do not prove budget irrelevant; within-test statement phase
+is not always deterministically available; tool-free patch proposals are a normal
+architecture if they receive adequate evidence or an acquisition handoff exists.
+Same-model review can have correlated errors but harm is unmeasured. Do not blindly
+pin every failure-stack/test-import file as writable or erase runtime docstrings.
+
+Implemented empty-page no-update semantics in paged_select with trace; nonempty
+rankings still replace, all-empty scans still fail. Added opt-in Python AST change
+gate to ordinary proposals, enabled in SWE bugfix config; before writes/verification.
+Generic documentation mode unaffected. Existing diagnostic gate reused, no parallel
+AST checker. Docstrings retained, non-Python changes not automatically rejected.
+This does not catch every behavior-equivalent rewrite or ensure relevance.
+
+56 local tests pass (paging, proposals, diagnostic answers, SWE task, verification
+repair), including later-empty retention, explicit pruning, comment-only rejection
+with unchanged source/no verification and default-off/real-change paths.
+Deterministic-replay-v1/report.json preserves transcript hashes, zero model calls:
+both recorded last-page erasures prevented; v2 comment-only proposal rejected;
+v1 variable-inline rewrite NOT rejected because AST differs. No new model trajectory,
+test-result gain or exact saved-runtime/cost claim. No paid run prepared.
+Executable-check bridge remains the main unimplemented next capability; budget
+calibration/telemetry and typed acquisition must be evaluated separately. Do not
+discard existing prompts/fields wholesale without per-consumer/cost audit.
+
+### 2026-10-22: Opt-in executable Critic-check bridge reaches main repair runtime
+
+Implemented diagnostic_execution bridge, reusing investigate/run_probe rather
+than another runner. Saved-source and later Critic decisions queue a pre-edit
+check. Current localized evidence is reacquired; stale repair-route anchors use
+bounded current file windows. Investigator can read/search allowed selected files
+or execute candidate imports under existing Docker sandbox. Max3calls in prepared
+config, charged to existing global budget; candidate import scope no longer needs
+all repository Python files. Host model/tool accounting and duplicate guards remain.
+Raw execution plus explicitly unverified interpretation is delivered to patch
+generation. Unknown, no completed experiment or executor-blocked result stops
+without forcing an edit. No hypothesis ledger or automatic semantic proof claimed.
+
+CLI --diagnostic-probe-config and diagnostic_executions reporting added. Immutable
+image ID and absolute interpreter required; opt-in only, no host fallback. Full
+call/source evidence remains in ledger/transcript. Tests first caught using query-
+scope collector on symbol-localized scope; corrected to proper collector with
+freshness fallback, then reran.88 local tests pass across bridge5/probe22/SWE task/
+verification/proposals/paging/loader/evidence. Runtime fixture proves check result
+arrives before patch; failures/unknown/global budget do not write. Mock Docker only.
+No live call dispatched. Prepared execution-bridge-v1 launcher: same mini, seed,
+reference,20call/120k/600s total Agent limits; new feature plus prior deterministic
+guards, not a single-factor ablation. New separate grading/output, no auto retry.
+
+### 2026-10-22: First runtime bridge executes; final citation protocol aborts
+
+Reviewed execution-bridge-v1 transcript/ledger:7calls/63,362tokens/79.281s Agent,
+273.937s with final grading,12tools, no patch/new verification. Probe ran first,
+ledger fact14 completed; subsequent answer used evidence-2/evidence-3 aliases
+absent from supplied source-0..5/observation-6. Host ValueError aborted, leaving
+diagnostic_executions empty despite actual execution in ledger. Preserved raw
+fact14 with ledger hash under execution-bridge-v1-review. Do not claim probe did
+not run. Model again tests decimal rendering rather than new write-path causality;
+even corrected citations would not establish useful diagnosis or repair.
+
+Added dynamic evidence-ID enum and available-ID menu, one bounded citation
+correction preserving prior execution. No silent alias mapping, script rerun,
+budget reset or paid call.52 local tests pass (probe24, bridge5, SWE task and
+verification repair), including unknown alias then corrected answer with single
+execution and repeated invalid IDs stopping. This repairs protocol recovery only;
+does not resolve goal drift or guarantee citations mean semantic support. No new
+same-loop paid run prepared in this review.
+
+User requests external-review summary of the first live execution-bridge round.
+Keep zero-progress distinction explicit: runtime probe succeeded, wrong question
+was tested, final citations failed, no patch/current verification followed. Report
+subsequent local protocol fix separately from the paid trajectory, preserve costs,
+and ask reviewer to assess goal drift and pending-check execution semantics without
+assuming deliberate evasion or a known repair answer. No new model/test run.
+
+### 2026-10-22: External review prioritizes baseline contrast; prepare zero-model test
+
+Reviewed latest proposal. Existing reference grade is reference_only with gold
+prediction, not a direct no-patch regression control. Baseline/candidate contrast
+is worthwhile. Corrections: baseline failure alone cannot prove candidate unrelated;
+critical-frame coverage is a proxy, not relevance proof; static import reachability
+is incomplete for Python; model-specified matching predictions do not automatically
+establish true causal hypotheses; signature changes can be regressions. Two valid
+ID namespaces are observed, but causing invented aliases is not established.
+273.937-79.281s includes all non-Agent work, not measured reclaimable grading alone.
+
+Added zero-model compare-source-tests mode to existing review_saved_diagnosis,
+source_comparison reusing Docker run_probe and candidate loader. Two frozen
+variants from git base commit bytes versus actual candidate; same installed test
+and immutable image. Exact pytest selector, structured phase reports/test hash,
+executed candidate provenance; unavailable is distinct from target failure. No
+original source/test change, model request, repair or official-score claim.
+37 local tests pass (comparison4/preflight4/probe24/bridge5). No Docker result yet.
+Prepared baseline-candidate-v1 launcher. Block rollback deliberately deferred until
+pair result; do not launch20 paid Critic calls before cheaper evidence is available.
+Coverage gating, question ledger, incremental result publishing and grade-result
+reuse remain unimplemented; avoid implying this turn delivered the entire proposal.
+
+### 2026-10-22: Read-only regression comparison fails before collection on cache path
+
+baseline-candidate-v1:0modelcalls/1tool/8.531s; baseline child wrapper completes but
+pytest exit4, no test reports. conftest imports Hypothesis whose default example
+database /testbed/.hypothesis/examples is unwritable; HypothesisWarning escalates
+under existing warnings-as-errors policy. Not a baseline regression failure; no
+candidate result. Candidate loader itself executed baseline card SHA5c89a239....
+
+Changed shared comparison code to set HYPOTHESIS_STORAGE_DIRECTORY to per-child
+writable /tmp before pytest/plugins/test imports. Both variants same adaptation;
+no warning suppression, dependency/source/test change or broader permissions.
+Report records path policy and current implementation hashes.38 related local
+tests pass, including generated code with mocked pytest asserting cache configured
+before import/execution; fixture mock ordering corrected after initial test error.
+Real image Hypothesis compatibility still needs Docker validation. Prepared
+baseline-candidate-v2 with migration and old incomplete result retained. Zero model
+dispatch. More time/budget was not the cause; do not enlarge them for this failure.
+
+### 2026-10-22: Paired regression contrast succeeds: baseline pass, candidate fail
+
+baseline-candidate-v2/results/report.json:compared,0modelcalls,2tools,5.641s.
+Same immutable image, identical installed test SHA c008ea80..., same exact selector
+and cache/warning policy. Baseline card SHA5c89a239... executed; setup/call/teardown
+pass. Candidate SHA63dd3079... executed; setup/teardown pass, call fails at initial
+PrimaryHDU.writeto before corruption. This establishes a reproducible contrast
+under diagnostic conditions with the card source as controlled changed input;
+do not keep treating preexisting/unrelated failure as equally supported here.
+It does not isolate a particular edit block or prove all official environments.
+Both runs emit the same pre-pytest NumPy binary-size warning; retain raw outputs
+and distinguish this from an unqualified healthy-environment claim.
+
+Hypothesis storage adaptation validated in real Docker. No candidate repair or
+official acceptance produced. Next bounded diagnostic: source-block rollback with
+syntax/identity checks and interaction caveats, reusing this completed pair rather
+than repeating it. Feed controlled contrast as historical bound evidence to models;
+do not encode the task answer in runtime. No new paid run or source changes here.
+
+### 2026-10-22: Prepare three isolated block reversions; tool Docker access denied
+
+User requests block rollback. Extended existing comparison with block_rollback
+mode, bounded8variants/120s using same sandbox. Completed paired control reused
+by exact plan/report hashes and matching image/interpreter/test inputs; new test
+hash and loader provenance checked. Original workspace unchanged. Initial frozen
+block-rollback-v1 grouped whole file due LF/CRLF mismatch; never executed. Shared
+rollback_blocks now compares logical lines and preserves candidate newlines.
+block-rollback-v2 has3 syntax-valid independent reversions, all byte-matching the
+shared implementation. This is not full ddmin or proof of interaction-free cause.
+
+13 local tests pass (comparison9/preflight4): control reuse/tamper rejection,
+syntax-invalid exclusion, newline partition and interdependent partial edits.
+Initial invalid-syntax fixture had one contiguous diff; corrected to two edits.
+Attempted zero-model execution to agent-attempt output: Docker pipe permission
+denied, first variant unavailable before target execution. No rollback outcomes.
+User-terminal run.ps1 uses separate untouched results output. No escalation,
+environment reset or completed-control rerun. First priority remains incomplete
+until these3 tests execute and their actual results are reviewed.
+
+### 2026-10-22: Existing rollback output contains completed first block; add resume
+
+User's repeated launch hit exist_ok=False. Inspected before rerunning: results
+report aggregate running, first reversion passed setup/call/teardown with exact
+plan/test/loader/source binding; block2 workspace exists but no completed row,
+block3 not recorded. Cause of prior interruption not established. Process command
+inspection denied by tool permissions; do not claim process status. First block
+contrast is useful but not complete three-block localization or final repair.
+
+Added compare_sources --resume-from (existing CLI), new output only. Validates
+plan, current source hashes, raw result vs recorded result, loader provenance,
+test identity and fixed executor inventory. Reuses completed passed/failed rows
+independently of aggregate status; unavailable rows rerun only on explicit resume.
+Allows explicit comparison-orchestration migration, records old implementation,
+report hash and prior budget.14 local tests pass including zero repeated probes
+on validated resume and mismatch rejection. Real first-row identity also checked.
+Prepared block-rollback-v2/resume.ps1 for remaining two variants, no new Docker
+or model call, old outputs untouched. This repairs the missing resume capability
+rather than deleting the directory or silently recalculating the passing block.
+
+### 2026-10-22: Three-block rollback contrast completed with control reuse
+
+resumed-results-v1:compared,0modelcalls,2newtools,5.89s; block1 pass reused from
+prior run, block2 and3 call-fail with setup/teardown pass. Same exact test SHA
+c008ea80... throughout; control baseline-pass/candidate-fail retained by hashes.
+Block1 changes the initial representation choice back to the original formatter;
+reverting it alone restores this regression test with other candidate changes
+retained. Blocks2/3 alone do not restore it. This localizes a test-specific
+necessary contrast in this candidate, not a globally minimal causal set or full
+repair. Reverting block1 may undo the original issue fix; do not publish it as
+solution or modify actual candidate. Prior control/retry costs remain preserved.
+
+First priority (paired baseline comparison plus independent single-block rollback)
+is complete. Actual explanation of the serialization/verification contract and a
+repair satisfying both target and preservation remain pending. Next model work
+should consume this controlled evidence rather than repeat preexisting-failure
+speculation; broader success requires independent acceptance/held-out evaluation.
+No new model call or code change in this review.
+
+### 2026-10-22: Controlled contrast handoff and bounded mechanism review prepared
+
+Added load_comparison_evidence validating frozen rollback/control identities,
+raw outcome consistency, test hash, source manifests and executed loader markers;
+bind saved candidate and import compact5observations plus actual block diffs.
+No source fix supplied. CLI --comparison-plan/--comparison-report requires saved
+continuation, checks prepared source and input stability. Historical contrasts
+delivered to initial/later Critic, Scout/patch goals, and execution bridge rather
+than only printed to user. They stay historical after edits, not fresh acceptance.
+36 local tests pass across evidence8/bridge5/SWE task/verification repair, including
+delivery to Critic/probe/patch and changed-source/control/raw-result rejection.
+
+Prepared contrast-mechanism-v1 (existing probe review runner) before another full
+repair: same mini,3calls/120s/60k, no patch, no official grade. Frozen actual
+validation/formatting source definitions and controlled raw outcomes, not the
+old solved question. First static request estimate29,306bytes; final pre-dispatch
+compaction omits two import-header windows, preserving full definitions and full
+readable files, to reserve space for output under32k. No provider dispatch.
+Initial preparation selector matched a nested observations string instead of the
+top-level key, corrected before plan creation. Success requires a new relevant
+execution and evidence-grounded mechanism explanation, not citations/JSON alone.
+This assisted exposed-case review cannot establish generalization or independent
+discovery of baseline causality. Full repair remains pending.
+
+### 2026-10-22: Mechanism review rejected by model endpoint authorization
+
+contrast-mechanism-v1:one provider request,5.937s, HTTP401 ModelError;0tools,
+reported tokens0/no usage supplied, unchanged workspace, no model answer/probe or
+acceptance. This is endpoint authentication/authorization failure, not failed
+diagnosis, context capacity or evidence-ID protocol. Exact cause (key validity,
+endpoint/account permissions) unverified; do not claim zero billing from missing
+usage alone. No automatic paid retry; local credential configuration needs checking
+without logging/exposing keys. Preserve frozen inputs and failed output.
+
+### 2026-10-22: Correct reporting of local checks versus real readiness
+
+User challenges repeated local-pass announcements followed by live failures.
+Accepted criticism: test counts were presented too prominently relative to mocked
+provider/Docker scope and missing end-to-end checks. Local tests legitimately
+covered branch/provenance/budget logic, but did not establish installed-image
+plugin/cache compatibility, actual model protocol behavior or repair quality.
+Missing resume and cache setup were avoidable engineering gaps; HTTP401 is an
+external authorization result, not evidence those local branches were wrong.
+Tool process Docker denial/absent credentials explains unavailable validation,
+not an excuse to imply readiness or repeatedly shift trial costs to the user.
+Future reports must name validation layers: deterministic replay/unit checks,
+zero-model actual environment check, bounded real provider protocol, then repair
+acceptance. Explicitly state untested layers and what each user run is intended
+to establish. Do not claim more tests proves end-to-end reliability; prioritize
+shared preflight/fixtures and recording real failures as regressions. No new paid
+run or code change in this accountability discussion.
+
+Current Docker access rechecked read-only with docker info --format ServerVersion:
+tool process receives permission denied on dockerDesktopLinuxEngine named pipe.
+User terminal previously ran containers successfully. Distinguish tool sandbox
+access from Docker service health; do not change host ACLs, reinstall/reset Docker
+or infer Keel lacks Docker support from this tool restriction.
+
+User requests credential check. Read only nonsecret config metadata: provider
+openai-compatible, model gpt-5.4-mini, api.openai.com/v1, api_key_env
+KEEL_MODEL_API_KEY. Current tool process has no value for that variable. Prior
+user-run report remains HTTP401. These are different process states; absence here
+does not establish why user's supplied credential was rejected. No key printed,
+credential search, authenticated request or paid call. User-terminal presence check
+alone cannot establish validity or endpoint permission.
+
+User-terminal check now confirms KEEL_MODEL_API_KEY is present and has no
+surrounding whitespace. This excludes those two configuration faults only;
+credential validity and endpoint permissions remain unverified. Next diagnostic
+is a read-only models-list request from that same terminal, printing HTTP status
+only. It does not generate content or establish repair/model-generation readiness.
+Official API error-code and models-list documentation consulted; no authenticated
+request or paid retry dispatched by the developer tool process.
+
+### 2026-10-23: Project-stage clarification
+
+Status review only; no new evaluation. Keel is a working research prototype with
+an acceptance/trace foundation, currently validating evidence-driven repair
+continuation. Controlled baseline and single-block rollback are complete for the
+exposed Astropy case; a repair preserving both target and regression is not.
+Latest bounded mechanism review remains HTTP401 before any model answer/tool.
+Credential presence/no-whitespace is confirmed only in the user terminal; no
+successful authentication result received. Distinguish this immediate operational
+blocker from unresolved diagnostic relevance, persistent state and repair quality.
+No claim of generalized autonomous self-improvement or production readiness.
+
+### 2026-10-23: Frozen mini/full-model diagnostic contrast prepared
+
+User authorizes stronger-model comparison. Prepared model-contrast-v1 using the
+existing review_saved_diagnosis runner, GPT-5.4 mini versus GPT-5.4 (official model
+documentation consulted). Preserve default mini config and old HTTP401 artifacts.
+New separately frozen configs/plans/results; static validation confirms all prior
+frozen inputs match and plans differ only in model config path/hash; config value
+diff is model name only. Same source/evidence/prompt/image/policies and per-arm
+3calls/120s/60k tokens/8tools/2048 output cap. One repetition, mini then full;
+same resource caps are not equal monetary cost, provider defaults retained.
+Single exposed human-assisted case can diagnose a model-dependent difference,
+not establish generalized ability or acceptance. Truncation/timeouts are separate
+from diagnostic errors. Pair stops on incomplete first arm, no automatic retry.
+Launcher syntax checked; current developer process lacks credential, so no paid
+request or Docker execution dispatched. Authentication remains unverified in user
+terminal. Old mini401 is not a valid quality baseline. Next user run must produce
+two real model outcomes before drawing a comparison.
+
+Model-contrast-v1 user run: mini made one provider request, returned HTTP401 in
+5.797s, no tools or acceptance; no model answer. Full arm was not dispatched due
+to the declared fail-fast launcher. This repeats the unresolved authentication
+failure, not a mini diagnostic failure or model-quality comparison. Preserve the
+output; do not rerun it or bypass to full before checking credential/endpoint
+compatibility. Developer should have foregrounded the unresolved401 prerequisite
+before giving the pair launch command; static readiness was not endpoint readiness.
+Next missing information: whether the key is for official OpenAI or a third-party
+compatible gateway, and a sanitized authentication result from the user terminal.
+
+User confirms official OpenAI key. Inspection of pair/mini launchers finds no
+credential assignment/removal; frozen config reads KEEL_MODEL_API_KEY and targets
+official /v1/chat/completions. Adapter checks nonempty/no whitespace before HTTP
+and builds Bearer header from that same environment value. Thus the reported401
+is not the adapter's missing-key branch. Old/stale process value or invalid key
+remains possible; previous success does not establish current validity. Next
+safe check compares process and persisted-user presence/equality only and checks
+presence in the exact launcher interpreter; never prints values. No API retry.
+
+User-run scope check: process configured=true, persisted User configured=false,
+exact launcher Python key present=true. ProcessMatchesUser=false follows from
+the absent User value and does not prove two different keys. Current subprocess
+inheritance works; credential is not persisted at User scope (Machine scope not
+checked). This does not establish validity or explain401. Persisting the same
+value would not fix authentication. Next read-only endpoint check must run in
+user terminal; no new experiment/provider generation dispatched here.
+
+User directly queried official GET /v1/models from PowerShell with the current
+process credential and received HTTP401. This independently reproduces auth
+rejection outside Keel and the diagnostic runner; missing subprocess environment
+is excluded by earlier launcher check. Exact server rejection code remains
+unknown; do not assert revocation, billing or key deletion. Next action is local
+official-project key verification/replacement, secure process-only entry, then
+repeat the read-only authentication check before creating fresh experiment output.
+No generation, retry or credential persistence performed by developer tools.
+
+User reports GET /v1/models HTTP200 after resetting credential in their terminal.
+This establishes models-list authentication at that time, not generation access.
+Prepared model-contrast-v2 fresh outputs, both plans byte-identical to v1 with all
+frozen input hashes checked, original frozen model configs referenced unchanged.
+Same sequential mini/full resource caps and fail-fast/no-automatic-retry policy.
+Previous401 records preserved; no credential stored, no model call dispatched here.
+Run from the same authenticated user terminal; compare real diagnostic outcomes
+only after both arms execute, and separate protocol/infrastructure errors.
+
+Model-contrast-v2 mini live:2calls/15,300tokens/25.625s,2Docker probes, both child
+scripts failed imports before reaching diagnostic operations. First manually
+installed a partially initialized qualified module and hit circular-import
+CARD_LENGTH error; second loaded as candidate_card, losing relative-import package
+context. Candidate loader markers empty in both. Second script is an attempted
+self-correction, not successful recovery. Third request blocked locally by32k
+context cap after first/second request sizes26,201/31,513bytes; not provider model
+context exhaustion, nor total60k-token/120s exhaustion. No diagnosis/acceptance.
+Full arm not started due fail-fast; user may explicitly invoke already frozen full
+launcher to complete comparison without rerunning mini or altering prompts/caps.
+Keep this negative result; do not repair orchestration mid-comparison. Distinguish
+model import-script errors from host observation-accumulation capacity failure.
+
+Full comparison now run:2calls/14,715tokens/31.031s, both candidate-import probes
+completed, expected card/header execution hashes present. Normal qualified imports
+avoided mini's manual-loading errors. Long raw card verified and complete rendering
+preserved its original text; script cropped rendered[10:30] itself, so False
+comparisons are not proof of library truncation. Neither probe reached exact
+failing HDU write; no final diagnosis. Third request again blocked by host32k
+input cap (second request30,428bytes), before model could assess second output.
+Recorded balanced comparison in docs/evaluations/model-contrast-v2.md. Evidence
+supports executable-probe difference in one assisted case only, not repair-quality
+superiority. Common request-accumulation bottleneck must be addressed identically
+for both arms in a versioned follow-up; preserve both original negative results.
+
+### 2026-10-23: Budgeted diagnostic request view, not raw-evidence truncation
+
+Implemented request_view for probe-comparison only. Exact duplicate successful
+outer JSON stdout may be removed from prompt while child result remains complete;
+old readable source text can be explicitly omitted with hash/reacquisition notice.
+No mutation of ledger observations, no execution-output truncation or cap increase;
+all other stages retain prior behavior. Trace omissions, keep failing closed if
+protected payload cannot fit.44 tests passed (view4 plus probe/inspection40), local
+fake-provider/executor scope, not new live repair evidence. Reconstructed third
+requests from both real v2 transcripts and ledger fact4:mini35,705->28,377bytes;
+full34,642->31,264bytes, complete child probe dictionaries unchanged.0model/Docker
+calls, report model-contrast-context-replay-v1/report.json. This resolves this
+specific admission bottleneck in replay; context quality and model diagnosis
+still require live measurement. Preserve v2 results and explicitly version next
+pair with the same revised orchestration policy for both models.
+
+V3 live completed both3calls/2probes; admission fix confirmed in real requests.
+Mini22,540tokens/29.187s:both manual-load scripts hit same circular import; changed
+inputs did not change loading mechanism. Final unknown honestly acknowledges no
+behavioral evidence, but long-string direction remains unverified. Full23,218/
+62.094s:both candidate-hash probes complete; raw decimal text preserved and raw
+21digit integer parses as int/preserves text. Direct formatter comparison converts
+the latter to float, so it is not the same input/type/path. Model's supported
+regression mechanism claim overreaches these narrow observations. Neither exact
+failing HDU write nor fix path executed, no patch/acceptance. Documented in
+docs/evaluations/model-contrast-v3.md. Evidence confirms execution-quality
+difference for this exposed case and context engineering fix, not complete root
+cause or generalized superiority. Next issue is relevance/claim support, not
+another budget increase; keep evidence and distinguish model labels from verdict.
+
+### 2026-10-23: Prioritize GPT-5.4 end-to-end continuation
+
+User changes objective from paired comparison to getting full model through repair.
+Added generic Critic/probe guidance: target operation/preconditions/input type must
+match; unrelated successful script and changed-type contrast do not establish
+causality; convert missing observation into executable check. This is prompt
+guidance, not deterministic path-coverage enforcement or proven semantic judge.
+No repository/task/repair-specific runtime branch.64 local prompt/probe/evidence/
+repair/task tests pass, mocked provider/execution scope, not live diagnosis proof.
+Prepared .keel/repair-exploration/full-repair-v1/run.ps1 using existing task runner,
+new .keel/swebench/astropy-full-repair-v1 output. GPT-5.4 only,20calls/180k tokens/
+600 agent seconds; separate official grading time, no automatic paid retry.
+Validated imported2completed raw full-v3 executions and5controlled contrasts
+against saved candidate hashes; model supported verdict deliberately not imported.
+Same saved snapshot/reference environment and diagnostic Docker image, transcript
+enabled. This is a new exposed assisted attempt, no first-attempt score or model
+comparison; changed budget explicit. No credential/new model/Docker call here.
+Next live run must establish whether relevant diagnostic action, behavioral patch,
+and independent acceptance actually occur; no promise that guidance alone suffices.
+
+Full-repair-v1 complete, unresolved. GPT-5.4 now generated a hashed-candidate probe
+that reached initial hdu.writeto and reproduced the actual VerifyError, linking
+formatter output and Card serialization on same input. This is diagnostic progress
+over prior raw-card-only probes, not accepted repair. No new candidate generated.
+11calls/125,803tokens/139.297agent seconds/27tools;342s total. Implementer evidence
+capacity failures56,177->52,137->49,760(repeated3) against48k cap consumed remaining
+5actions after initial saved assessment;6/6recovery exhaustion despite remaining
+global budget.0newverification rounds, saved-seed selected, final grade unresolved
+with no infra error. Prior request-view fix was probe-specific, did not cover this
+proposal builder. Next measure full request components and zero-model replay
+before new paid run; repeated source reselection may not reduce fixed payload.
+Report docs/evaluations/full-repair-v1.md; exact fixed-overhead cause not yet
+established. Do not conflate successful diagnosis with patch or acceptance.
+
+### 2026-10-23: Repair the proposal handoff capacity bottleneck
+
+User asks how to fix. Measured recorded active goal plus selected evidence fact27
+reproduces49,760bytes exactly. Added overflow-only proposal goal view: JSON layout
+minification and exact duplicate successful transport stdout removal, retaining
+complete child execution and source windows, task prose and original records.
+No cap expansion, code repair supplied, semantic verdict or generic ability claim.
+Zero-model replay now47,796bytes under48k, evidence exactly unchanged; artifact
+proposal-context-replay-v1/report.json. Larger selections still correctly fail;
+the formerly repeated narrow selection fits and may proceed.52 local tests pass
+including distinct transport output retention, source preservation, fitting-request
+stability and oversized-source failure. These are unit/replay checks only.
+Prepared full-repair-v2 new attempt, same GPT-5.4/model/tool/time/token conditions
+and historical evidence as v1; explicit proposal implementation migration, old
+artifacts untouched. It will revalidate/diagnose in fresh attempt, not recover prior
+conversation or reuse a paid model answer as a patch. No new provider/Docker call.
+
+### 2026-10-23: GPT-5.4 full-repair-v2 passed runtime and official acceptance
+
+Inspected actual trial/result/trace/patch and official per-instance report:
+runtime passed,official_resolved true, no grading/infra failure. FAIL_TO_PASS1/1,
+PASS_TO_PASS174/174, including previously failing invalid_float_cards2. Model
+probe reached exact initial write; model then generated normalization helper for
+short/fallback representations, preserving original short-decimal requirement.
+No host-written case repair. Only card.py changed, audit no findings/unexpected
+changes, metadata not checked; inherited audit limits remain. New-attempt patch
+SHA48b2537b6e52a63e86390ca808931862f25dc8779a5d9b6e31ea62273e146723.
+8calls/93,158tokens/19tools/325.688agent seconds (includes verifier),521.375total;
+1verification round,2/6recovery actions. Same global caps asv1. Report
+docs/evaluations/full-repair-v2.md. V1->v2 result improves, but not clean attribution
+or cost ablation due stochastic paths and different completion work. Benchmark
+ready false/exposed assisted continuation, not original-condition first attempt
+or generalized self-improvement. Preserve all prior costs; no paid rerun now.
+Next review this positive trajectory for bounded optimization and held-out design.
+
+Success interpretation clarified: observed bottlenecks were layered, not solely
+model or prompt. Full model more consistently executed probes than mini in the
+small contrasts; end-to-end full model still failed until proposal handoff fit.
+An executable relevant check plus usable evidence delivery plus independent
+acceptance forms the demonstrated assisted loop. No clean isolation of model,
+guidance, historical controls and context effects; no universal autonomy claim.
+Commit guidance summarizes generic evidence-context handling, diagnostic guidance
+and successful-continuation documentation, without implying model training or
+hardcoded Astropy repair. Explanation-only turn; no new run or code change.

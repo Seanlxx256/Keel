@@ -97,6 +97,39 @@ python -m unittest tests.test_atomic_progress tests.test_index_checkpoints tests
 
 ## Shared runtime experience (2026-10-19)
 
+### Proposal evidence overflow after diagnostic handoff (2026-10-23)
+
+Full-repair-v1 reached the failing write in a model-designed probe, then five
+source reselections exhausted recovery before patch generation. Fixed goal evidence
+included duplicated outer execution JSON; narrowing source alone could plateau.
+`proposals.compact_goal_evidence` produces an overflow-only view of JSON evidence
+lines: minifies JSON layout and removes outer stdout only after exact equality
+with retained child result, successful transport and empty outer stderr. Natural
+task text, source windows, child output/code/status and provenance are preserved.
+Raw goal remains in transcripts/ledger; request includes a view notice. Distinct
+transport output stays intact; hard cap still applies. This does not guarantee
+arbitrary requests fit. Tests: test_proposal_context plus proposal/repair suites.
+Stored-request replay proposal-context-replay-v1:49,760->47,796bytes at48k,
+0model/Docker calls, selected source unchanged. Not live patch/acceptance proof.
+
+### Diagnostic request accumulation (2026-10-23)
+
+Both model-contrast-v2 arms stopped before call3 at the local32k request cap,
+despite remaining model-call/time/token budget. Stored execution rows contain
+both outer JSON stdout and the parsed child probe, duplicating output in prompts.
+Keep raw observations immutable. `diagnostic_inspection.request_view` removes an
+outer stdout only when its parsed JSON exactly equals the retained child result,
+and the outer process succeeded without stderr/timeout. If still too large,
+older readable source windows are explicitly marked omitted with text hashes and
+read/search reacquisition instructions. Keep complete child code/output/status,
+IDs, freshness and source manifest; never silently truncate observations. Trace
+every omission and retain the hard cap if the remaining request still cannot fit.
+Only probe-comparison requests opt into this policy. This is request admission,
+not a relevance check or successful diagnosis. Tests: test_diagnostic_request_view;
+real stored-request replay: model-contrast-context-replay-v1/report.json,0model/
+Docker calls; mini35,705->28,377bytes,full34,642->31,264bytes. Reconstructed next
+requests are not paid end-to-end results. Version future paired plans explicitly.
+
 `keel.experience.RecoverySession` runs observe/retrieve/probe/act/verify/record.
 `ExperienceStore` persists verified recoveries and failed attempts in SQLite.
 Stored records cannot execute commands: only caller-registered actions can run.
@@ -1254,3 +1287,239 @@ Regression: test_diagnostic_acquisition exercises real search/read tools and sha
 inspection with fake model replies: unknown -> read test -> cited re-proposal,
 second unknown, insufficient inspection, unchanged global budget, and refusal to
 edit read-only tests. Live performance remains unverified.
+
+For a bounded live acquisition check, reuse review_saved_diagnosis with mode
+diagnostic_acquisition. Replay the saved unknown reply without provider usage;
+report the host dispatch reservation separately from new live calls. Run the
+production RecoveryController.propose and existing inspection tools against copied,
+hashed source files. Keep ledger/transcript outside the source workspace. Override
+replace only at the final mutation boundary so validated proposals are held,
+not applied; report proposal_validated_edits_held, never repair pass. Source
+snapshots must match before/after; insufficient evidence is evidence_blocked.
+Preserve incomplete outputs with no automatic paid retry. Record requests,
+responses, rejected completion diagnostics and usage before moving to the next
+step. Current micro limits: <=4 live calls /240 seconds /80k tokens /20 tools,
+<=60 seconds and 2048 output per call; saved replay uses one host call reservation.
+Frozen host test bodies are not automatically the harness's patched test source.
+
+## Action-capability probe comparison, opt-in experiment
+
+Use diagnostic_probe_pair in review_saved_diagnosis to compare the same frozen
+question/source under equal per-arm caps. Keep the tool loop and response schema
+shared; only probe availability differs. Resolve the operator's existing Docker
+image to a local ID before paid calls; never pull/build or fall back to host Python.
+Use CommandRunner's network-none/read-only/non-root/capability/resource limits.
+Model-authored Python runs in a child inside that container for <=10 seconds;
+output goes to files with hard RLIMIT_FSIZE limits, and returned stdout/stderr are
+capped. Outer timeout uses remaining shared time and existing container cleanup.
+No host report mount, credentials or Docker socket is provided to the container.
+
+Mounted candidate source and installed image packages are different provenance.
+A probe that imports the unchanged package does not establish current candidate
+behavior. Preserve script, input windows, image ID, execution output and final
+answer for manual inspection. Repeated identical actions stop. Record diagnostic
+outputs only; no patch application or official score. Completed arm receipts may
+be reused after identity checks; incomplete arms must not be automatically rerun.
+Predeclare distinguishing evidence and cost/repetition criteria, rather than
+promoting a change because JSON validated. One exposed case and fixed arm order
+do not establish general performance or causal accuracy improvements.
+
+After an optional tool goes unused, distinguish voluntary tool choice from
+ability to design/use an experiment. A required-probe capability review must be
+a separately frozen probe-only plan (arms=[probe], probe_policy=required). Preserve
+the optional baseline; do not repeat it or relabel forced execution as the same
+comparison. Permit an explicit blocked/unknown outcome with a stated obstacle;
+the host does not certify that obstacle as real. One early final answer receives
+policy feedback, a second stops; corrections consume the same call/time budget.
+Probe attempt does not guarantee success or a relevant observation. Do not promote
+the policy until scripts, candidate provenance and reasoning show actual benefit.
+
+Probe action interfaces must state parameter semantics: executable Python in code;
+query/path empty. A probe intention in query with code="" is an invalid tool call,
+not an attempted container execution or output-size failure. Reflect active policy
+in action schema and expose byte bounds before dispatch. Permit at most one typed
+argument correction within existing shared budgets; never synthesize a task script
+on the host or count invalid arguments as probe use. Retain raw reply and costs.
+Regression: test_diagnostic_probe covers natural-language query/empty code followed
+by corrected execution, and repeated empty code without container launch.
+
+## Candidate package execution and failed child correction
+
+Use candidate_context in a fresh probe interpreter to intercept qualified imports
+of hashed mounted modules. Retain image-provided parent/dependency packages and
+normal relative-import semantics; register before importing the package so eager
+reexports bind to candidate objects. Reject preimported target packages instead of
+mixing cached classes, verify bytes before compilation, and record each candidate
+module's origin/SHA/loading result. Do not import package files under arbitrary
+top-level spec names. Package initializers retain fallback dependency search paths.
+This is a generic source loader, not task-specific code repair. Dynamic package
+data, extension modules and arbitrary project startup behavior remain unproven.
+
+candidate_imports and correct_failed_probe are explicit experimental flags, default
+off. Distinguish outer executor status from nested child returncode/timeout. A
+wrapper returncode0 does not mean the experiment succeeded. With correction enabled,
+only first child script failure/timeout permits one DIFFERENT probe; two attempts
+maximum, same global model/tool/time limits. Executor failures are not blindly
+retried, successful probes do not earn extra executions, duplicate scripts stop.
+
+Before another paid trial, run test_candidate_imports (relative dependencies,
+eager reexports, initializer fallback, SHA changes, preimport rejection and actual
+generated worker in a trusted local child), and test_diagnostic_probe. Production
+model code remains Docker-only. The optional test_probe_docker_fixture uses the
+existing image/interpreter from KEEL_TEST_PROBE_PLAN with zero provider calls and
+stores evidence under .keel/probe-selfchecks. Its default skip is not a Docker pass.
+
+Use review_saved_diagnosis --check-imports for a zero-model actual-candidate check;
+explicit --import-path entries come from the frozen source catalog. Verify source
+plan hash/source bytes, and record CURRENT implementation hashes separately from
+the historical plan. Passing requires real candidate file origin and executed
+loader SHA, not merely returncode0. Distinguish import_failed, provenance_failed
+and execution_unavailable; Docker pipe denial does not test package importability.
+Preserve outputs under a new path, and do not invoke a model to diagnose the import
+interface before deterministic importability has been established.
+
+A thin mount on cwd/sys.path can create namespace parent packages before a late
+PEP 660 editable finder sees the real package. In candidate_context remove only
+snapshot search entries while the explicit hashed source finder is active; restore
+sys.path on exit. Do not invent missing package configuration. Test with an editable
+finder AFTER PathFinder, not only an installed directory on sys.path: the latter
+misses this failure class. Explicit candidate package initializers and external
+dependency paths must still work. Native namespace-only projects remain outside
+the current validated scope. On preflight import failure preserve parent package
+origins/search paths to distinguish namespace shadowing from missing dependencies.
+
+Successful probe execution does not imply diagnostic completion. Experimental
+continue_successful_probe permits one DIFFERENT follow-up that cites the preceding
+execution observation, within the same existing budgets and total two-probe cap.
+Do not silently change old once-only trial policies. Repeated scripts stop; source
+citations alone cannot justify an execution follow-up's provenance. The host checks
+references, not semantic relevance; final diagnosis remains manually reviewed.
+
+A separately frozen continuation may reuse one completed historical probe. Bind
+its original script/output/report hash and image ID, verify all candidate source
+hashes before paid calls, and label it historical. Report prior_probe_attempts and
+new_probe_attempts separately, preserving prior costs. Do not treat reused output
+as fresh verification. Incompatible image/source must block before model dispatch.
+
+Required-probe completion is local to the current investigation. Historical
+executions remain reusable context and count toward the unchanged execution cap,
+but cannot satisfy the fresh-execution gate. Expose current_question_execution_ids;
+withhold answer until fresh execution exists and require its citation in the final
+answer. One policy correction uses the same budget, repeated violations stop,
+and blocked/unknown remains available. Do not synthesize experiment code or
+equate a fresh citation with causal validity. Optional reviews keep their existing
+behavior. Regression: test_required_continuation_cannot_finish_using_only_historical_execution
+and test_required_answer_must_cite_fresh_execution_not_just_source. Preserve old
+paid results and migrate frozen implementation hashes before any new live trial.
+
+Diagnostic blockers now use diagnostic_closure host predicates. A cited current
+outer executor nonzero returncode/timeout establishes an observed execution
+obstacle, not its root cause. Historical output, missing observations and child
+script failures cannot certify blocking. Unsupported blocker and premature answer
+share one correction allowance and existing total budgets. Repeated violations
+remain unresolved; current runner's legacy evidence_blocked status on RecoveryStopped
+does not certify a real environmental blocker. Report closure separately.
+Regression: test_diagnostic_closure plus diagnostic_probe false-blocker-to-probe
+and actual-executor-failure tests. Default repair runtime is not yet integrated.
+
+Use run_swebench_task --diagnostic-report with saved-source continuation to pass
+receipted raw candidate executions into Critic changes and Scout context. Validate
+report hash, candidate manifest paths/hashes and executed loader markers; exclude
+historical-only/failed executions and do not import model verdicts as facts. Check
+saved and prepared workspaces, freeze report/receipt identity during inference,
+and bound payload size. Imported output remains historical, not fresh acceptance.
+Preserve new-attempt and assisted provenance. Tests: test_diagnostic_evidence and
+test_diagnostic_execution_is_forwarded_in_saved_continuation. This does not enable
+the experimental probe executor inside ordinary runtime or prove repair benefit.
+
+Decision guidance lives in decision_guidance and is delivered to Critic, proposal
+and experimental probe requests. Five questions cover facts, alternatives, action
+choice, observable success and switch conditions. Reuse existing response fields
+and bounded outputs; do not request hidden chain-of-thought, add case answers or
+infer correctness from labeled prose. Proposal summaries must name the expected
+behavioral difference, not present comments/equivalent rewrites as fixes. Prompt
+delivery tests are not behavioral enforcement or live efficacy evidence; migrate
+frozen implementation identities before another review.
+
+Paged localization treats an empty page result as no update when carry is
+nonempty, with localization_empty_page_preserved trace. Nonempty selection still
+replaces/prunes; all-empty scans still fail. This prevents total erasure without
+unbounded union, but is not a keep/add/drop protocol or relevance guarantee.
+
+SWE bugfix proposals enable agent.require_python_ast_change before writes or
+acceptance. Whole-batch Python AST equality rejects comments/formatting-only edits;
+generic proposal mode defaults off so documentation tasks remain possible.
+Docstrings remain in AST because __doc__ can be observable. AST difference does
+not prove semantic change: equivalent variable rewrites still pass. Do not claim
+blanket no-op detection or saved grading duration from static replay. Replay full
+proposals against exact seed, not only snippets. Tests: test_paged_localization,
+test_proposals and test_diagnostic_answer.
+
+Main runtime may opt into diagnostic_execution (immutable Docker execution config,
+absolute container python, max_model_calls1..4) in adaptive localized-proposal mode.
+Pending Critic checks from saved continuations and later recovery execute before
+patch generation. Reuse diagnostic_probe.investigate and run_probe, shared global
+budget/ledger/trace; narrow readable/candidate-import paths to selected source.
+Refresh bytes before execution; stale localization anchors fall back to bounded
+current file evidence rather than asserting old positions. Raw executions and
+unverified assessment enter the patch goal. Unknown, noncompleted experiment or
+verified executor failure does not authorize a patch. No source write/network/host
+fallback added. This gate does not certify relevance or causal interpretation.
+CLI: --diagnostic-probe-config; results: diagnostic_executions. Test actual runtime
+handoff, executor failure, unknown result and global budget sharing before live use.
+
+Diagnostic citations use current observation IDs, with a dynamic enum and explicit
+available_evidence_ids. Unknown string IDs receive one typed correction within
+unchanged stage/global budgets; repeated errors stop unresolved. Never infer aliases
+such as evidence-2 -> source-2 or rerun a completed probe to fix a reference. Keep
+execution in ledger even when final interpretation fails. Tests cover corrected
+answer reusing one execution and repeated unknown IDs without tool dispatch.
+
+For baseline-versus-candidate causality, use review_saved_diagnosis
+--compare-source-tests with frozen source variants and one exact test selector.
+source_comparison reuses run_probe/candidate loader, fixed immutable image,
+2-tool/60s total budget,10s child deadline, no model/network/source edits. Export
+baseline bytes from the task base commit without checking out over saved work.
+Require actual executed loader hashes and identical installed test-file hashes.
+Collection/setup/teardown errors, skips, missing results and timeouts are unavailable,
+not failing target tests. This diagnostic does not reproduce every official harness
+condition. Baseline also failing does not prove patch irrelevance. If baseline
+passes/candidate fails, block rollback may localize the contrast but interactions
+and invalid partial patches must be retained, not scored as evidence of causality.
+
+Read-only pytest diagnostics need writable runtime storage before plugin imports.
+source_comparison sets HYPOTHESIS_STORAGE_DIRECTORY to an isolated /tmp directory
+before importing pytest/test modules. Keep warning/error policy and source/tests
+unchanged; apply adaptation equally to variants and record it plus implementation
+hashes. Example evidence: baseline-candidate-v1 exited4 loading conftest with a
+HypothesisWarning about unusable /testbed/.hypothesis/examples, reports=[]; target
+never ran. Do not score this as a failing baseline or relax warnings to get a pass.
+Test generated code ordering with a trusted fixture, then validate in real Docker.
+
+source_comparison.rollback_blocks compares logical lines (ignoring LF/CRLF for
+partition only) and aligns restored lines to candidate newline style. Preserve
+each variant/hash and syntax-invalid partial variants; do not count invalid syntax
+as target failure. block_rollback plans reuse completed controls only after exact
+control plan/report hashes and image/interpreter/test selector match; each new
+test must match control test-source hash and executed candidate provenance.
+Run only new rollback variants, not baseline/candidate again. Independent single-
+block reversions are not full delta debugging and may miss interacting causes.
+
+On an existing comparison output inspect report before changing paths. Use
+--resume-from REPORT with a NEW output to reuse independently completed variants
+even when aggregate status is running/incomplete. Match plan hash, source manifest,
+raw structured result, loader provenance, test hash and executor implementation.
+Only comparison orchestration migration is allowed/recorded; preserve previous
+implementation/budget/report hash. Never reuse unavailable rows, overwrite old
+output or infer whole-run completion from one passing block. Tests verify actual
+reuse without another probe and rejection of plan mismatch.
+
+Transfer completed rollback evidence with run_swebench_task --comparison-plan and
+--comparison-report, only alongside validated saved-source continuation. Validate
+frozen control/variant identities, raw structured results, loader markers and exact
+saved/prepared candidate. Import compact outcomes plus observed reversion diffs,
+not a developer repair answer. Retain bound historical evidence in Critic changes,
+saved-source Scout goal and diagnostic bridge input, including later rounds.
+Subsequent source edits invalidate freshness but do not erase historical contrasts.
+Do not force model state updates from narrative conclusions or claim this is a full
+question/hypothesis ledger. Test delivery and tamper/mismatch rejection first.

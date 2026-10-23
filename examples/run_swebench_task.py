@@ -79,7 +79,8 @@ def trial_budget(overrides=None, *, profile='standard'):
 def config_for(task, task_dir, output, model_config, harness_python, environment_overlay_path=None, policies=None, *, budget_limits=None, budget_profile='standard'):
     verifier = Path(__file__).with_name('swebench_verify_workspace.py').resolve()
     config = {'mode': 'localized-proposal', 'goal': task['problem_statement'], 'model': model_config,
-            'agent': {'max_steps': 12, 'max_context_bytes': 48000, 'max_output': 4096, 'require_change': True},
+            'agent': {'max_steps': 12, 'max_context_bytes': 48000, 'max_output': 4096, 'require_change': True,
+                      'require_python_ast_change': True},
             'recovery': {'strategy': 'adaptive', 'max_actions': 12 if budget_profile == 'extended' else 6,
                          'repeat_limit': 2, 'write_roots': ['.']},
             'verification_repair_attempts': 8 if budget_profile == 'extended' else 3,
@@ -96,8 +97,10 @@ def config_for(task, task_dir, output, model_config, harness_python, environment
     return config
 
 
-def execute(root, task_dir, reference_dir, model_config, harness_python, output, *, mcp_config=None, localization_tool_steps=6, require_external_tool=False, local_exploration=False, resume_snapshot=None, saved_repo=None, diagnostic_inspection=False, recovery_progress=False, targeted_source_review=False, diagnosis_supervision=False, budget_driven_recovery=False, record_model_transcript=False, infrastructure_guard=False, model_transport_retries=0, retain_instance_image=False, diagnostic_handoff=False, budget_limits=None, budget_profile='standard'):
+def execute(root, task_dir, reference_dir, model_config, harness_python, output, *, mcp_config=None, localization_tool_steps=6, require_external_tool=False, local_exploration=False, resume_snapshot=None, saved_repo=None, diagnostic_inspection=False, recovery_progress=False, targeted_source_review=False, diagnosis_supervision=False, budget_driven_recovery=False, record_model_transcript=False, infrastructure_guard=False, model_transport_retries=0, retain_instance_image=False, diagnostic_handoff=False, budget_limits=None, budget_profile='standard', diagnostic_report=None, diagnostic_execution=None, comparison_plan=None, comparison_report=None):
     started = time.monotonic()
+    from keel.diagnostic_execution import validate_probe_config
+    validate_probe_config(diagnostic_execution)
     if type(model_transport_retries) is not int or not 0 <= model_transport_retries <= 2:
         raise ValueError('model_transport_retries must be an integer from 0 to 2')
     if model_transport_retries and not record_model_transcript:
@@ -129,6 +132,24 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
     if resume_snapshot:
         from keel.saved_repair import load_saved_repair
         seed_patch,continuation=load_saved_repair(task_dir,reference_dir,resume_snapshot,saved_repo)
+    diagnostic_evidence = None
+    if diagnostic_report is not None:
+        if continuation is None:
+            raise ValueError('Diagnostic evidence requires validated saved-source continuation')
+        from keel.diagnostic_evidence import load_diagnostic_evidence
+        diagnostic_evidence = load_diagnostic_evidence(diagnostic_report, saved_repo)
+        continuation['changes']['diagnostic_evidence'] = diagnostic_evidence
+        continuation['provenance']['diagnostic_report_sha256'] = diagnostic_evidence['report_sha256']
+    comparison_evidence = None
+    if bool(comparison_plan) != bool(comparison_report):
+        raise ValueError('Controlled evidence requires both comparison plan and report')
+    if comparison_plan is not None:
+        if continuation is None:
+            raise ValueError('Controlled evidence requires saved-source continuation')
+        from keel.diagnostic_evidence import load_comparison_evidence
+        comparison_evidence = load_comparison_evidence(comparison_plan, comparison_report, saved_repo)
+        continuation['changes']['controlled_comparisons'] = comparison_evidence
+        continuation['provenance']['comparison_report_sha256'] = comparison_evidence['report_sha256']
     task = verify_task(task_dir)
     version = subprocess.run([harness_python, '-c', 'import importlib.metadata; print(importlib.metadata.version("swebench"))'],
                              check=True, capture_output=True, text=True, timeout=20).stdout.strip()
@@ -145,6 +166,14 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
         validate_servers(tools)
     task_receipt = file_hash(task_dir/'task-receipt.json')
     def frozen():
+        if comparison_plan is not None:
+            from keel.diagnostic_evidence import load_comparison_evidence
+            if load_comparison_evidence(comparison_plan, comparison_report, saved_repo) != comparison_evidence:
+                raise ValueError('Controlled comparison evidence changed during inference')
+        if diagnostic_report is not None:
+            from keel.diagnostic_evidence import load_diagnostic_evidence
+            if load_diagnostic_evidence(diagnostic_report, saved_repo) != diagnostic_evidence:
+                raise ValueError('Diagnostic evidence changed during inference')
         if resume_snapshot:
             from keel.saved_repair import load_saved_repair
             if load_saved_repair(task_dir,reference_dir,resume_snapshot,saved_repo)[0]!=seed_patch:
@@ -226,6 +255,14 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
                     with_seed.path(name,write=True)
             finally:
                 with_seed.ledger.close()
+        if diagnostic_report is not None:
+            from keel.diagnostic_evidence import load_diagnostic_evidence
+            if load_diagnostic_evidence(diagnostic_report, repo) != diagnostic_evidence:
+                raise ValueError('Prepared workspace differs from diagnostic source')
+        if comparison_plan is not None:
+            from keel.diagnostic_evidence import load_comparison_evidence
+            if load_comparison_evidence(comparison_plan, comparison_report, repo) != comparison_evidence:
+                raise ValueError('Prepared source differs from controlled comparison candidate')
         config = config_for(task, task_dir, output, model_config, harness_python, overlay_path, policies,
                             budget_limits=limits, budget_profile=budget_profile)
         if instance_cache_scope is not None:
@@ -237,6 +274,9 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
         config['recovery']['diagnosis_supervision'] = diagnosis_supervision
         config['recovery']['diagnostic_handoff'] = diagnostic_handoff
         config['recovery']['budget_driven'] = budget_driven_recovery
+        if diagnostic_execution is not None:
+            config['diagnostic_execution'] = diagnostic_execution
+            report['diagnostic_execution_config'] = diagnostic_execution
         if continuation:
             config['continuation_context']=continuation
         if local_exploration:
@@ -258,6 +298,7 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
                       external_tool_validation=result.get('external_tool_validation', {}),
                       infrastructure_attempts=result.get('infrastructure_attempts', []),
                       recovery=result.get('recovery'), verification_rounds=len(result.get('verification_attempts', [])))
+        report['diagnostic_executions'] = result.get('diagnostic_executions', [])
         report['diagnostic_inspections'] = [{'critic_next_check':row['critic_next_check'],
             'checks':row['checks'],'assessment':row['assessment'],'scope':row['scope']}
             for row in result.get('diagnostic_inspections', [])]
@@ -324,6 +365,10 @@ def main():
     parser.add_argument('--max-agent-seconds', type=int)
     parser.add_argument('--resume-snapshot',type=Path)
     parser.add_argument('--saved-repo',type=Path)
+    parser.add_argument('--comparison-plan',type=Path)
+    parser.add_argument('--comparison-report',type=Path)
+    parser.add_argument('--diagnostic-probe-config',type=Path, help='Opt-in immutable Docker probe execution config for pre-edit Critic checks')
+    parser.add_argument('--diagnostic-report',type=Path, help='Receipted probe arm report, bound to saved source; historical evidence only')
     parser.add_argument('--mcp-config', type=Path, help='Explicit authorized tools; servers must target the trial workspace, not another repository')
     parser.add_argument('--localization-tool-steps', type=int, choices=range(1, 13), default=6)
     parser.add_argument('--require-external-tool', action='store_true', help='Integration validation: require an authorized MCP attempt before local fallback')
@@ -370,7 +415,7 @@ def main():
                      saved_repo=args.saved_repo.resolve() if args.saved_repo else None,
                      diagnostic_inspection=args.diagnostic_inspection == 'required',
                      recovery_progress=args.recovery_progress, targeted_source_review=args.targeted_source_review,
-                     diagnosis_supervision=args.diagnosis_supervision, budget_driven_recovery=args.budget_driven_recovery, record_model_transcript=args.record_model_transcript, infrastructure_guard=args.infrastructure_guard, model_transport_retries=args.model_transport_retries, retain_instance_image=args.retain_instance_image, diagnostic_handoff=args.diagnostic_handoff, budget_limits=limits, budget_profile=args.budget_profile)
+                     diagnosis_supervision=args.diagnosis_supervision, budget_driven_recovery=args.budget_driven_recovery, record_model_transcript=args.record_model_transcript, infrastructure_guard=args.infrastructure_guard, model_transport_retries=args.model_transport_retries, retain_instance_image=args.retain_instance_image, diagnostic_handoff=args.diagnostic_handoff, budget_limits=limits, budget_profile=args.budget_profile, diagnostic_report=args.diagnostic_report.resolve() if args.diagnostic_report else None, diagnostic_execution=json.loads(args.diagnostic_probe_config.read_text(encoding='utf-8')) if args.diagnostic_probe_config else None, comparison_plan=args.comparison_plan.resolve() if args.comparison_plan else None, comparison_report=args.comparison_report.resolve() if args.comparison_report else None)
     print(json.dumps({key: value for key, value in report.items() if key != 'implementation'}, indent=2))
     return 0 if (report['official_resolved'] is True and
                  (not args.budget_driven_recovery or report.get('runtime_status') == 'passed')) else 1

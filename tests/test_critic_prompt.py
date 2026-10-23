@@ -8,6 +8,7 @@ from keel.core import Budget, Ledger, Limits, Trace, InvalidSelection, InputCapa
 from keel.models import Reply
 from keel.recovery import RecoveryController, CRITIC_QUESTIONS, validate_critic_decision, critic_length_warnings
 from keel.workspace import Workspace
+from keel.decision_guidance import DECISION_QUESTIONS
 
 
 class CriticPromptTests(unittest.TestCase):
@@ -77,6 +78,10 @@ class CriticPromptTests(unittest.TestCase):
                     self.assertEqual(controller.report()['response_warnings'][0]['warnings'][0]['characters'], 1023)
                     self.assertEqual(len(result['evidence']), 1023)
                     prompt = model.messages[0]['content']
+                    self.assertEqual(json.loads(model.messages[1]['content'])['decision_questions'], DECISION_QUESTIONS)
+                    self.assertIn('ALTERNATIVES', CRITIC_QUESTIONS['hypothesis'])
+                    for label in ('CHOICE', 'SUCCESS', 'SWITCH'):
+                        self.assertIn(label, prompt)
                     embedded = json.loads(prompt.split('JSON schema: ', 1)[1])
                     for field, description in CRITIC_QUESTIONS.items():
                         # Same contract is embedded for providers ignoring schemas.
