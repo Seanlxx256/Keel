@@ -29,6 +29,25 @@ class SwebenchBatchTests(unittest.TestCase):
         with patch('examples.run_swebench_batch.seen_tasks', return_value=(set(), {}, [])):
             return prepare(root, source, model, root/'python', root/'batch')
 
+    def test_exposure_scan_skips_environments_but_keeps_experiment_receipts(self):
+        from examples.run_swebench_batch import seen_tasks
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)
+            env=root/'.keel/tools/.venv';env.mkdir(parents=True)
+            (env/'fixture.json').write_text('"ignored__fixture-1"')
+            run=root/'.keel/runs';run.mkdir()
+            (run/'trial.json').write_text('"actual__task-2"')
+            seen,receipts,_=seen_tasks(root)
+            self.assertEqual(seen,{'actual__task-2'})
+            self.assertEqual(len(receipts),1)
+
+    def test_exposure_scan_deadline_aborts_instead_of_freezing_partial_exclusions(self):
+        from examples.run_swebench_batch import seen_tasks
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);(root/'docs').mkdir()
+            with patch('examples.run_swebench_batch.time.monotonic',side_effect=[0,121]):
+                with self.assertRaises(TimeoutError):seen_tasks(root)
+
     def test_seeded_selection_excludes_seen_tasks_and_is_order_independent(self):
         rows = self.rows()
         excluded = {'alpha__lib-1'}

@@ -37,9 +37,17 @@ class StaticAuditTests(unittest.TestCase):
 
     def test_protected_path_variants(self):
         for name in ("src/widget.spec.tsx", "src/widget.test.jsx", "Conftest.py", ".gitlab-ci.yml",
-                     "foo/TESTS/check.py", ".circleci/config.yml", "pytest.ini"):
+                     "foo/TESTS/check.py", "testing/python/integration.py", "pkg/Testing/check.py",
+                     r"testing\python\integration.py", ".circleci/config.yml", "pytest.ini"):
             with self.subTest(name=name):
                 self.assertTrue(protected_path(name))
+
+    def test_added_test_under_testing_is_protected_even_without_assertion_removal(self):
+        before='VALUE = 1\n'
+        after=before+'def test_feature():\n    assert True\n'
+        self.assertIn('protected_file_changed',self.rules(before,after,'testing/python/integration.py'))
+        self.assertFalse(protected_path('src/_pytest/skipping.py'))
+        self.assertFalse(protected_path('pkg/testing_helpers.py'))
 
     def test_dependency_upgrade_keeps_test_configuration(self):
         before = '[project]\nversion="1"\n[tool.pytest.ini_options]\naddopts="-v"\n'

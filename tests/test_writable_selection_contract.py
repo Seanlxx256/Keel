@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from keel.core import Budget, InvalidSelection, Ledger, Limits, Trace
+from keel.core import Budget, InvalidSelection, PolicyDenied, Ledger, Limits, Trace
 from keel.localization import localize, selection_request
 from keel.models import Reply
 from keel.workspace import Workspace
@@ -63,6 +63,32 @@ class WritableSelectionContractTests(unittest.TestCase):
             self.assertEqual(scope['files'], ['pkg/core.py'])
             self.assertEqual(model.calls, 2)
             self.assertEqual((root/'tests/test_feature.py').read_bytes(), b'# Read-only diagnostic evidence\n')
+
+    def test_testing_directory_is_readable_but_not_an_edit_choice_or_write_target(self):
+        owner=self
+        class Model:
+            calls=0
+            def complete_json(self,messages,schema,**kwargs):
+                self.calls+=1
+                if self.calls==1:
+                    data=json.loads(messages[1]['content'])
+                    owner.assertEqual(schema['properties']['files']['items']['enum'],['pkg/core.py'])
+                    owner.assertEqual(data['read_only_evidence_paths'],['testing/integration.py'])
+                    return Reply(json.dumps({'files':['pkg/core.py']}),10)
+                return Reply(json.dumps({'locations':['pkg/core.py:1']}),10)
+        with tempfile.TemporaryDirectory() as temporary, closing(Ledger(Path(temporary)/'ledger.sqlite')) as ledger:
+            root=Path(temporary);ws,_=self.fixture(root,ledger)
+            (root/'testing').mkdir();target=root/'testing/integration.py'
+            target.write_bytes(b'def test_feature():\n    assert True\n')
+            self.assertIn('test_feature',ws.read('testing/integration.py',role='scout')['value'])
+            with self.assertRaises(PolicyDenied):ws.path('testing/integration.py',write=True)
+            exploration={'observed_source_paths':['testing/integration.py'],
+                'summary':{'files':['pkg/core.py','testing/integration.py']},
+                'evidence':[{'fact_id':1,'preview':'read-only test evidence'}]}
+            with patch('keel.localization.explore_for_localization',return_value=exploration):
+                scope=localize(Model(),ws,'Repair feature',{'max_context_bytes':12000})
+            self.assertEqual(scope['files'],['pkg/core.py'])
+            self.assertEqual(target.read_bytes(),b'def test_feature():\n    assert True\n')
 
     def test_provider_ignoring_enum_still_fails_without_silent_filtering(self):
         class Model:

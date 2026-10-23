@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import shutil
 import sys
+import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from examples.swebench_bridge import grade
@@ -18,12 +19,15 @@ from keel.swebench import prepare as prepare_task, reference_prediction, verify_
 INSTANCE = re.compile(r'\b[A-Za-z0-9_.-]+__[A-Za-z0-9_.-]+-\d+\b')
 
 
-def seen_tasks(root):
+def seen_tasks(root, *, timeout=120):
     seen, receipts, omitted = set(), {}, []
+    deadline=time.monotonic()+timeout
     skip = {'.git', 'datasets', 'repo', 'solver-repo', 'snapshot-base', 'snapshot-gold',
-            'base', 'gold', 'site-packages', 'node_modules', '__pycache__'}
+            'base', 'gold', 'site-packages', 'node_modules', '__pycache__', '.venv', 'venv', 'envs'}
     for area in ('docs', '.keel'):
         for directory, directories, names in os.walk(root/area):
+            if time.monotonic()>deadline:
+                raise TimeoutError('Exposure scan deadline exceeded; no task list frozen')
             directories[:] = [name for name in directories if name not in skip and not name.startswith('harness-')]
             for name in names:
                 path = Path(directory)/name
