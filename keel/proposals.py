@@ -146,8 +146,36 @@ def compact_goal_evidence(goal):
     return ''.join(lines)
 
 
+class ProposalCapacityExceeded(InputCapacityExceeded):
+    """Measured request capacity, including the floor source selection cannot fix."""
+    def __init__(self, size, limit, fixed_bytes):
+        self.input_bytes, self.limit_bytes, self.fixed_bytes = size, limit, fixed_bytes
+        super().__init__(f'Localized evidence requires {size} input bytes; limit is {limit}. '
+                         f'Fixed context without writable source windows is {fixed_bytes} bytes. '
+                         'Narrow source only if the fixed context fits.')
+
+
+def proposal_context_limits(settings):
+    soft=settings.get('max_context_bytes')
+    if 'proposal_context_policy' in settings:
+        from .context_budget import validate_policy
+        policy=validate_policy(settings['proposal_context_policy'])
+        if 'proposal_context_hard_bytes' in settings:
+            raise ValueError('Choose token-based policy or legacy proposal headroom, not both')
+        if type(soft) is not int or not 0<soft<=policy['max_request_bytes']:
+            raise ValueError('Byte soft target must not exceed independent request byte ceiling')
+        return soft,policy['max_request_bytes']
+    hard=settings.get('proposal_context_hard_bytes',soft)
+    if 'proposal_context_hard_bytes' in settings:
+        if (type(soft) is not int or soft<=0 or type(hard) is not int
+                or not soft<=hard<=soft+soft//10):
+            raise ValueError('proposal_context_hard_bytes requires max_context_bytes and allows at most 10% explicit headroom')
+    return soft,hard
+
+
 def proposal_request(goal, files, evidence, settings, *, structured=True, dependencies=None, diagnostic_check=None, readonly_evidence=None):
     from .decision_guidance import DECISION_QUESTIONS, SUMMARY_GUIDANCE
+    soft_limit,hard_limit=proposal_context_limits(settings)
     files = evidence_scope(files, evidence)
     schema = {'type': 'object', 'properties': {
         'edits': {'type': 'array', 'minItems': 1, 'maxItems': 8, 'items': {
@@ -183,7 +211,7 @@ def proposal_request(goal, files, evidence, settings, *, structured=True, depend
     if not structured:
         messages[0]['content'] += ' Required output schema: ' + json.dumps(schema)
     size = len(json.dumps(messages, ensure_ascii=False).encode()) + (len(json.dumps(schema).encode()) if structured else 0)
-    if settings.get('max_context_bytes') is not None and size > settings['max_context_bytes']:
+    if soft_limit is not None and size > soft_limit:
         payload=json.loads(messages[1]['content'])
         compacted_goal=compact_goal_evidence(goal)
         if compacted_goal!=goal:
@@ -191,8 +219,18 @@ def proposal_request(goal, files, evidence, settings, *, structured=True, depend
             payload['request_view']='Duplicate execution wrappers removed; full child outputs and source windows retained. Raw goal remains in trajectory.'
             messages[1]['content']=json.dumps(payload,ensure_ascii=False)
             size=len(json.dumps(messages,ensure_ascii=False).encode())+(len(json.dumps(schema).encode()) if structured else 0)
-    if settings.get('max_context_bytes') is not None and size > settings['max_context_bytes']:
-        raise InputCapacityExceeded(f'Localized evidence requires {size} input bytes; limit is {settings["max_context_bytes"]}. Narrow files or query anchors')
+    if soft_limit is not None and size > soft_limit:
+        # Remove JSON layout whitespace across the full payload, never whitespace
+        # inside source/log strings. This is lossless, unlike evidence truncation.
+        payload=json.loads(messages[1]['content'])
+        messages[1]['content']=json.dumps(payload,ensure_ascii=False,separators=(',',':'))
+        size=len(json.dumps(messages,ensure_ascii=False).encode())+(len(json.dumps(schema).encode()) if structured else 0)
+    if hard_limit is not None and size > hard_limit:
+        payload=json.loads(messages[1]['content'])
+        payload['evidence']=[]
+        floor_messages=[messages[0],{'role':'user','content':json.dumps(payload,ensure_ascii=False,separators=(',',':'))}]
+        fixed=len(json.dumps(floor_messages,ensure_ascii=False).encode())+(len(json.dumps(schema).encode()) if structured else 0)
+        raise ProposalCapacityExceeded(size,hard_limit,fixed)
     return messages, schema, size
 
 
@@ -262,7 +300,23 @@ def _propose_once(model, workspace, goal, files, evidence, settings, *, dependen
     messages, schema, size = proposal_request(goal, files, evidence, settings,
         structured=structured, dependencies=dependencies, diagnostic_check=diagnostic_check, readonly_evidence=readonly_evidence)
     output = settings.get('max_output', 1024)
-    workspace.budget.allow_model(size, output)
+    token_metrics=None
+    if 'proposal_context_policy' in settings:
+        from .context_budget import admission
+        try:
+            token_metrics=admission(messages,schema if structured else {},settings['proposal_context_policy'],output,workspace.budget)
+        except (BudgetExceeded,InputCapacityExceeded) as error:
+            workspace.trace.emit('implementer','proposal_token_admission_rejected',reason=str(error),
+                                 metrics=getattr(error,'context_metrics',None))
+            raise
+    workspace.budget.allow_model(token_metrics['reserved_input_tokens'] if token_metrics else size, output)
+    if token_metrics:
+        workspace.trace.emit('implementer','proposal_token_admitted',**token_metrics)
+    soft,hard=proposal_context_limits(settings)
+    workspace.trace.emit('implementer','proposal_context_admitted',input_bytes=size,
+                         soft_limit_bytes=soft,hard_limit_bytes=hard,
+                         headroom_used_bytes=max(0,size-soft) if soft is not None else 0,
+                         max_output=output,scope='Local byte policy; shared budget reservation still enforced')
     workspace.trace.emit('implementer', 'llm_call_started', step=0, input_bytes=size, strategy='proposal')
     try:
         reply = (model.complete_json(messages, schema=schema, timeout=workspace.budget.remaining, max_output=output)
@@ -274,6 +328,15 @@ def _propose_once(model, workspace, goal, files, evidence, settings, *, dependen
     if not isinstance(reply.content, str) or (reply.tokens is not None and (type(reply.tokens) is not int or reply.tokens < 0)):
         raise ModelError('Invalid proposal reply or token usage')
     workspace.budget.charge_tokens(reply.tokens if reply.tokens is not None else size + len(reply.content.encode()))
+    if token_metrics and isinstance(reply.metadata,dict):
+        actual=reply.metadata.get('prompt_tokens')
+        if type(actual) is int and actual>=0:
+            workspace.trace.emit('implementer','proposal_token_estimate_observed',
+                estimated_input_tokens=token_metrics['input_estimate'],actual_input_tokens=actual,
+                reserved_input_tokens=token_metrics['reserved_input_tokens'],
+                under_reserved=actual>token_metrics['reserved_input_tokens'],
+                estimator=token_metrics['estimator'],model=reply.metadata.get('reported_model',reply.metadata.get('requested_model')),
+                policy_sha256=token_metrics['policy_sha256'],tokenizer_sha256=token_metrics.get('tokenizer_sha256'))
     workspace.budget.check()
     fact = workspace.ledger.add('decision', 'implementer', 'Untrusted patch proposal', reply.content)
     workspace.trace.emit('implementer', 'llm_call_finished', fact_id=fact, tokens=reply.tokens,

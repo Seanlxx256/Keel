@@ -6,11 +6,25 @@ import unittest
 from unittest.mock import patch
 
 from keel.campaign_reporting import FrozenModel
-from keel.core import Budget, BudgetExceeded, Limits, ModelError, ModelTransportError
+from keel.core import Budget, BudgetExceeded, Limits, ModelError, ModelTransportError, ModelCompletionError
 from keel.models import Reply
 
 
 class TransportTests(unittest.TestCase):
+    def test_completion_failure_preserves_safe_diagnostics_without_retry_or_secret_text(self):
+        error=ModelCompletionError('secret provider text',tokens=10518,diagnostics={
+            'finish_reason':'length','refusal_present':False,'content_present':True,
+            'prompt_tokens':9494,'completion_tokens':1024,'max_output':1024,
+            'raw_response':'secret-provider-data','api_key':'secret-key'})
+        provider,model,_,transcript=self.invoke([error],retries=1)
+        with self.assertRaises(ModelCompletionError):self.dispatch(model)
+        self.assertEqual(len(provider.requests),1)
+        rows=[json.loads(line) for line in transcript.read_text().splitlines()]
+        failure=next(row for row in rows if row['event']=='error')
+        self.assertEqual(failure['completion_diagnostics']['finish_reason'],'length')
+        self.assertEqual(failure['tokens'],10518)
+        self.assertNotIn('secret',transcript.read_text())
+
     def invoke(self, replies, *, calls=4, tokens=20000, retries=1):
         class Provider:
             requests = []
@@ -88,6 +102,20 @@ class TransportTests(unittest.TestCase):
             with self.assertRaises(ModelTransportError):
                 model.complete([], timeout=1, max_output=100)
             self.assertEqual(opener.return_value.open.call_count, 1)
+
+    def test_wrapped_transient_transport_and_certificate_failure_are_distinct(self):
+        import os, ssl, urllib.error
+        from keel.models import CompatibleChatModel
+        for reason, expected in ((ConnectionResetError('secret'), ModelTransportError),
+                                 (ssl.SSLEOFError('secret'), ModelTransportError),
+                                 (ssl.SSLCertVerificationError('secret'), ModelError)):
+            with self.subTest(reason=type(reason).__name__), patch.dict(os.environ, {'TEST_PROVIDER_KEY':'fixture'}), patch('keel.models.urllib.request.build_opener') as opener:
+                opener.return_value.open.side_effect=urllib.error.URLError(reason)
+                model=CompatibleChatModel('fixture','https://example.invalid',api_key_env='TEST_PROVIDER_KEY')
+                with self.assertRaises(expected) as caught:model.complete([],timeout=1,max_output=100)
+                self.assertIs(type(caught.exception),expected)
+                self.assertEqual(caught.exception.transport_reason,type(reason).__name__)
+                self.assertNotIn('secret',str(caught.exception))
 
     def test_runtime_binds_retry_to_its_budget(self):
         import sys

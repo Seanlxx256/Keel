@@ -210,6 +210,7 @@ def main():
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--execute', action='store_true')
     parser.add_argument('--network-policy', choices=['no_pipeline'])
+    parser.add_argument('--instance-cache-scope', help='Retain session/recipe-scoped image; fresh containers and test scores')
     parser.add_argument('--timeout', type=int, default=1800,
                         help='Total grading deadline in seconds, including image builds (default: 1800)')
     args = parser.parse_args()
@@ -248,7 +249,7 @@ def main():
         if not args.execute:
             result = {'status': 'plan_only', 'next': 'Invoke official Docker harness with --execute', 'benchmark_ready': False}
         else:
-            result = grade(args.task.resolve(), args.export_dir.resolve(), args.output.resolve(), timeout=args.timeout, network_policy=args.network_policy)
+            result = grade(args.task.resolve(), args.export_dir.resolve(), args.output.resolve(), timeout=args.timeout, network_policy=args.network_policy, instance_cache_scope=args.instance_cache_scope)
     print(json.dumps(result, indent=2))
     return 1 if result.get('status') in ('grading_error','environment_unresolved') else 0
 

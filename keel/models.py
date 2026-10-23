@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import json
+import errno
+import socket
+import ssl
 import http.client
 import math
 import os
@@ -167,7 +170,8 @@ class CompatibleChatModel:
                         'content_present': isinstance(content, str) and bool(content.strip()),
                         'prompt_tokens': counts[0], 'completion_tokens': counts[1],
                         'max_output': max_output}, content=content if isinstance(content, str) else None)
-            metadata = {'provider': 'openai-compatible', 'requested_model': self.model}
+            metadata = {'provider': 'openai-compatible', 'requested_model': self.model,
+                        'prompt_tokens':counts[0], 'completion_tokens':counts[1]}
             for field in ('model', 'system_fingerprint'):
                 if isinstance(result.get(field), str):
                     metadata['reported_' + field] = result[field]
@@ -178,8 +182,11 @@ class CompatibleChatModel:
             raise error_class(f'Model HTTP request failed with status {error.code}') from None
         except (OSError, http.client.IncompleteRead, ValueError, KeyError, TypeError, IndexError, AttributeError) as error:
             reason = error.reason if isinstance(error, urllib.error.URLError) else error
-            error_class = ModelTransportError if isinstance(reason, (TimeoutError, ConnectionError, http.client.RemoteDisconnected, http.client.IncompleteRead)) else ModelError
-            raise error_class(f'Invalid or unavailable model response ({type(error).__name__})', tokens=known_tokens) from None
+            transient = isinstance(reason, (TimeoutError, ConnectionError, http.client.RemoteDisconnected, http.client.IncompleteRead, ssl.SSLEOFError)) or (isinstance(reason, socket.gaierror) and reason.errno == socket.EAI_AGAIN) or (isinstance(reason, OSError) and reason.errno in {errno.ECONNRESET, errno.ECONNABORTED, errno.ETIMEDOUT, errno.EPIPE})
+            error_class = ModelTransportError if transient else ModelError
+            failure = error_class(f'Invalid or unavailable model response ({type(error).__name__}; reason={type(reason).__name__})', tokens=known_tokens)
+            failure.transport_reason = type(reason).__name__
+            raise failure from None
 
 
 def from_config(config: dict) -> Model:

@@ -48,7 +48,26 @@ class FrozenModel:
             try:
                 reply = value(*args, **kwargs)
             except Exception as error:
-                self.record('error', error_type=type(error).__name__)
+                from .core import ModelCompletionError
+                details={}
+                reason=getattr(error,'transport_reason',None)
+                if reason in {'TimeoutError','ConnectionResetError','ConnectionAbortedError','BrokenPipeError','RemoteDisconnected','IncompleteRead','SSLEOFError','gaierror','SSLCertVerificationError','OSError','str'}:
+                    details['transport_reason']=reason
+                if isinstance(error,ModelCompletionError):
+                    source=error.diagnostics if isinstance(error.diagnostics,dict) else {}
+                    safe={}
+                    for key in ('refusal_present','tool_calls_present','assistant_role','content_present'):
+                        if type(source.get(key)) is bool:
+                            safe[key]=source[key]
+                    for key in ('prompt_tokens','completion_tokens','max_output'):
+                        if type(source.get(key)) is int and source[key]>=0:
+                            safe[key]=source[key]
+                    if source.get('finish_reason') in ('stop','length','content_filter','tool_calls','function_call'):
+                        safe['finish_reason']=source['finish_reason']
+                    details['completion_diagnostics']=safe
+                    if type(error.tokens) is int and error.tokens>=0:
+                        details['tokens']=error.tokens
+                self.record('error', error_type=type(error).__name__,**details)
                 raise
             if self.transcript is not None:
                 self.record('response', content=reply.content, tokens=reply.tokens, metadata=getattr(reply, 'metadata', None))

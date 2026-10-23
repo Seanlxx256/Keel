@@ -12,6 +12,24 @@ from keel.decision_guidance import DECISION_QUESTIONS
 
 
 class CriticPromptTests(unittest.TestCase):
+    def test_explicit_role_output_budget_reaches_provider_and_trace(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)
+            with closing(Ledger(root/'ledger.sqlite')) as ledger:
+                ws=Workspace(root,Budget(Limits(max_tokens=100000)),ledger,Trace(root/'trace.jsonl'))
+                controller=RecoveryController({'max_actions':2},ws)
+                answer={'action':'replan',**{field:'unverified' for field in CRITIC_QUESTIONS}}
+                owner=self
+                class Model:
+                    def complete_json(self,*args,**kwargs):
+                        owner.assertEqual(kwargs['max_output'],2048)
+                        return Reply(json.dumps(answer),30)
+                controller.decide(Model(),'Inspect',[],[],{'max_context_bytes':18000,'max_output':4096,'critic_max_output':2048})
+                rows=[json.loads(line) for line in (root/'trace.jsonl').read_text().splitlines()]
+                event=next(row for row in rows if row['event']=='llm_call_started')
+                self.assertEqual(event['max_output'],2048)
+                self.assertEqual(ws.budget.model_calls,1)
+
     def test_complete_decision_still_must_fit_context_and_raw_reply_is_preserved(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

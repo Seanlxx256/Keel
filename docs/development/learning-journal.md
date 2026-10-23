@@ -2222,3 +2222,289 @@ guidance, historical controls and context effects; no universal autonomy claim.
 Commit guidance summarizes generic evidence-context handling, diagnostic guidance
 and successful-continuation documentation, without implying model training or
 hardcoded Astropy repair. Explanation-only turn; no new run or code change.
+
+### 2026-10-23: Prevent unproductive capacity-recovery calls
+
+User requests further repair. Added measured ProposalCapacityExceeded fields for
+actual/fixed-without-writable-source bytes and cap. RecoveryController stops with
+specific trace before paid source reselection when fixed floor already exceeds
+cap; otherwise one unchanged oversized evidence signature cannot repeatedly spend
+selection calls. Fingerprint includes goal, source evidence, dependencies and
+readonly evidence. A changed selection still proceeds normally; no cap expansion,
+source edits, semantic learning or automatic paid retry.56 relevant local tests
+pass including fixed-floor/no-repeat/changed-selection cases. No live cost claim.
+Replayed successful paid proposal from full-repair-v2:46,722bytes and unchanged
+goal/source/permissions/guidance. Initial equality assertion also compared a view
+notice that is not regenerated for already-compacted fitting input; corrected
+comparison explicitly excludes only that notice, not evidence. Artifact
+proposal-recovery-guard-v1/report.json,0model/Docker calls. Existing accepted
+patch/results untouched; no new trial needed to establish these branch behaviors.
+
+User explicitly requests another run. Prepared full-repair-v3 new output, same
+GPT-5.4/20calls/180k/600agent-seconds and original saved failing source, historical
+diagnostic/control bindings verified. No successful v2 repair or answer seeded.
+Current proposal capacity/no-progress implementation hashes recorded. This is
+an assisted reproducibility attempt, not held-out validation or clean ablation.
+Old success/costs untouched; launcher syntax checked, no model/Docker call here.
+User terminal retains credentials; run there, no automatic retry.
+
+Full-repair-v3 checked:unresolved, no new edits/verification rounds.11calls/
+127,357tokens/138.531agent seconds/327.469total,27tools. Recovery correctly emits
+recovery_stopped for repeated identical oversized evidence,5actions used rather
+than claiming total-budget exhaustion. Sizes53,054/52,700/55,548/48,075 against
+48,000 cap, fixed floor38,304. Last selection misses by75bytes, then repeated
+selection triggers guard; floor fits so fixed-floor branch does not apply.
+Official final grading of inherited seed:1F2Ppass,173P2Ppass/1fail, no infra error.
+V2 success does not repeat here; no new code regression is established because
+model paths differ. Guard detects stagnation but supplies no fallback and does
+not prove reduced total cost. Previous duplicate-wrapper compaction is insufficient
+for every sampled handoff. Next inspect request component accounting and general
+lossless serialization/headroom before choosing bounded evidence retrieval;
+do not rerun unchanged, discard failure, loosen audit or provide case repair.
+
+### 2026-10-23: Slight overflow is not evidence irrelevance
+
+User questions hardcap and harmful context pruning. Clarified v3 blocked entire
+request; it did not cut75bytes of evidence.48k is local byte admission policy,
+not model token window or total token budget. Added overflow-only full user-JSON
+layout minification after duplicate-wrapper compaction; source/log string values
+unchanged.53 local tests pass including small-overflow lossless equality. Real
+v3 goal/selection facts31/32 replay48,075->47,999bytes,0provider/Docker calls,
+proposal-lossless-layout-v1/report.json. Only1byte margin: do not present this as
+robust capacity management or launch another trial immediately. Earlier diagnostic
+source omission was explicit; proposal path keeps selected source intact.
+Proposed next policy (not implemented): distinct soft target and bounded hard
+ceiling, output/global-budget reservation, trace any permitted overflow, protected
+current failure/probe/source, historical evidence on demand. Model confidence alone
+cannot authorize expansion or correctness. No claim of token-aware management,
+automatic semantic summarization or adaptive ceiling currently implemented.
+
+### 2026-10-23: Explicit soft target and bounded proposal hard ceiling
+
+Implemented opt-in agent.proposal_context_hard_bytes, max_context_bytes as soft
+target, hard at most110%; absent setting retains prior strict behavior. Existing
+lossless packing runs above soft; complete payload admitted through hard only
+after shared input/output budget reservation. proposal_context_admitted records
+actual bytes/soft/hard/headroom/output. Runtime validates stage/types/bounds;
+SWE CLI exposes --proposal-context-hard-bytes and reports policy. No stage-wide
+unbounded expansion, model self-authorization, token estimator change or evidence
+deletion.57 tests pass including hard rejection, no provider dispatch on global
+budget denial, valid proposal-mode config and trace. Config_for positive/negative
+and v3 saved-request replay checked, artifact proposal-elastic-policy-v1,0calls.
+Prepared full-repair-v4:48000soft/52800hard for proposals, same GPT-5.4/20calls/
+180k/600s and original saved candidate/evidence. Explicit policy change recorded;
+not identical-condition v3 repetition. No model/Docker call from developer process.
+This can absorb minor variation, not guarantee correct diagnosis or repair.
+
+Full-repair-v4 inspected:runtime passed,official_resolved true,no infra/grading
+error.1F2P/174P2P all passed,1verification round; model-generated card.py helper
+normalizes short/fallback exponent representation.7calls/77,917tokens/11tools/
+308.328agent seconds/498.281total.Only1saved-assessment recovery action,no
+reselection loop. Proposal admission47,891bytes against48ksoft/52.8khard,
+headroom_used0: do not attribute success to elastic branch, which this live run
+did not exercise. Compare v2 successful8calls/93,158tokens/19tools descriptively,
+not a causal cost claim. V2/v4 accepted,v1/v3 unresolved; all exposed assisted
+attempts preserved, no first-attempt/generalization claim. Report
+docs/evaluations/full-repair-v4.md. No additional paid rerun; next independent
+checkpoints and explicit boundary tests after freezing current successful artifacts.
+
+Hard-ceiling rationale clarified:52,800=48,000*1.10 bytes, a conservative explicit
+engineering headroom choice to absorb small admission variation without unbounded
+growth.10% is not experimentally optimal, model window-derived or a correctness
+threshold. Distinguish52,800bytes fromKiB and tokens. Latest live success used0
+headroom, so does not validate10% value. Global conservative input/output budget
+reservation still applies. Future tuning should use request-size distributions,
+admission/no-progress/cost/acceptance outcomes and held-out cases rather than
+choose a bound solely to fit a known failed run. Explanation only, no new run.
+
+### 2026-10-23: Token-aware proposal admission replaces ratio-only headroom
+
+User authorizes mature capacity design. Implemented optional proposal_context_policy
+in runtime/SWE CLI: declared model context, per-call estimated input allowance,
+safety reserve and independent byte cap. Admission uses min(model-output,
+per-call,remaining-global-output), then shared allow_model reservation. Global
+depletion is not a source-reselection problem. Legacy behavior remains default;
+ratio policy and token policy mutually exclusive. Scope proposals only, no claim
+of all-role token-aware context. Complete evidence retained, lossless packing kept.
+Estimator supports explicit offline tiktoken encoding file (no downloads/model
+guessing); missing resource/dependency visibly falls back to serializedUTF8 bytes.
+No tokenizer installed here, offline constructor boundary tested with stub. Local
+count/schema framing remain approximate, provider_exact false; official counting
+docs distinguish Responses exact-count API, not added to Chat transport.
+Adapter now preserves actual input/output token metadata; traces record estimator,
+policy/tokenizer hash and predicted-vs-actual input. calibration_report groups
+models/policies/tokenizers, returns p95ratio/maxunderestimate/underreserve counts,
+does not autotune from a single success.73 local tests pass; budget-exploration
+initial package invocation hit preexisting sibling import, rerun with discovery
+passed14; no source change needed. Saved v3 first rejected evidence facts19/20
+replay52,618bytes,77,333alreadyusedtokens,reservedinput53,668,effectiveinput60k;
+fits example policy with unchanged source.0model/Docker calls. Artifact
+token-policy-replay-v1/report.json. Config example model context1,050,000 verified
+against official GPT-5.4 page, input60k/safety1024/byte128KiB operational choices,
+not optimal constants. Documentation docs/proposal-context-budget.md includes
+limits and rollout. No new live repair or demonstrated monetary saving.
+
+Prepared full-repair-v5 fresh outputs with copied frozen context-policy.json,
+same GPT-5.4/20calls/180k/600s and original failing source. Legacy10% flag removed;
+new policy exposed in CLI/report, input/source/control hashes revalidated and
+launcher syntax/CLI help checked. No generation/Docker calls dispatched. New
+policy run is an explicit configuration change, not same-condition replication.
+Operator can inspect example/doc and launch in credential-bearing terminal.
+
+Tokenizer explanation: maps text to model-specific token IDs, so byte count and
+token count differ with language/code/content. Its context-management role is
+estimating request capacity and reserving output/cost budgets, not assessing
+evidence relevance, improving reasoning or proving repair correctness. Current
+proposal fallback is deliberately conservative bytes; correct offline vocabulary
+and dependency are needed for local token estimates. Message/schema framing can
+still differ from provider actual usage, hence safety and calibration records.
+Explanation-only turn, no install/model call or new evaluation.
+
+### 2026-10-23: Investigate integration CI failures; correct stale scope fixtures
+
+User reports Ubuntu/Windows integration exit1 without failing step/stack. GitHub
+API unavailable from tools (connection refused), gh not installed, web fetch also
+unavailable; requested first failed step/log asynchronously. No remote root cause
+claim yet. CI runs real compass validation then unittest discovery. Minimal local
+interpreter validation unavailable for all3optional dependencies. Full regression
+on that interpreter938tests:5errors from tree-sitter missing, plus reproducible
+scope-fixture error and no-retry expectation failure. Alternate user interpreter
+has deps:real tree-sitter/LanceDB pass, MCP fails local PermissionError; this is not
+evidence GitHub shares permission failure.
+
+Identified source contract: writable but unevidenced target is rejected as
+InvalidProposal before any write and may be corrected; workspace-protected target
+is PolicyDenied and never retried. Old tests expected policy error from ordinary
+outside.py. Initially tried terminal rejection for all undeclared targets; full
+suite exposed2existing stale-target recovery regressions, so reverted that change.
+Final correction preserves runtime semantics: evidence-scope test expects bounded
+proposal rejection; policy-no-retry fixture now attempts actual protected test
+file. Added correction test proving only shown file can be written and2calls.
+51 related tests pass;41 dependency-inclusive focused tests had passed before the
+temporary branch was reverted;15 bridge tests pass on minimal interpreter.
+
+Alternate-interpreter full938run overlapped temporary branch:5failures/2errors,
+including reverted-rule2failures, local MCP process denial2cases and3bridge fixture
+failures specific to that interpreter (bridge15pass in minimal). This overlapping
+run is not final-tree validation and must not be presented as fixed full-suite pass.
+No model calls, no weakening test protection, no CI dependency skip or permission
+bypass. Remaining requirement is actual GitHub first failing-step log to confirm
+whether these fixture issues are the remote failure; no remote green run claimed.
+
+### 2026-10-23: Full-repair-v5 failed before token policy execution
+
+Inspected trial/transcript/trace: first Critic request max_output1024 returns
+ModelCompletionError (refused/truncated/incomplete combined).1call/10,518tokens/
+36.312agent seconds,0tools/diagnostic executions/verification rounds/new edits;
+236.906total includes final grading inherited seed,1F2Ppass/173P2Ppass1fail. New
+proposal token policy never reached, so no causal claim against it. Initial
+request34,697serializedbytes; frozen review runner's24kbudget cannot accept it
+without explicit budget planning. Critic hardcaps output1024; possible truncation,
+but actual finish reason lost by recorder, not established.
+Patched FrozenModel to preserve safe typed completion diagnostics/known tokens
+instead of error type only; arbitrary messages/unknownfields/rawerrorcontent not
+logged, no retries introduced.39 local transport/provider/Critic/task tests pass,
+including no-secret/no-retry regression. Previous run's detailed reason cannot be
+recovered retrospectively. Next should isolate bounded Critic output check with
+explicit adequate input budget and record reason, not rerun full failed seed grade
+or increase unrelated input limit. No new provider/Docker call or repair claim.
+
+### 2026-10-23: Correct incomplete successful-baseline freezing claim
+
+User asks whether successful version was frozen and changed functions. Auditv4:
+patch/transcript/ledger/reports/configs/185implementationhashes preserved, but no
+complete archived Keel source bytes at those hashes. A receipt is not a runnable
+source snapshot; acknowledged this engineering gap. V4->v5 changed task runner,
+models/proposals/runtime/pyproject and added context_budget; later recording patch
+changes campaign_reporting. No claim of unchanged success rerun or recoverable
+exactv4 source. First Critic messages/schema/configs/output1024 nevertheless match
+exactly in both transcripts; v5 failed before proposal logic. Cause unknown absent
+finish reason, not evidence newtokenpolicy caused failure. Report
+docs/evaluations/successful-baseline-freeze-audit.md. No rollback/commit/paid call;
+future experiments need actual source snapshots and explicit single-factor changes.
+
+### 2026-10-23: Archive real source and preregister Critic stability samples
+
+User requests continuation to test accidental success concern. Added reusable
+runtime_snapshot create/verify:actual source-byte copies,inventory checks before/
+after copy, no overwrite, rejects drift/missing/added paths; creator environment
+inventory explicit not a locked/rebuilt environment.28 local snapshot/review/
+transport/provider tests pass. Frozen review supports explicit validated per-arm
+request_budget up to80k/180s (default24k/180s preserved), records response metadata.
+No larger generation cap or paid retries introduced.
+Prepared critic-stability-v1:187current implementation files copied into isolated
+runtime,modelconfig and exact firstv5request copied and hash-bound. All3plans run
+snapshotted runner from snapshotted cwd; per sample1call/48k-tokenreservation/60s/
+output1024; total3calls/144k declared tokens/180s request budget, no tools/Docker.
+Predeclared3 independent samples continue after failures and preserve each result;
+rerunning group with prior results is refused, no automatic repeated paid sample.
+This is current-source baseline, not recoveredv4source; firstmessages/schema equal
+to success/failure requests, provider alias/weights still external. Conditions
+change timeout from original to60s, so any timeout is distinct from completion
+failure. Purpose protocol stability/finish reasons only, not semantic correctness
+or fullrepair replication. Snapshot/launcher syntax verified, no provider call.
+Success/failure counts need all3attempts, not stop at first success; smalln cannot
+establish robust generalization. Oldv4 success artifacts andv5 failure retained.
+
+Critic-stability-v1 reviewed all3:protocol completed2,failed1. All actual input
+9494tokens; outputs1013/1024/943, times25.187/24.328/21.406, total31,462tokens.
+Failedsample2finish_reason=length,refusalfalse,contentpresenttrue,partialtext stops
+mid-assessment.1024cap is proven fragile here; not a source-context/token-admission
+failure, and not proof of a general2/3repair rate. Sample1fits by11tokens. Cannot
+retroactively establish v5finishreason, which was lost. Prepared v2 same archived
+187files and exactprompt/schema/config, onlyoutput2048,3independent1calls/60s/48k
+reservations. No provider call here, snapshot/hash and launcher syntax checked.
+V1 shell left cwd inside archive; v2 wrapper uses Push/Pop to preserve caller cwd,
+without changing the model request. Results summary stored separately; no old
+sample overwritten/retried. Document docs/evaluations/critic-output-stability-v1.md.
+Full runtime Critic default remains1024 until explicit later migration; output
+microcheck completion still not semantic diagnosis or end-to-end reproducibility.
+
+### 2026-10-23: Critic output budget clarification and frozen continuation
+V2 three protocol samples completed; output tokens950/1000/963, input9494each, total31395. All below1024, so small sample does not establish causal improvement from2048. V1 failed sample directly showed length at1024. Historical accepted fullrepairv2/v4 also used1024 Critic cap; completion under it was possible, not guaranteed. Output cap limits generation; no posthoc deletion of valid output is proposed. Added explicit critic_max_output1..4096 with shared budget reservation/default1024 preserved;58 related local tests passed, no paid evaluation. Prepared full-repair-v6 actual source snapshot, explicit2048,20calls/180k tokens/600agentseconds; absolute paths and Push/Pop launcher. Snapshot verification and plan-only passed, no provider/Docker run. External task/repo/environment are referenced and separately validated, not fully archived. User asks why truncate: explain finite resource cap versus reliable completion; larger output allowance is mitigation, not proven end-to-end success.
+
+Next-step clarification: inspected full-repair-v6 launcher; frozen runtime verification precedes dispatch, explicit Critic2048 and20calls/180k tokens/600agentseconds retained. User terminal launch is next; no new evaluation result this turn.
+
+### 2026-10-23: Full-repair-v6 interrupted by two infrastructure failures
+Inspected trial.json, model-transcript.jsonl, run/result.json, trace and final-grade build_image.log. Critic completed with explicit2048 and identified lowercase scientific notation / short-string branch as tentative mechanism; no claim of verified diagnosis. Scout retained four source paths over two pages, then fourth provider attempt failed URLError during definition selection. Model transport retries configured0. Runtime77.906seconds,4model attempts,36548tokens,5tools; no new patch (changes.patch empty), diagnostic executions=[],verification rounds0. Final grading independently unavailable: instance image rebuild git clone GitHub failed gnutls_handshake TLS termination, exit128; official_resolved=null, not test failure. Thus this run cannot assess repair reproducibility or2048 end-to-end benefit. Existing generic ModelError recording loses URLError detail; precise API transport cause unknown. Preserve frozen v6 and all paid artifacts. Next engineering priorities: typed safe transport diagnostics/bounded retries and skip redundant grading when no candidate changed; source freeze alone does not archive Docker images. No new code fix or paid rerun in this review.
+
+### 2026-10-23: Bounded transport reuse and unchanged-seed skip implemented
+Reused existing budget-accounted model_transport retries, not a new loop. Provider marks wrapped known reset/timeout/EOF/temporary DNS as transient; captures reason class without raw strings. Certificate failure remains nonretryable. Recorder stores allowlisted reason types. Failed continuation whose full patch equals validated seed now preserves prediction but skips final grading with null official result; changed candidate still grades. New test initially had incomplete mock provenance (missing source_files), corrected fixture;45 relevant local tests then pass. No actual API/Docker validation. Prepared new actual-source full-repair-v7 snapshot, explicit one transport retry, Critic2048 and same20calls/180k/600s budgets. V6 untouched; both changes mean this is an engineering continuation, not single-factor causal study. No claim solves v6 unknown URLError or TLS clone failure; latter can still block a new candidate evaluation.
+
+### 2026-10-23: Full-repair-v7 exposes different wrapped transport cause
+Reviewed trial and transcript: first Critic request failed URLError(reason=FileNotFoundError),1attempt,0reported tokens,18.078agentseconds/22.5total,0tools/probes/verifications/no new patch. Reported0tokens is not proof remote request incurred no usage. Retry did not trigger because FileNotFoundError is deliberately not classified transient; retrying missing resources without diagnosis is unsupported. Unchanged-seed grading skip worked in real launcher, official_resolved=null, no duplicate Docker grade. Error message preserves reason, but transcript reason allowlist omitted FileNotFoundError; note telemetry gap. No file path/errno retained, so missing certificate/proxy/local resource remain hypotheses, not established cause. Different from known output truncation and not evidence model failed source repair. Next diagnostic should inspect actual interpreter SSL/proxy configuration and safely capture errno/resource category without credentials; do not raise model budget or blindly rerun.
+
+### 2026-10-23: Freeze work while isolating connection failure
+Confirmed v4/v7 model.json raw SHA identical a7b3b68dfb969c8e798e2e438ba76dc26925c8137f37c086d2cbd340489760cc, launcher interpreter path identical. Does not prove installed dependencies or process environments unchanged. Added standalone check_model_connection.py, no credentials, no generation, one bounded20s GET via same urllib opener/redirect refusal. Records safe errno/reason/stack function names and certificate path presence, no raw exception/headers/proxy values. Tool process actual interpreter SSL context created; no configured certificate env overrides. Live tool check failed ConnectionRefusedError10061, different from userv7 FileNotFoundError, so cannot diagnose user's process from tool environment. Windows default cafile/capath absent does not itself imply unavailable system trust. Request matching user-terminal no-key check next. Agent/retry implementation and frozen runs untouched. No full rerun or success claim.
+
+### 2026-10-23: User-process connection answered HTTP401
+User no-key GET returned401, SSL context created/no CA overrides; prior FileNotFoundError not reproduced. This verifies current unauthenticated HTTP response only, not key validity/model completion or historical root cause. Tool/user proxy scheme sets differ; cannot infer specific proxy fault. Prepared full-repair-v7/repeat-1.ps1 using byte-identical v7 snapshot/config/limits, only output path astropy-full-repair-v7-repeat-1 changes. Old failure preserved, snapshot verified before dispatch by same launcher. No implementation changes, automatic extra attempts or causal success claim.
+
+### 2026-10-23: Frozen v7 repeat-1 completed accepted repair
+Read trial, UTF8 transcript, diagnostic execution, changes.patch and official report. Runtime passed/official_resolved=true,1F2P and174P2P passed/no failures; patch applied.9calls,99817tokens,13tools,346.016agentseconds/565.265total,1diagnostic execution and1verification round. No error/transport retry events in transcript; success does not validate retry recovery or explain previous FileNotFoundError. Model changed _format_float using shared normalize on short/fallback representations, including uppercase exponent; no developer patch to task code. Same v7 frozen implementation/config as failed first attempt, only output directory changed. This demonstrates accepted repair on this exposed assisted continuation, not stable success rate/generalization or original-condition benchmark; benchmark_ready=false. Snapshot and all artifacts retained. Reviewer first script used Windows default GBK and failed reading transcript; reread explicitlyUTF8, no experiment cost incurred. Next meaningful stability check is another identical frozen run without code changes, then cross-case validation rather than more mechanisms.
+
+### 2026-10-23: Preregister unchanged v7 repeat-2
+User requests continuation after accepted repeat-1. Prepared repeat-2.ps1 by replacing only output directory in original v7 launcher; snapshot inventory verified and new result path absent. Same frozen implementation/config/model alias/limits and existing one-transport-retry policy. One additional attempt only, no automatic group loop; preserve prior error and accepted run, count all attempts when assessing reliability. No paid call or new repair result this turn. Repeated exposed assisted task does not establish cross-case quality.
+
+### 2026-10-23: Unchanged v7 repeat-2 runtime accepted, duplicate final grade unavailable
+Read trial/result/transcript and raw verification official report: runtime passed, one diagnostic execution,1verification round with official harness1F2P+174P2P passed.7calls/77265tokens/11tools/307.063agentseconds/351.047total. No transport error/retry events. Model produced distinct smaller patch falling back to16G for lowercase scientific strings. Subsequent independent final-grade rebuilt instance image and git clone failed gnutls_handshake TLS termination exit128; top-level grading_error and official_resolved=null retained. Do not call whole pipeline passed or model repair failed; runtime official acceptance is real and separately evidenced. Both completed-model repeats accepted at runtime, first final gradepassed/second unavailable; initial v7 connection failure remains in denominator. Avoid further paid Agent rerun; next isolate duplicated grading image lifecycle/reuse, preserve source/config frozen while inspecting existing official evidence.
+
+### 2026-10-23: Reuse existing recipe cache by default, grade-only recovery
+Located retention mechanism already implemented but disabled in v7 launch (retain_instance_image=false). Internal verification cleanup retained0images; final rebuilt and clone TLS failed. Changed live future task default to True with explicit --no-retain-instance-image optout, preserving scoped recipe cache and fresh test containers/scores. Bridge standalone grade accepts cache scope.38local cache/bridge/task tests passed before replacing explicit-retention test with default-retention coverage; rerun pending below. Prepared frozen repeat2-grade-recovery-v1 runtime/launcher using original hash-validated prediction export, fresh600s grading-only output and unique retained cache scope; no model calls, original failure unchanged. Cannot resurrect removed prior image or guarantee clone succeeds. No paid Agent rerun.
+Default-retention regression rerun: all38 cache/bridge/task checks passed. No actual Docker run from tool process; user grade-only execution remains pending.
+
+### 2026-10-23: Repeat2 independent grade-only recovery passed
+Inspected recovery grading.json/raw official report/harness log. Graded resolved=true,1F2P+174P2P passed,returncode0, no error,reportsha28193db849ef7ec132ecd498baa6f58b98a14840f44a740f6db649e9b6449b62. Command used original repeat2 predictions with frozen recovery harness adapter, no Agent/model dispatch.167.99s instance execution; cache_levelinstance,cleanup removed0/unremoved1 confirms retained image, not yet a second-run cache-hit observation. Original repeat2 grading_error left intact; append recovery not replacement first-attempt outcome. Both completed model continuations now have independent official acceptance (second via grade-only retry); original v7 model transport failure and repeated network/build costs remain recorded. Not cross-case generalization or unconditional reliability. Next priority consolidate accepted baseline and evaluate another held-out failure, rather than more same-case paid reruns.
+
+### 2026-10-23: Clarify first success versus latest accepted continuation
+Explanation-only comparison: first acceptedv2 and recentv7 repeats all repair same exposed saved-source task, not fresh generalization. V2 historical success lacks full executable source archive; v7 actual implementation snapshot. V7 uses explicitCritic2048, newer proposal context policy and optional one budget-accounted transport retry; cannot isolate contributions from cross-version outcomes. Repeat1 and2 use identical frozenv7 configuration, generate different accepted patches and costs; repeat2 final grade initially networkfailed then separate grade-only recovery retained image. Image retention change belongs recovery/future runner, not originalv7 inference. Do not present recovered grade as uninterrupted end-to-end success or credit retry (no retry events).
+
+### 2026-10-23: Attribute observed v7 repeat cost difference to concrete calls
+Compared UTF8 per-request transcripts. Repeat1 selected card/header/verify, file selection3calls+definition selection2calls; repeat2 selected card only, file2calls+definition1call. Critic1/probe2/proposal1 identical counts; no network retries. Totals99817 vs77265 (-22552,22.59percent); input/output [(95787, 4030), (73655, 3610)]. Extra repeat1 catalog7402 and definition9183 total16585tokens,73.54percent of difference; remaining5967 from different prompt/output lengths in aligned calls. Both generate one probe and one patch/one verification round. Output decreased only small amount relative input; no implementation update or persistent learning between frozen attempts. Cannot causally explain page count from scope alone without replaying pagination; note observed narrower selections and fewer pages, not guaranteed optimization.
+Clarification: observed v7 cost reduction includes model sampling/trajectory variation; identical code/config does not guarantee identical selections or costs. Two accepted model continuations support reproducibility on this assisted case but do not estimate stable success rate or prove learned efficiency. Separate model repair acceptance, infrastructure failures and cost distribution; no new evaluation this turn.
+
+### 2026-10-23: Commit scope and unresolved remote integrations
+User requests commit message, not staging/commit execution. Inspected workflow: checkoutv4/setup-pythonv5/upload-artifactv4; installs extras then compass validate then unittest. Supplied annotations contain exit1 and Node20 forced24 deprecation warning only, no failed step stack/report. Cannot attribute exit1 to deprecation warning or claim CI fixed/green. Requested first failed step output/Actions link asynchronously. No workflow version bump without verified compatibility/release details, no blind dependency change. Commit description should cover frozen runtime replay, context/output budgeting, typed transport handling and scoped image retention; avoid claiming remote integration fix.
+
+### 2026-10-23: Regression-stage CI narrowed, local full suite and fixture repair
+User confirms both remote jobs fail Run regression suite, not integration probe/action setup. Requested remote FAIL/ERROR traceback; still unavailable. Ran exact unittest discover command with user interpreter:947tests/149.212s,3failures+2errors+2skips. Three bridge cases fail pre-harness because mocked classic dataset used actual installed harness version; four relevant mock cases (including exit0/no-report false-positive risk) now explicitly bind swebench3.0.0. Explicit newharness5.0.2 rejection test unchanged, production validator unchanged. All15bridge tests pass under user interpreter after fix. Remaining local MCP client/SDK cases fail PermissionErrorWinError5 in restricted subprocess setup; do not waive tests or infer remote cause. Full log.keel/ci-regression-local-review-v1.log preserved; no full post-fix run claimed, no CI green claim. Need remote traceback to match failure class.

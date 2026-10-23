@@ -35,6 +35,11 @@ def execute(plan_path, output, *, model=None):
         if file_hash(Path(path)) != expected:
             raise ValueError('Frozen input changed: ' + path)
     requests = plan['requests']
+    request_budget=plan.get('request_budget',{'max_tokens':24000,'max_wallclock':180})
+    if (not isinstance(request_budget,dict) or set(request_budget)!={'max_tokens','max_wallclock'}
+            or type(request_budget['max_tokens']) is not int or not 1<=request_budget['max_tokens']<=80000
+            or type(request_budget['max_wallclock']) is not int or not 1<=request_budget['max_wallclock']<=180):
+        raise ValueError('Frozen request_budget permits 1..80000 tokens and 1..180 seconds')
     arms = [r['arm'] for r in requests]
     contract = plan.get('response_contract', 'critic')
     if contract not in {'critic', 'diagnostic_handoff', 'diagnostic_answer'}:
@@ -86,19 +91,20 @@ def execute(plan_path, output, *, model=None):
                 raise ValueError('Failed attempt cannot be reused')
             print('[Review] reuse '+name, flush=True)
         else:
-            budget = Budget(Limits(max_model_calls=1, max_tokens=24000,
-                                  max_tool_calls=1, max_wallclock=180))
+            budget = Budget(Limits(max_model_calls=1, max_tokens=request_budget['max_tokens'],
+                                  max_tool_calls=1, max_wallclock=request_budget['max_wallclock']))
             record = {'arm': name, 'status': 'pending', 'scope': plan['scope']}
             size = len(json.dumps(request['messages']).encode()) + len(json.dumps(request['schema']).encode())
             maximum = request.get('max_output', 1024)
             budget.allow_model(size, maximum)
             record['budget'] = budget.report()
             atomic_json(result_path, record)
-            print('[Review] '+name+' one call; timeout 180s', flush=True)
+            print('[Review] '+name+' one call; timeout '+str(request_budget['max_wallclock'])+'s', flush=True)
             try:
                 reply = model.complete_json(request['messages'], schema=request['schema'],
                                             timeout=budget.remaining, max_output=maximum)
                 record['raw_response'] = reply.content
+                record['response_metadata'] = getattr(reply,'metadata',None)
                 budget.charge_tokens(reply.tokens if reply.tokens is not None else size+len(reply.content.encode()))
                 budget.check()
                 value = json.loads(reply.content)

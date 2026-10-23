@@ -125,7 +125,7 @@ class SwebenchBridgeTests(unittest.TestCase):
             root = Path(temp)
             _, run = self.fixture(root)
             export_prediction(root/'task', run, root/'export', 'keel')
-            with patch('examples.swebench_bridge.run_harness', return_value=SimpleNamespace(returncode=0)):
+            with patch('examples.swebench_bridge.importlib.metadata.version', return_value='3.0.0'), patch('examples.swebench_bridge.run_harness', return_value=SimpleNamespace(returncode=0)):
                 result = grade(root/'task', root/'export', root/'grading')
             self.assertEqual(result['status'], 'grading_error')
             self.assertIsNone(result['official_resolved'])
@@ -134,7 +134,7 @@ class SwebenchBridgeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp); _, run = self.fixture(root)
             export_prediction(root/'task', run, root/'export', 'keel')
-            with patch('examples.swebench_bridge.run_harness', return_value=SimpleNamespace(returncode=0)) as harness:
+            with patch('examples.swebench_bridge.importlib.metadata.version', return_value='3.0.0'), patch('examples.swebench_bridge.run_harness', return_value=SimpleNamespace(returncode=0)) as harness:
                 result = grade(root/'task', root/'export', root/'grading', instance_cache_scope='a'*32)
             command = harness.call_args.args[0]
             self.assertEqual(command[command.index('--cache_level')+1], 'instance')
@@ -148,7 +148,7 @@ class SwebenchBridgeTests(unittest.TestCase):
             root = Path(temp)
             _, run = self.fixture(root)
             export_prediction(root/'task', run, root/'export', 'keel')
-            with patch('examples.swebench_bridge.run_harness', side_effect=KeyboardInterrupt):
+            with patch('examples.swebench_bridge.importlib.metadata.version', return_value='3.0.0'), patch('examples.swebench_bridge.run_harness', side_effect=KeyboardInterrupt):
                 with self.assertRaises(KeyboardInterrupt):
                     grade(root/'task', root/'export', root/'grading')
             result = json.loads((root/'grading/grading.json').read_text())
@@ -176,7 +176,7 @@ class SwebenchBridgeTests(unittest.TestCase):
                 report.parent.mkdir(parents=True)
                 report.write_text(json.dumps({'org__lib-1': {'resolved': True, 'patch_successfully_applied': True}}))
                 return SimpleNamespace(returncode=0)
-            with patch('examples.swebench_bridge.run_harness', side_effect=harness):
+            with patch('examples.swebench_bridge.importlib.metadata.version', return_value='3.0.0'), patch('examples.swebench_bridge.run_harness', side_effect=harness):
                 result = grade(root/'task', root/'export', root/'grading')
             self.assertEqual(result['status'], 'graded')
             self.assertTrue(result['official_resolved'])

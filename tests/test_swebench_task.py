@@ -13,6 +13,21 @@ from keel.runtime import validate
 
 
 class SwebenchTaskTests(unittest.TestCase):
+    def test_failed_unchanged_seed_skips_grade_but_changed_candidate_is_graded(self):
+        from examples.run_swebench_task import execute
+        from types import SimpleNamespace
+        for current in ('seed','changed'):
+            with self.subTest(current=current), tempfile.TemporaryDirectory() as temp:
+                root=Path(temp);row=self.task(root);reference=self.policy_reference(root,row)
+                repo=root/'repo';repo.mkdir()
+                context={'verification':[{'returncode':1}], 'changes':{}, 'provenance':{'source_files':{}}}
+                with patch('examples.run_swebench_task.subprocess.run',return_value=SimpleNamespace(stdout='3.0.0')), patch('examples.run_swebench_task.prepare_snapshot',return_value=repo), patch('keel.saved_repair.load_saved_repair',return_value=('seed',context)), patch('examples.run_swebench_task.run',return_value={'status':'failed','budget':{}}), patch('examples.run_swebench_task.export_prediction'), patch('keel.swebench.workspace_patch',return_value=current), patch('examples.run_swebench_task.grade',return_value={'status':'graded','official_resolved':False}) as grade:
+                    report=execute(root,root/'task',reference,{'name':'test'},'python',root/'trial',resume_snapshot=root/'snapshot',saved_repo=repo)
+                self.assertEqual(grade.call_count,int(current!='seed'))
+                if current=='seed':
+                    self.assertIsNone(report['official_resolved'])
+                    self.assertEqual(report['final_grading']['status'],'skipped_unchanged_failed_seed')
+
     def test_diagnostic_execution_is_forwarded_in_saved_continuation(self):
         from examples.run_swebench_task import execute
         from types import SimpleNamespace
@@ -57,7 +72,7 @@ class SwebenchTaskTests(unittest.TestCase):
                 report=execute(root,root/'task',reference,{'name':'test'},'python',root/'trial',diagnostic_handoff=True)
             self.assertTrue(agent.call_args.args[0]['recovery']['diagnostic_handoff'])
             self.assertTrue(report['diagnostic_handoff'])
-    def test_retained_image_scope_shared_by_verifier_and_final_grading(self):
+    def test_default_retained_image_scope_shared_by_verifier_and_final_grading(self):
         from examples.run_swebench_task import execute
         from types import SimpleNamespace
         with tempfile.TemporaryDirectory() as temp:
@@ -68,7 +83,7 @@ class SwebenchTaskTests(unittest.TestCase):
                     patch('examples.run_swebench_task.run', return_value={'status': 'passed', 'budget': {}}) as agent, \
                     patch('examples.run_swebench_task.export_prediction'), \
                     patch('examples.run_swebench_task.grade', return_value={'status': 'graded', 'official_resolved': True}) as grade:
-                report = execute(root, root/'task', reference, {'name': 'test'}, 'python', root/'trial', retain_instance_image=True)
+                report = execute(root, root/'task', reference, {'name': 'test'}, 'python', root/'trial')
             scope = report['instance_cache_scope']
             self.assertEqual(len(scope), 32)
             command = agent.call_args.args[0]['acceptance'][0]

@@ -10,6 +10,26 @@ from keel.runtime import run
 
 
 class ProposalTests(unittest.TestCase):
+    def test_token_policy_integration_preserves_shared_accounting(self):
+        self.config['agent']['proposal_context_policy']={'model_context_tokens':32768,
+            'max_input_tokens':16000,'safety_tokens':256,'max_request_bytes':24000}
+        result,_=self.execute([{'path':'app.py','old':'VERSION = 1','new':'VERSION = 2'}])
+        self.assertEqual(result['status'],'passed')
+        rows=[json.loads(line) for line in (self.root/'.keel/run/trace.jsonl').read_text().splitlines()]
+        admitted=next(row for row in rows if row['event']=='proposal_token_admitted')
+        self.assertEqual(admitted['estimator'],'utf8_bytes_conservative')
+        self.assertEqual(admitted['output_reserved_tokens'],1024)
+        self.assertFalse(admitted['provider_exact'])
+
+    def test_explicit_proposal_headroom_is_validated_and_admission_is_traced(self):
+        self.config['agent']['proposal_context_hard_bytes']=13200
+        result,_=self.execute([{'path':'app.py','old':'VERSION = 1','new':'VERSION = 2'}])
+        self.assertEqual(result['status'],'passed')
+        rows=[json.loads(line) for line in (self.root/'.keel/run/trace.jsonl').read_text().splitlines()]
+        admission=next(row for row in rows if row['event']=='proposal_context_admitted')
+        self.assertEqual(admission['soft_limit_bytes'],12000)
+        self.assertEqual(admission['hard_limit_bytes'],13200)
+
     def test_bugfix_policy_rejects_comment_only_before_writes_or_verification(self):
         self.config['agent']['require_python_ast_change']=True
         result,_=self.execute([{'path':'app.py','old':'VERSION = 1',

@@ -10,6 +10,7 @@ requires-python = ">=3.11"
 dependencies = []
 
 [project.optional-dependencies]
+token-counting = ["tiktoken>=0.7,<1"]
 compass = ["tree-sitter>=0.25,<0.27", "tree-sitter-python>=0.23,<0.26"]
 compass-vectors = ["lancedb>=0.20,<1"]
 validation = ["mcp>=1.28,<2"]

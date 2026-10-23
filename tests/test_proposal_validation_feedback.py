@@ -13,13 +13,16 @@ class ProposalValidationFeedbackTests(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         root = Path(temp.name)
         (root/'app.py').write_bytes(b'VALUE = 1\nOTHER = 3\n')
+        if policy:
+            (root/'tests').mkdir()
+            (root/'tests/test_app.py').write_bytes(b'VALUE = 1\n')
         class Model:
             def __init__(self):
                 self.messages = []
             def complete_json(self, messages, **kwargs):
                 self.messages.append(messages)
                 bad = len(self.messages) == 1 or repeat_bad
-                value = {'summary': 'update', 'edits': [{'path': 'outside.py' if policy else 'app.py',
+                value = {'summary': 'update', 'edits': [{'path': 'tests/test_app.py' if policy else 'app.py',
                          'old': 'VALUE = 1\n', 'new': 'VALUE = 2' if bad else 'VALUE = 2\n'}]}
                 if bad and oversized:
                     value['summary'] = 'invalid response padding ' * 1000

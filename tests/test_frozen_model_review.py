@@ -9,6 +9,32 @@ from keel.models import Reply
 
 
 class FrozenReviewTests(unittest.TestCase):
+    def test_explicit_request_budget_preserves_one_call_limit_and_timeout(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);path,fields=self.prepare(root);plan=json.loads(path.read_text())
+            plan['requests']=plan['requests'][:1]
+            plan['requests'][0]['messages'][0]['content']='x'*26000
+            plan['request_budget']={'max_tokens':48000,'max_wallclock':60}
+            path.write_text(json.dumps(plan));path.with_suffix('.sha256').write_text(file_hash(path))
+            owner=self
+            class Model:
+                calls=0
+                def complete_json(self,*args,**kwargs):
+                    self.calls+=1;owner.assertLessEqual(kwargs['timeout'],60)
+                    return Reply(json.dumps({f:'stop' if f=='action' else 'unverified' for f in fields}),30)
+            model=Model();report=execute(path,root/'out',model=model)
+            self.assertEqual(model.calls,1)
+            self.assertEqual(report['records'][0]['budget']['limits']['max_tokens'],48000)
+
+    def test_invalid_request_budget_rejected_before_provider_call(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);path,_=self.prepare(root);plan=json.loads(path.read_text())
+            plan['request_budget']={'max_tokens':80001,'max_wallclock':60}
+            path.write_text(json.dumps(plan));path.with_suffix('.sha256').write_text(file_hash(path))
+            with self.assertRaisesRegex(ValueError,'request_budget'):
+                execute(path,root/'out',model=object())
+            self.assertFalse((root/'out').exists())
+
     def test_completion_rejection_preserves_partial_content_and_output_setting(self):
         from keel.core import ModelCompletionError
         with tempfile.TemporaryDirectory() as temp:

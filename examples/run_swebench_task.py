@@ -76,7 +76,7 @@ def trial_budget(overrides=None, *, profile='standard'):
     return limits
 
 
-def config_for(task, task_dir, output, model_config, harness_python, environment_overlay_path=None, policies=None, *, budget_limits=None, budget_profile='standard'):
+def config_for(task, task_dir, output, model_config, harness_python, environment_overlay_path=None, policies=None, *, budget_limits=None, budget_profile='standard', proposal_context_hard_bytes=None, proposal_context_policy=None, critic_max_output=None):
     verifier = Path(__file__).with_name('swebench_verify_workspace.py').resolve()
     config = {'mode': 'localized-proposal', 'goal': task['problem_statement'], 'model': model_config,
             'agent': {'max_steps': 12, 'max_context_bytes': 48000, 'max_output': 4096, 'require_change': True,
@@ -90,6 +90,16 @@ def config_for(task, task_dir, output, model_config, harness_python, environment
             'acceptance': [[sys.executable, str(verifier), '--task', str(task_dir.resolve()),
                             '--output-root', str((output/'verifications').resolve()),
                             '--harness-python', str(Path(harness_python).resolve())]]}
+    if critic_max_output is not None:
+        if type(critic_max_output) is not int or not 1<=critic_max_output<=4096:
+            raise ValueError('critic_max_output must be 1..4096')
+        config['agent']['critic_max_output']=critic_max_output
+    if proposal_context_policy is not None:
+        config['agent']['proposal_context_policy']=proposal_context_policy
+    if proposal_context_hard_bytes is not None:
+        config['agent']['proposal_context_hard_bytes']=proposal_context_hard_bytes
+    from keel.proposals import proposal_context_limits
+    proposal_context_limits(config['agent'])
     if environment_overlay_path is not None:
         config['acceptance'][0].extend(['--environment-overlay', str(environment_overlay_path.resolve())])
     for key,value in (policies or {}).items():
@@ -97,8 +107,14 @@ def config_for(task, task_dir, output, model_config, harness_python, environment
     return config
 
 
-def execute(root, task_dir, reference_dir, model_config, harness_python, output, *, mcp_config=None, localization_tool_steps=6, require_external_tool=False, local_exploration=False, resume_snapshot=None, saved_repo=None, diagnostic_inspection=False, recovery_progress=False, targeted_source_review=False, diagnosis_supervision=False, budget_driven_recovery=False, record_model_transcript=False, infrastructure_guard=False, model_transport_retries=0, retain_instance_image=False, diagnostic_handoff=False, budget_limits=None, budget_profile='standard', diagnostic_report=None, diagnostic_execution=None, comparison_plan=None, comparison_report=None):
+def execute(root, task_dir, reference_dir, model_config, harness_python, output, *, mcp_config=None, localization_tool_steps=6, require_external_tool=False, local_exploration=False, resume_snapshot=None, saved_repo=None, diagnostic_inspection=False, recovery_progress=False, targeted_source_review=False, diagnosis_supervision=False, budget_driven_recovery=False, record_model_transcript=False, infrastructure_guard=False, model_transport_retries=0, retain_instance_image=True, diagnostic_handoff=False, budget_limits=None, budget_profile='standard', diagnostic_report=None, diagnostic_execution=None, comparison_plan=None, comparison_report=None, proposal_context_hard_bytes=None, proposal_context_policy=None, critic_max_output=None):
     started = time.monotonic()
+    if critic_max_output is not None and (type(critic_max_output) is not int or not 1<=critic_max_output<=4096):
+        raise ValueError('critic_max_output must be 1..4096')
+    from keel.proposals import proposal_context_limits
+    proposal_context_limits({'max_context_bytes':48000,
+        **({'proposal_context_hard_bytes':proposal_context_hard_bytes} if proposal_context_hard_bytes is not None else {}),
+        **({'proposal_context_policy':proposal_context_policy} if proposal_context_policy is not None else {})})
     from keel.diagnostic_execution import validate_probe_config
     validate_probe_config(diagnostic_execution)
     if type(model_transport_retries) is not int or not 0 <= model_transport_retries <= 2:
@@ -203,6 +219,8 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
               'model_transport_retries': model_transport_retries,
               'instance_cache_scope': instance_cache_scope,
               'limits': limits,
+              'critic_max_output': critic_max_output or 1024,
+              'proposal_context_policy': proposal_context_policy or {'soft_bytes':48000,'hard_bytes':proposal_context_hard_bytes or 48000},
               'budget_profile': budget_profile,
               'recovery_limits': {'max_actions': 12 if budget_profile == 'extended' else 6,
                                   'verification_repair_attempts': 8 if budget_profile == 'extended' else 3,
@@ -264,7 +282,7 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
             if load_comparison_evidence(comparison_plan, comparison_report, repo) != comparison_evidence:
                 raise ValueError('Prepared source differs from controlled comparison candidate')
         config = config_for(task, task_dir, output, model_config, harness_python, overlay_path, policies,
-                            budget_limits=limits, budget_profile=budget_profile)
+                            budget_limits=limits, budget_profile=budget_profile, proposal_context_hard_bytes=proposal_context_hard_bytes, proposal_context_policy=proposal_context_policy, critic_max_output=critic_max_output)
         if instance_cache_scope is not None:
             config['acceptance'][0].extend(['--instance-cache-scope', instance_cache_scope])
         config['verification_infrastructure_retries'] = 1 if infrastructure_guard else 0
@@ -309,6 +327,13 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
         if (result.get('failure') or {}).get('category') == 'environment_blocked':
             report['status'] = 'environment_blocked'
             return report
+        if continuation and result['status'] != 'passed':
+            from keel.swebench import workspace_patch
+            if workspace_patch(repo, task) == seed_patch:
+                report.update(status='unresolved', official_resolved=None,
+                    final_grading={'status':'skipped_unchanged_failed_seed',
+                        'scope':'No new candidate; historical seed outcome is not a fresh evaluation.'})
+                return report
         if infrastructure_guard:
             from keel.verification_infrastructure import docker_health
             report['docker_before_final_grade'] = docker_health()
@@ -356,8 +381,11 @@ def main():
     parser.add_argument('--record-model-transcript', action='store_true', help='Persist full model messages and replies locally; excludes provider headers/config')
     parser.add_argument('--infrastructure-guard', action='store_true', help='Check Docker server before inference; retry unavailable acceptance once on the same candidate')
     parser.add_argument('--model-transport-retries', type=int, choices=range(3), default=0, help='Explicit transient provider retries per call, charged to shared budgets; requires transcript')
-    parser.add_argument('--retain-instance-image', action='store_true', help='Retain recipe-scoped instance images within this trial; fresh test containers and scores')
+    parser.add_argument('--retain-instance-image', action=argparse.BooleanOptionalAction, default=True, help='Retain recipe-scoped instance images within this trial; fresh test containers and scores')
     parser.add_argument('--diagnostic-handoff', action='store_true', help='Review actual localized edit scope against the pending Critic check before planning writes')
+    parser.add_argument('--critic-max-output',type=int,help='Explicit Critic role output budget,1..4096; legacy default unchanged')
+    parser.add_argument('--proposal-context-policy',type=Path,help='Explicit JSON token/context/output/safety and independent byte policy for proposals')
+    parser.add_argument('--proposal-context-hard-bytes',type=int, help='Explicit proposal-only hard ceiling; 48000 byte soft target, at most 52800 hard bytes')
     parser.add_argument('--max-model-calls', type=int)
     parser.add_argument('--budget-profile', choices=tuple(BUDGET_PROFILES), default='standard',
                         help='Explicit extended exploration budget; default limits remain unchanged')
@@ -382,6 +410,13 @@ def main():
         ('max_wallclock', args.max_agent_seconds)) if value is not None}, profile=args.budget_profile)
     if args.require_external_tool and not args.mcp_config:
         parser.error('--require-external-tool requires --mcp-config')
+    proposal_policy=json.loads(args.proposal_context_policy.read_text(encoding='utf-8')) if args.proposal_context_policy else None
+    from keel.proposals import proposal_context_limits
+    proposal_context_limits({'max_context_bytes':48000,
+        **({'proposal_context_hard_bytes':args.proposal_context_hard_bytes} if args.proposal_context_hard_bytes is not None else {}),
+        **({'proposal_context_policy':proposal_policy} if proposal_policy is not None else {})})
+    if args.critic_max_output is not None and not 1<=args.critic_max_output<=4096:
+        parser.error('--critic-max-output must be1..4096')
     check_reference(args.task, args.reference_grade)
     if bool(args.resume_snapshot) != bool(args.saved_repo):
         parser.error('--resume-snapshot and --saved-repo must be supplied together')
@@ -390,7 +425,7 @@ def main():
         load_saved_repair(args.task, args.reference_grade, args.resume_snapshot, args.saved_repo)
     if not args.execute:
         print(json.dumps({'status': 'plan_only', 'instance_id': verify_task(args.task)['instance_id'], 'max_model_calls': limits['max_model_calls'],
-                          'max_agent_seconds': limits['max_wallclock'], 'limits': limits,
+                          'max_agent_seconds': limits['max_wallclock'], 'limits': limits, 'critic_max_output':args.critic_max_output or 1024, 'proposal_context_policy':proposal_policy or {'soft_bytes':48000,'hard_bytes':args.proposal_context_hard_bytes or 48000},
                           'max_verification_rounds': (limits['max_model_calls'] + 1 if args.budget_driven_recovery
                                                      else 9 if args.budget_profile == 'extended' else 4),
                           'budget_driven_recovery': args.budget_driven_recovery,
@@ -415,7 +450,7 @@ def main():
                      saved_repo=args.saved_repo.resolve() if args.saved_repo else None,
                      diagnostic_inspection=args.diagnostic_inspection == 'required',
                      recovery_progress=args.recovery_progress, targeted_source_review=args.targeted_source_review,
-                     diagnosis_supervision=args.diagnosis_supervision, budget_driven_recovery=args.budget_driven_recovery, record_model_transcript=args.record_model_transcript, infrastructure_guard=args.infrastructure_guard, model_transport_retries=args.model_transport_retries, retain_instance_image=args.retain_instance_image, diagnostic_handoff=args.diagnostic_handoff, budget_limits=limits, budget_profile=args.budget_profile, diagnostic_report=args.diagnostic_report.resolve() if args.diagnostic_report else None, diagnostic_execution=json.loads(args.diagnostic_probe_config.read_text(encoding='utf-8')) if args.diagnostic_probe_config else None, comparison_plan=args.comparison_plan.resolve() if args.comparison_plan else None, comparison_report=args.comparison_report.resolve() if args.comparison_report else None)
+                     diagnosis_supervision=args.diagnosis_supervision, budget_driven_recovery=args.budget_driven_recovery, record_model_transcript=args.record_model_transcript, infrastructure_guard=args.infrastructure_guard, model_transport_retries=args.model_transport_retries, retain_instance_image=args.retain_instance_image, diagnostic_handoff=args.diagnostic_handoff, budget_limits=limits, budget_profile=args.budget_profile, diagnostic_report=args.diagnostic_report.resolve() if args.diagnostic_report else None, diagnostic_execution=json.loads(args.diagnostic_probe_config.read_text(encoding='utf-8')) if args.diagnostic_probe_config else None, comparison_plan=args.comparison_plan.resolve() if args.comparison_plan else None, comparison_report=args.comparison_report.resolve() if args.comparison_report else None, proposal_context_hard_bytes=args.proposal_context_hard_bytes, proposal_context_policy=proposal_policy, critic_max_output=args.critic_max_output)
     print(json.dumps({key: value for key, value in report.items() if key != 'implementation'}, indent=2))
     return 0 if (report['official_resolved'] is True and
                  (not args.budget_driven_recovery or report.get('runtime_status') == 'passed')) else 1

@@ -97,7 +97,92 @@ python -m unittest tests.test_atomic_progress tests.test_index_checkpoints tests
 
 ## Shared runtime experience (2026-10-19)
 
+### Runnable source baseline and independent repetitions (2026-10-23)
+
+runtime_snapshot.create_snapshot copies every implementation_hashes entry as raw
+bytes into an isolated runtime tree, then checks source stability and verifies the
+copy; verify_snapshot rejects changed/missing/added runtime files. Snapshot output
+must be new; no overwrite. Creator dependency versions/interpreter are observations,
+not a recreated environment lock or frozen remote model. Prompts/configs must also
+be copied and hash-bound; never archive arbitrary credential files. Execute from
+snapshot root with the snapshotted runner, not the live workspace. Tests cover
+CRLF preservation, independence from live edits and changed/added-file rejection.
+run_frozen_model_review supports explicit bounded request_budget (max80k tokens,
+180s;1call per arm) so a known34k-byte prompt is not rejected by old24k default.
+Critic stability study uses3predeclared independent samples, each48k tokens/60s,
+same1024output; failed samples retained, no automatic retry or optional stopping.
+Protocol completion is not semantic diagnosis or end-to-end repair reproducibility.
+
+### Preserve completion failure diagnostics (2026-10-23)
+
+full-repair-v5 stopped in the first Critic call before proposal/token-policy logic.
+Adapter raises ModelCompletionError with finish reason, refusal/tool flags, usage
+and output cap, but FrozenModel formerly wrote only exception type, losing cause.
+FrozenModel now records a typed allowlist of these diagnostics plus known tokens;
+never serialize arbitrary provider error text, raw exception objects or unknown
+diagnostic fields. Propagate the same exception; no automatic paid retry. Test:
+test_model_transport.test_completion_failure_preserves_safe_diagnostics_without_retry_or_secret_text.
+Old missing finish reason cannot be reconstructed;1024output cap is a suspect,
+not proof of truncation. Use a bounded frozen Critic-only check before another
+full grading run; do not attribute pre-proposal failure to context-policy changes.
+
+### Repair authorization versus displayed evidence (2026-10-23)
+
+Workspace-protected paths (including tests and root escapes) are PolicyDenied and
+must not enter model-response correction retries. A writable target lacking current
+displayed evidence is InvalidProposal: reject the entire batch before any write,
+allow bounded correction only against displayed files, never expand allowed_files
+from a model claim. Protected paths pass through workspace policy first. Regression:
+test_proposal_validation_feedback.test_policy_failure_never_retries,
+test_proposal_evidence_scope (no partial writes and declared/unshown correction),
+test_proposals.test_undeclared_writable_target_is_rejected_without_writes.
+Local reproduction exposed contradictory legacy expectations. An attempted stricter
+declared-target terminal rule also broke existing stale-target recovery tests and
+was reverted; correction of rejected text does not authorize writing that target.
+Use an actually protected path in the policy-no-retry fixture, not an ordinary
+unselected writable path. Keep no-partial-write and bounded-correction assertions.
+
 ### Proposal evidence overflow after diagnostic handoff (2026-10-23)
+
+Token-policy successor: see docs/proposal-context-budget.md and context_budget.py.
+Explicit model-context/per-call-input/safety/independent-byte limits replace a
+percentage relationship; remaining global budget and output reservation bind each
+proposal. Legacy policy still supported, mutually exclusive. No deleted evidence.
+Default estimator is visibly conservative bytes; offline encoding optional and
+not provider exact. Adapter usage metadata and calibration reports support future
+measurement, not automatic policy relaxation. Do not describe local/stub counting
+tests as a calibrated tokenizer or Responses exact-count integration.
+
+Explicit elastic proposal admission: agent.proposal_context_hard_bytes opts into
+a hard ceiling from max_context_bytes up to at most110% of that soft target.
+Default remains soft==hard. Scope is proposal modes only; no expansion of Scout,
+Critic or probe requests. Always attempt existing lossless repacking above soft;
+admit complete remaining payload only below hard and after shared input/output
+budget reservation. Trace proposal_context_admitted with limits, used bytes and
+output allowance. Runtime/config validation rejects bool/missing-soft/oversized
+headroom before dispatch. SWE task flag --proposal-context-hard-bytes records
+policy in trial/plan reports. Existing conservative byte-as-token estimate is
+unchanged; this is not a model-token-window calibration or semantic trimming.
+Tests test_proposal_context/test_proposals include cap enforcement, source-value
+preservation, no dispatch on global-budget denial, and admission telemetry.
+
+Small-overflow follow-up: minify full user payload JSON layout before reselection,
+never whitespace inside source/log strings. Test semantic equality after decoding.
+V3 replay48,075->47,999 under48k but only1byte margin: this is admission evidence,
+not a robust headroom solution. Do not use this result to assert stable repairs.
+Distinguish local byte cap from model token window and global billed-token budget;
+soft-target/explicit bounded overflow policy remains planned, not implemented.
+
+Capacity recovery follow-up: `ProposalCapacityExceeded` reports request bytes,
+limit and fixed bytes after removing writable-source evidence. If the fixed floor
+already exceeds the limit, source reselection cannot help; RecoveryController
+records a trace and stops without a paid reselection. Otherwise allow normal
+reselection, but reject a repeated identical failing goal/evidence/dependency/
+readonly context before scheduling another selection. Distinct evidence remains
+eligible; this is a no-progress guard, not automatic repair or budget expansion.
+Regression coverage in test_proposal_context includes both stop paths, successful
+changed selection and capacity-floor accounting. Success-request replay retains
+goal/source/permissions/guidance; already-compacted view notice is not regenerated.
 
 Full-repair-v1 reached the failing write in a model-designed probe, then five
 source reselections exhausted recovery before patch generation. Fixed goal evidence
@@ -1523,3 +1608,14 @@ saved-source Scout goal and diagnostic bridge input, including later rounds.
 Subsequent source edits invalidate freshness but do not erase historical contrasts.
 Do not force model state updates from narrative conclusions or claim this is a full
 question/hypothesis ledger. Test delivery and tamper/mismatch rejection first.
+
+### Interrupted provider transport and unchanged seed grading (2026-10-23)
+V6 Scout URLError lost wrapped reason; do not infer a specific transport cause. Provider boundary now exposes safe reason type, never raw error text/URLs. Retry known transient reset/timeout/EOF/temporary-DNS errors via existing model_transport shared budget; certificate failures, malformed output and unknown string reasons remain terminal. Explicit retries0..2 are required and unknown usage is conservatively reserved. FrozenModel records allowlisted reason types. Regression: tests.test_model_transport wrapped-error cases and existing budget/retry tests.
+For failed saved-source continuation, compare current full workspace_patch with validated seed_patch after exporting prediction. If identical, skip final grade with official_resolved=null and explicit skipped_unchanged_failed_seed; do not claim cached success or fresh verification. Changed candidates still grade. Regression: tests.test_swebench_task checks both branches. This avoids duplicate evaluation, not Docker image/network recovery.
+
+When urllib URLError wraps FileNotFoundError, do not infer which file or classify all URL errors transient. Isolate with examples/check_model_connection.py using exact launcher interpreter and user process; bounded unauthenticated GET, no generation/credentials/redirect following. Compare reason/errno/safe stack frames and CA override existence. Tool-process network failure can differ from user process. Windows trust store may work with no default cafile/capath. Preserve each diagnostic output (exclusive create); HTTP401 without credentials means HTTP transport answered, not valid authentication or completion readiness.
+
+### Default trial image retention (2026-10-23)
+Repeat2 internal official harness passed175tests then cleanup retained0images; final stage rebuilt and git clone TLS failed. Existing harness_cache scopes generated instance recipe plus unique trial, excludes candidate patch; cache_level=instance preserves setup image, fresh containers/scores. Task runner now defaults retain_instance_image=True; --no-retain-instance-image explicitly restores cleanup behavior. No environment recipe/source/test changes. Bridge grade CLI exposes --instance-cache-scope for standalone scoring retries. Never reuse previous scores as fresh tests, never mutate prior grading_error. Existing test_harness_cache verifies recipe/scope isolation; test_swebench_task now checks default forwarding to both verifier/final grade. Grade-only recovery may need initial clone because old image is gone; retention cannot promise network restoration.
+
+Mocked official-harness unit tests must bind both dataset schema and harness version. Reading installed metadata while mocking the harness makes a classic fixture fail before its intended assertion, or makes a no-report test pass for the wrong reason. Pin only mocked test metadata to matching3.0.0; keep explicit incompatible5.x rejection check. tests.test_swebench_bridge15pass with installed user environment. This is fixture isolation, not changing real grading compatibility or proving remote CI green.

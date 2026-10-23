@@ -134,10 +134,16 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
     if type(repair_attempts) is not int or not 0 <= repair_attempts <= (8 if adaptive else 3) or (repair_attempts and not (proposal_mode or agent_mode)):
         raise ValueError('verification_repair_attempts requires a model-driven mode and integer 0..3 (adaptive: 0..8)')
     settings = config.get("agent", {})
-    if not isinstance(settings, dict) or set(settings) - {"max_steps", "max_output", "require_evidence", "max_work_items", "max_context_bytes", "require_change", "require_python_ast_change"} or any(
-            type(v) is not int or v <= 0 for key, v in settings.items() if key not in {"require_evidence", "require_change", "require_python_ast_change"}) or any(
+    if not isinstance(settings, dict) or set(settings) - {"max_steps", "max_output", "critic_max_output", "require_evidence", "max_work_items", "max_context_bytes", "proposal_context_hard_bytes", "proposal_context_policy", "require_change", "require_python_ast_change"} or any(
+            type(v) is not int or v <= 0 for key, v in settings.items() if key not in {"require_evidence", "require_change", "require_python_ast_change", "proposal_context_policy"}) or any(
             type(settings[key]) is not bool for key in ("require_evidence", "require_change", "require_python_ast_change") if key in settings):
         raise ValueError("agent accepts positive integer max_steps/max_output/max_work_items/max_context_bytes and boolean require_evidence/require_change/require_python_ast_change")
+    if settings.get('critic_max_output',1024)>4096:
+        raise ValueError('critic_max_output must be 1..4096')
+    from .proposals import proposal_context_limits
+    proposal_context_limits(settings)
+    if ('proposal_context_hard_bytes' in settings or 'proposal_context_policy' in settings) and not proposal_mode:
+        raise ValueError('Proposal context policies are supported only in proposal modes')
     engine = config.get("orchestrator", "native")
     if engine not in {"native", "langgraph"}:
         raise ValueError("orchestrator must be native or langgraph")

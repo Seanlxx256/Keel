@@ -268,9 +268,12 @@ class RecoveryController:
             size = len(json.dumps(messages).encode()) + len(json.dumps(schema).encode())
         if size > settings.get('max_context_bytes', 12000):
             raise InputCapacityExceeded('Critic observation exceeds context cap')
-        output = min(settings.get('max_output', 1024), 1024)
+        output = settings.get('critic_max_output',min(settings.get('max_output', 1024), 1024))
+        if type(output) is not int or not 1<=output<=4096:
+            raise ValueError('critic_max_output must be 1..4096')
         self.ws.budget.allow_model(size, output)
         self.ws.trace.emit('critic', 'llm_call_started', input_bytes=size, strategy='recovery-route',
+                           max_output=output,
                            recovery_progress_context=bool(observation.get('previous_check_observations')))
         try:
             structured = callable(getattr(model, 'complete_json', None))
@@ -411,6 +414,7 @@ class RecoveryController:
         current_goal, current_evidence = goal, evidence
         readonly_evidence = []
         selection_feedback = None
+        capacity_failures = set()
         while True:
             try:
                 if selection_feedback is not None:
@@ -452,6 +456,19 @@ class RecoveryController:
                     raise RecoveryStopped('Read-only diagnosis did not return citable source windows')
                 current_goal = goal + '\nRead-only diagnostic assessment (untrusted source interpretation, not runtime execution):\n' + json.dumps(inspection['assessment'])
             except InputCapacityExceeded as error:
+                fixed=getattr(error,'fixed_bytes',None)
+                limit=getattr(error,'limit_bytes',None)
+                if fixed is not None and limit is not None and fixed>limit:
+                    workspace.trace.emit('implementer','proposal_context_unrecoverable',
+                        reason='fixed_context_exceeds_limit',fixed_bytes=fixed,limit_bytes=limit)
+                    raise RecoveryStopped('Fixed proposal context exceeds request limit; source reselection cannot resolve it') from error
+                signature=digest({'goal':current_goal,'evidence':current_evidence,
+                                  'dependencies':dependencies,'readonly_evidence':readonly_evidence})
+                if signature in capacity_failures:
+                    workspace.trace.emit('implementer','proposal_context_unrecoverable',
+                        reason='unchanged_oversized_evidence',evidence_signature=signature)
+                    raise RecoveryStopped('Source reselection returned the same oversized evidence; no context progress') from error
+                capacity_failures.add(signature)
                 self.permit('reselect_evidence', error, current_evidence)
                 selection_feedback = {'capacity_error': str(error),
                     'instruction': 'Select fewer complete functions needed for repair; omit whole classes and unrelated definitions.'}

@@ -1,0 +1,6 @@
+{
+  "model_context_tokens": 1050000,
+  "max_input_tokens": 60000,
+  "safety_tokens": 1024,
+  "max_request_bytes": 131072
+}
