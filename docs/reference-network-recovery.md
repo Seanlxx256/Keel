@@ -1,0 +1,36 @@
+# Reference network recovery
+
+This opt-in path handles a frozen official reference build that failed on transient APT downloads. It does not repair library source or change reference labels. Original failed artifacts remain unchanged.
+
+`keel.reference_network_recovery` checks task/export receipts, reference patch identity, failed grader input, matching instance build artifacts and a supported standalone APT command. Conda timeouts, signature errors, arbitrary exit100 failures and stacked environment policies do not qualify.
+
+The bounded sequence is:
+
+1. Pin the currently available local environment image ID; retry the original APT command in a disposable diagnostic build.
+2. If it still fails, call the existing network ReAct loop: at most two host-selected URL probes, then an evidence-supported isolated `no_pipeline` workload experiment or an honest stop. Experience remains advisory.
+3. Only after the full APT workload completes, run fresh official reference grading. A successful probe or experiment alone is never reference acceptance.
+
+The diagnostic workload retains package archives using the existing isolated cache. It does not alter host networking, mirrors, package lists, dependency choices, TLS verification or signature verification. The current image ID is pinned throughout recovery; it is not retrospective proof of the image used by the older failed build.
+
+`reference_verified` means original transport plus fresh official reference passed. `reference_verified_reconstructed` means a declared transport policy plus fresh official reference passed; report reconstructed conditions separately. All other outcomes remain unavailable. New grading artifacts live under recovery/reference-grade; the old grading_error is preserved.
+
+The CLI action `examples/swebench_bridge.py recover-reference-network` accepts `--task`, `--export` (the reference export), `--failed-grade`, `--model-config`, `--harness-python`, `--output`, `--timeout`, `--max-network-steps`, and `--execute`. Without execute it validates applicability without Docker/model dispatch. Use a fresh output directory; failed/interrupted attempts are not silently restarted. Completed recovered reference-grade can be supplied to the shared task runner after its normal checks, without rerunning recovery.
+
+For future frozen batches, prepare with `examples/run_swebench_batch.py --recover-network`. This explicit arm records extra environment-model limits, dispatches only supported APT failures, and hands a successful recovered reference to the existing task runner. Do not combine with packaging recovery. Previously frozen batches retain their original protocol.
+
+The initial live check uses a30minute outer watchdog,29minute shared recovery deadline, at most4model calls and60k diagnostic tokens. Original APT retry gets up to600seconds;600seconds are reserved for final reference grading. Model inference is only used after an unsuccessful unchanged workload retry. The shared ReAct loop bounds each action and records observations; the outer watchdog terminates its local child process tree. Docker daemon-side cleanup is not independently certified.
+
+Validation: local mocked Docker/provider tests cover the real cross-module ReAct handoff, official revalidation, budget bounds, input/image drift, signature rejection and batch dispatch. They do not establish real network recovery; inspect live results separately.
+
+### Progress-aware original workload allocation (2026-10-24)
+The original APT retry now has a600second soft allocation. At that boundary, distinct recent APT acquisition/unpacking/configuration milestones permit120second renewals on the same running process. Repeated lines, changing download counters/speed alone and generic heartbeats do not qualify. Freshness window120seconds; all renewals remain inside remaining global recovery time minus660seconds (600for fresh grading,60for overhead). Renewal can consume diagnosis time, so diagnosis may become unavailable; it never guarantees completion. No model decides these routine renewals. Only original retry currently uses this policy; other stages remain independently bounded.
+
+keel.stage_progress.AptProgressBudget is consumed by run_harness while polling the complete log. Harness and workload receipts preserve milestones, extensions and explicit hard-stage versus no-fresh-progress stop reasons. A budget stop is stage_budget_exhausted, not an APT acquisition failure; no transport adaptation is dispatched merely because installation timed out. Milestones are progress proxies, not proof of correctness, causal diagnosis or daemon cancellation. Archive reuse is not a dpkg state checkpoint. Tests.test_stage_progress covers repetition/staleness/hardcap, actual continuing/terminated children and workload receipt propagation; real Docker acceptance remains a separate step.
+
+### BuildKit terminal-phase coverage (2026-10-24)
+v3 real APT RUN completed832.4s but imageexport/unpack was not recognized and softstop fired960s. Progress policy now recognizes the export step from BuildKit exporting to image, then distinct export metadata/layer milestones and unpacking on that same step. Each forward phase transition (export,unpack) receives one240s quiet-operation grace, capped by unchanged hard stage deadline and grading reserve. Repeated starts/duration-only updates cannot reset grace; no output is not proof of a hang or health. Receipts include phase and bounded transition grants; process exit and fresh official grading are still required. This is a generic BuildKit phase fix, not a task-specific timeout exemption. Tests cover transition/repetition/unrelatedsteps/hardcap plus a real quietexport child. Rawv3 terminal text comparison uses synthetic arrivaltimes where globaltimestamps absent and doesnot establish actualcompletion.
+
+### Bounded acquisition retry and observable archives (2026-10-24)
+New opt-in retry_acquire policy uses Acquire::Retries2 and HTTP/HTTPS acquisition timeout20s, retains downloaded packages in its isolated APT_CONFIG. These settings concern acquisition, not changing package names/versions/sources/signature checks or retrying dpkg. Definition shared by apt_workload and official harness adapter, separate image tag, accepted reference policy receipt/verification forwarding. No pipeline policy is stacked. APT documents failed-file retries in https://manpages.debian.org/bookworm/apt/apt.conf.5.en.html .
+
+Existing whole-workload retry remains classifier-gated to transient fetch failures with signature/install errors excluded, max1..3attempts inside shareddeadline. This diagnostic uses2attempts; no infinite retry. Shared archive cache key remains immutablebaseID, lockedmount, docker-clean disabled in disposableimageonly. New before/after manifests record package filenames/sizes and partialbytes even whencommandfails; EXIT trap preserves originalstatus. Presence is not proof of cachehit/integrity: APT retainsvalidation; compare actualnetworklogs before crediting reuse. Missingcachetelemetry cannotturnfailedAPTintosuccess. DirectAPTCLI now returns nonzero for failedworkload, so outercontroller cannot falselymarkpass. New validation78relatedchecks pass; actualretry/cacheeffect notestablished and referencegrade stillrequired afterworkloadcompletion.

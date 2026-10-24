@@ -3,6 +3,7 @@ import json
 import re
 import subprocess
 import uuid
+import time
 
 
 def validate_inspection(modules, distributions):
@@ -42,6 +43,80 @@ for name in request['distributions']:
         result['distributions'][name] = {'error':traceback.format_exc()[-1000:]}
 print(json.dumps(result))
 '''
+
+DEPENDENCY_PROGRAM = r'''
+import importlib.metadata as md,json
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name as canonical
+installed={canonical(d.metadata['Name']):d for d in md.distributions() if d.metadata.get('Name')}
+versions={name:d.version for name,d in installed.items()}
+conflicts=[]
+editable=[]
+for name,d in installed.items():
+ location=str(d.locate_file(''))
+ if location=='/testbed' or location.startswith('/testbed/'):editable.append(name)
+ try:
+  direct=json.loads(d.read_text('direct_url.json') or '{}')
+  if direct.get('dir_info',{}).get('editable'):editable.append(name)
+ except ValueError:pass
+ for raw in d.requires or []:
+  req=Requirement(raw)
+  if req.marker is not None and not req.marker.evaluate({'extra':''}):continue
+  provider=canonical(req.name)
+  if provider in versions and req.specifier and not req.specifier.contains(versions[provider],prereleases=True):
+   conflicts.append({'consumer':name,'provider':provider,'requirement':raw,'installed_version':versions[provider]})
+mapping={module:[canonical(name) for name in names] for module,names in md.packages_distributions().items()}
+print(json.dumps({'versions':versions,'conflicts':conflicts,'editable_distributions':sorted(set(editable)),
+ 'module_distributions':mapping,
+ 'scope':'Declared active dependency constraints; not proof every runtime error is a version conflict'}))
+'''
+
+
+def retained_image(directory):
+    recipes=list((directory/'logs/build_images/instances').glob('*/Dockerfile'))
+    if len(recipes)!=1:raise ValueError('Require one retained instance recipe')
+    name,tag=recipes[0].parent.name.rsplit('__',1)
+    return name+':'+tag
+
+
+def run_image_program(image, program, request, output, *, timeout, network=False):
+    """Bounded owned-container action; no rebuild, host mount or credential injection."""
+    from examples.swebench_bridge import run_harness
+    output.mkdir(parents=True,exist_ok=False)
+    deadline=time.monotonic()+timeout
+    def remaining():
+        value=deadline-time.monotonic()
+        if value<=0:raise TimeoutError('Compatibility action deadline exhausted')
+        return value
+    name='keel-compat-'+uuid.uuid4().hex
+    args=['docker','run','--rm','--name',name,'--pull=never','--read-only',
+          '--network','bridge' if network else 'none','--cap-drop=ALL','--security-opt=no-new-privileges',
+          '--pids-limit','128','--memory','1g','--cpus','1','--tmpfs','/tmp:rw,size=512m',
+          '--workdir','/testbed','--entrypoint','/opt/miniconda3/envs/testbed/bin/python',
+          image,'-B','-c',program,json.dumps(request)]
+    result={'returncode':1,'scope':'Owned container only; no host mount or injected credentials'}
+    def identity():
+        value=subprocess.run(['docker','image','inspect','--format','{{.Id}}',image],
+            capture_output=True,text=True,check=True,timeout=min(10,remaining())).stdout.strip()
+        if not re.fullmatch(r'sha256:[a-f0-9]{64}',value):raise ValueError('Invalid image identity')
+        return value
+    try:
+        result['base_image_id']=identity()
+        action_seconds=remaining()-15
+        if action_seconds<=0:raise TimeoutError('Insufficient action/validation budget')
+        process=run_harness(args,cwd=output,log_path=output/'command.log',timeout=action_seconds,echo_output=False)
+        with (output/'command.log').open('rb') as stream:raw=stream.read(524289)
+        if len(raw)>524288:raise ValueError('Compatibility action output too large')
+        result.update(returncode=process.returncode,stdout=raw.decode('utf-8',errors='replace'))
+        if identity()!=result['base_image_id']:raise ValueError('Image changed during compatibility action')
+    except Exception as error:
+        result.update(error_type=type(error).__name__,returncode=1)
+    finally:
+        cleanup=output/'cleanup';cleanup.mkdir()
+        try:run_harness(['docker','rm','-f',name],cwd=cleanup,log_path=cleanup/'command.log',timeout=min(5,remaining()),echo_output=False)
+        except Exception as error:result['cleanup_error_type']=type(error).__name__
+        (output/'result.json').write_text(json.dumps(result,indent=2),encoding='utf-8')
+    return result
 
 
 PLUGIN_PROGRAM = r'''
@@ -90,7 +165,7 @@ print(json.dumps(result))
 '''
 
 
-def inspect_image(directory, modules, distributions, *, timeout=45, plugin_probe=False):
+def inspect_image(directory, modules, distributions, *, timeout=45, plugin_probe=False,allow_restore=True):
     validate_inspection(modules, distributions)
     images = sorted((directory/'logs/build_images/instances').glob('*/Dockerfile'))
     if len(images) != 1:
@@ -107,6 +182,8 @@ def inspect_image(directory, modules, distributions, *, timeout=45, plugin_probe
         result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=timeout)
         restored = False
         if result.returncode == 125 and 'No such image' in result.stderr:
+            if not allow_restore:
+                return {'image':image,'returncode':125,'error':'Retained image unavailable; no rebuild dispatched'}
             # Official evaluation may have removed this image after reporting.
             # Restore only the exact archived recipe, never ask the model for build commands.
             context = images[0].parent

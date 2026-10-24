@@ -44,16 +44,22 @@ def reference_policies(reference_dir):
     result=json.loads((reference_dir/'grading.json').read_text(encoding='utf-8'))
     policies={}
     for key,filename,allowed in (
-            ('network_policy','network-policy.json','no_pipeline'),
-            ('plugin_policy','plugin-policy.json','remove_unused_vcs_versioning')):
+            ('network_policy','network-policy.json',('no_pipeline','retry_acquire')),
+            ('plugin_policy','plugin-policy.json',('remove_unused_vcs_versioning',))):
         if result.get(key):
             path=reference_dir/filename
             if file_hash(path)!=result.get(key+'_sha256'):
                 raise ValueError('Reference '+key+' changed')
             value=json.loads(path.read_text(encoding='utf-8'))
-            if result[key]!=allowed or value!={'policy':allowed,'version':1}:
+            if result[key] not in allowed or value!={'policy':result[key],'version':1}:
                 raise ValueError('Unsupported reference '+key)
-            policies[key]=allowed
+            policies[key]=result[key]
+    if result.get('compatibility_policy_sha256'):
+        from keel.dependency_compatibility import validate_policy
+        path=reference_dir/'compatibility-policy.json'
+        if file_hash(path)!=result['compatibility_policy_sha256']:raise ValueError('Reference compatibility policy changed')
+        validate_policy(json.loads(path.read_text(encoding='utf-8')))
+        policies['compatibility_policy']=str(path.resolve())
     return policies
 
 
@@ -107,8 +113,20 @@ def config_for(task, task_dir, output, model_config, harness_python, environment
     return config
 
 
-def execute(root, task_dir, reference_dir, model_config, harness_python, output, *, mcp_config=None, localization_tool_steps=6, require_external_tool=False, local_exploration=False, resume_snapshot=None, saved_repo=None, diagnostic_inspection=False, recovery_progress=False, targeted_source_review=False, diagnosis_supervision=False, budget_driven_recovery=False, record_model_transcript=False, infrastructure_guard=False, model_transport_retries=0, retain_instance_image=True, diagnostic_handoff=False, budget_limits=None, budget_profile='standard', diagnostic_report=None, diagnostic_execution=None, comparison_plan=None, comparison_report=None, proposal_context_hard_bytes=None, proposal_context_policy=None, critic_max_output=None):
+def execute(root, task_dir, reference_dir, model_config, harness_python, output, *, mcp_config=None, localization_tool_steps=6, require_external_tool=False, local_exploration=False, resume_snapshot=None, saved_repo=None, diagnostic_inspection=False, recovery_progress=False, targeted_source_review=False, diagnosis_supervision=False, budget_driven_recovery=False, record_model_transcript=False, infrastructure_guard=False, model_transport_retries=0, retain_instance_image=True, diagnostic_handoff=False, budget_limits=None, budget_profile='standard', diagnostic_report=None, diagnostic_execution=None, comparison_plan=None, comparison_report=None, proposal_context_hard_bytes=None, proposal_context_policy=None, critic_max_output=None, total_seconds=None, final_grade_reserve=600):
     started = time.monotonic()
+    deadline = None
+    if total_seconds is not None:
+        if type(total_seconds) is not int or type(final_grade_reserve) is not int or not 0 < final_grade_reserve < total_seconds - 20:
+            raise ValueError('Total deadline requires positive final grading reserve and cleanup margin')
+        if budget_limits and 'max_wallclock' in budget_limits:
+            raise ValueError('Use total_seconds or max_agent_seconds, not both')
+        deadline = started + total_seconds
+    def remaining(reserve=0):
+        value = min(total_seconds, deadline-time.monotonic()) - reserve - 20
+        if value <= 0:
+            raise TimeoutError('Shared trial deadline exhausted; candidate artifacts preserved')
+        return value
     if critic_max_output is not None and (type(critic_max_output) is not int or not 1<=critic_max_output<=4096):
         raise ValueError('critic_max_output must be 1..4096')
     from keel.proposals import proposal_context_limits
@@ -259,7 +277,7 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
                 report.update(status='environment_blocked', failure={'category': 'environment_blocked',
                     'stage': 'preflight', 'message': 'Docker server unavailable; no Agent calls dispatched'})
                 return report
-        repo = prepare_snapshot(task['repo'], task['base_commit'], output/'repo', timeout=180,
+        repo = prepare_snapshot(task['repo'], task['base_commit'], output/'repo', timeout=min(180, remaining(final_grade_reserve)) if deadline else 180,
                                 **({'source':str(saved_repo.resolve())} if saved_repo else {}))
         if seed_patch:
             subprocess.run(['git','-c','safe.directory='+repo.as_posix(),'-C',str(repo),'apply','--binary','-'],
@@ -281,6 +299,15 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
             from keel.diagnostic_evidence import load_comparison_evidence
             if load_comparison_evidence(comparison_plan, comparison_report, repo) != comparison_evidence:
                 raise ValueError('Prepared source differs from controlled comparison candidate')
+        if deadline:
+            allocation = min(limits['max_wallclock'], int(remaining(final_grade_reserve)))
+            if allocation < 1:
+                raise TimeoutError('No Agent time remains after final grading reserve')
+            limits = dict(limits, max_wallclock=allocation)
+            report['limits'] = limits
+            report['shared_deadline'] = {'total_seconds':total_seconds, 'final_grade_reserve':final_grade_reserve,
+                'cleanup_margin':20, 'agent_allocation_seconds':limits['max_wallclock'],
+                'scope':'Elapsed preparation deducted; runtime includes in-loop verification.'}
         config = config_for(task, task_dir, output, model_config, harness_python, overlay_path, policies,
                             budget_limits=limits, budget_profile=budget_profile, proposal_context_hard_bytes=proposal_context_hard_bytes, proposal_context_policy=proposal_context_policy, critic_max_output=critic_max_output)
         if instance_cache_scope is not None:
@@ -347,6 +374,10 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
         kwargs.update(policies)
         if instance_cache_scope is not None:
             kwargs['instance_cache_scope'] = instance_cache_scope
+        if deadline:
+            kwargs['timeout'] = remaining()
+            report['shared_deadline']['final_grade_timeout_seconds'] = kwargs['timeout']
+            save()
         final = grade(task_dir, output/'prediction', output/'final-grade', python=harness_python, **kwargs)
         report.update(status='completed' if final['status'] == 'graded' else 'grading_error',
                       official_resolved=final['official_resolved'], grading_error=final.get('error'))
@@ -391,6 +422,8 @@ def main():
                         help='Explicit extended exploration budget; default limits remain unchanged')
     parser.add_argument('--max-tokens', type=int)
     parser.add_argument('--max-agent-seconds', type=int)
+    parser.add_argument('--total-seconds', type=int, help='Shared preparation/Agent/final-grade deadline; replaces max-agent-seconds')
+    parser.add_argument('--final-grade-reserve', type=int, default=600)
     parser.add_argument('--resume-snapshot',type=Path)
     parser.add_argument('--saved-repo',type=Path)
     parser.add_argument('--comparison-plan',type=Path)
@@ -405,6 +438,8 @@ def main():
         parser.error('--model-transport-retries requires --record-model-transcript')
     if args.targeted_source_review and not args.recovery_progress:
         parser.error('--targeted-source-review requires --recovery-progress')
+    if args.total_seconds is not None and args.max_agent_seconds is not None:
+        parser.error('--total-seconds replaces --max-agent-seconds')
     limits = trial_budget({key: value for key, value in (
         ('max_model_calls', args.max_model_calls), ('max_tokens', args.max_tokens),
         ('max_wallclock', args.max_agent_seconds)) if value is not None}, profile=args.budget_profile)
@@ -425,7 +460,7 @@ def main():
         load_saved_repair(args.task, args.reference_grade, args.resume_snapshot, args.saved_repo)
     if not args.execute:
         print(json.dumps({'status': 'plan_only', 'instance_id': verify_task(args.task)['instance_id'], 'max_model_calls': limits['max_model_calls'],
-                          'max_agent_seconds': limits['max_wallclock'], 'limits': limits, 'critic_max_output':args.critic_max_output or 1024, 'proposal_context_policy':proposal_policy or {'soft_bytes':48000,'hard_bytes':args.proposal_context_hard_bytes or 48000},
+                          'total_seconds':args.total_seconds, 'final_grade_reserve':args.final_grade_reserve, 'max_agent_seconds': None if args.total_seconds else limits['max_wallclock'], 'limits': limits, 'critic_max_output':args.critic_max_output or 1024, 'proposal_context_policy':proposal_policy or {'soft_bytes':48000,'hard_bytes':args.proposal_context_hard_bytes or 48000},
                           'max_verification_rounds': (limits['max_model_calls'] + 1 if args.budget_driven_recovery
                                                      else 9 if args.budget_profile == 'extended' else 4),
                           'budget_driven_recovery': args.budget_driven_recovery,
@@ -450,7 +485,7 @@ def main():
                      saved_repo=args.saved_repo.resolve() if args.saved_repo else None,
                      diagnostic_inspection=args.diagnostic_inspection == 'required',
                      recovery_progress=args.recovery_progress, targeted_source_review=args.targeted_source_review,
-                     diagnosis_supervision=args.diagnosis_supervision, budget_driven_recovery=args.budget_driven_recovery, record_model_transcript=args.record_model_transcript, infrastructure_guard=args.infrastructure_guard, model_transport_retries=args.model_transport_retries, retain_instance_image=args.retain_instance_image, diagnostic_handoff=args.diagnostic_handoff, budget_limits=limits, budget_profile=args.budget_profile, diagnostic_report=args.diagnostic_report.resolve() if args.diagnostic_report else None, diagnostic_execution=json.loads(args.diagnostic_probe_config.read_text(encoding='utf-8')) if args.diagnostic_probe_config else None, comparison_plan=args.comparison_plan.resolve() if args.comparison_plan else None, comparison_report=args.comparison_report.resolve() if args.comparison_report else None, proposal_context_hard_bytes=args.proposal_context_hard_bytes, proposal_context_policy=proposal_policy, critic_max_output=args.critic_max_output)
+                     diagnosis_supervision=args.diagnosis_supervision, budget_driven_recovery=args.budget_driven_recovery, record_model_transcript=args.record_model_transcript, infrastructure_guard=args.infrastructure_guard, model_transport_retries=args.model_transport_retries, retain_instance_image=args.retain_instance_image, diagnostic_handoff=args.diagnostic_handoff, total_seconds=args.total_seconds, final_grade_reserve=args.final_grade_reserve, budget_limits=({k:v for k,v in limits.items() if k != "max_wallclock"} if args.total_seconds is not None else limits), budget_profile=args.budget_profile, diagnostic_report=args.diagnostic_report.resolve() if args.diagnostic_report else None, diagnostic_execution=json.loads(args.diagnostic_probe_config.read_text(encoding='utf-8')) if args.diagnostic_probe_config else None, comparison_plan=args.comparison_plan.resolve() if args.comparison_plan else None, comparison_report=args.comparison_report.resolve() if args.comparison_report else None, proposal_context_hard_bytes=args.proposal_context_hard_bytes, proposal_context_policy=proposal_policy, critic_max_output=args.critic_max_output)
     print(json.dumps({key: value for key, value in report.items() if key != 'implementation'}, indent=2))
     return 0 if (report['official_resolved'] is True and
                  (not args.budget_driven_recovery or report.get('runtime_status') == 'passed')) else 1
@@ -458,3 +493,4 @@ def main():
 
 if __name__ == '__main__':
     raise SystemExit(main())
+

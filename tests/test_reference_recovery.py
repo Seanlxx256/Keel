@@ -1,4 +1,5 @@
 import json
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 import tempfile
@@ -19,8 +20,10 @@ class ReferenceRecoveryTests(unittest.TestCase):
         data=root/'data.jsonl';data.write_text(json.dumps(row))
         prepare(data,row['instance_id'],root/'task');reference_prediction(root/'task',root/'reference')
         failed=root/'failed';failed.mkdir()
+        policy=failed/'network-policy.json';policy.write_text(json.dumps({'policy':'no_pipeline','version':1}))
         (failed/'grading.json').write_text(json.dumps({'status':'graded','runtime_status':'reference_only',
-            'official_resolved':False,'network_policy':'no_pipeline'}))
+            'official_resolved':False,'network_policy':'no_pipeline',
+            'network_policy_sha256':hashlib.sha256(policy.read_bytes()).hexdigest()}))
         (failed/'grader-input.json').write_text(json.dumps([row]))
         log=failed/'logs/run_evaluation/run/reference/id/test_output.txt';log.parent.mkdir(parents=True)
         log.write_text('DeprecationWarning release-branch-semver vcs_versioning')

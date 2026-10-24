@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import signal
 from pathlib import Path
 import subprocess
 import sys
@@ -30,13 +31,34 @@ def has_progress(before,after):
         any(value>before['vectors'].get(key,0) for key,value in after['vectors'].items()))
 
 
-def stop_tree(child):
-    if os.name=='nt':
-        subprocess.run(['taskkill','/PID',str(child.pid),'/T','/F'],
-            capture_output=True,timeout=15)
+def stop_tree(child, *, timeout=15, process_group=False):
+    """Bound cleanup time; process_group requires a separately created POSIX session."""
+    deadline=time.monotonic()+timeout
+    result={'method':'taskkill_tree' if os.name=='nt' else 'posix_group' if process_group else 'direct_child',
+            'tree_signal_sent':False,'descendants_verified':False}
+    try:
+        if os.name=='nt' and child.poll() is None:
+            killed=subprocess.run(['taskkill','/PID',str(child.pid),'/T','/F'],
+                stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
+                timeout=min(3,timeout),creationflags=subprocess.CREATE_NO_WINDOW)
+            result['tree_signal_sent']=killed.returncode==0
+        elif os.name!='nt' and process_group:
+            try:
+                os.killpg(child.pid,signal.SIGKILL)
+                result['tree_signal_sent']=True
+            except ProcessLookupError:
+                pass
+    except (OSError,subprocess.TimeoutExpired) as error:
+        result['tree_error_type']=type(error).__name__
     if child.poll() is None:
-        child.kill()
-    child.wait(timeout=15)
+        try:child.kill()
+        except OSError as error:result['root_error_type']=type(error).__name__
+    try:
+        child.wait(timeout=max(.01,deadline-time.monotonic()))
+    except subprocess.TimeoutExpired:
+        result['wait_timed_out']=True
+    result['root_exited']=child.poll() is not None
+    return result
 
 
 def continue_run(plan,run,output,*,rounds=3,timeout=3600,wait_current=False):

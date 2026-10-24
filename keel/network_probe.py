@@ -108,25 +108,31 @@ print('KEEL_NETWORK_RESULT='+json.dumps(result))
 
 
 def run_probe(command, *, timeout=20):
+    from examples.swebench_bridge import run_harness
     try:
-        process = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
-        if process.returncode:
-            # Never copy arbitrary proxy credentials or subprocess stderr to reports.
-            stderr = process.stderr.lower()
-            category = ('permission_boundary' if 'permission denied' in stderr or 'access is denied' in stderr
-                        else 'image_unavailable' if 'no such image' in stderr else 'process_error')
-            result = {'status': category, 'returncode': process.returncode}
-            if category == 'process_error':
-                result['diagnostic'] = diagnostic_excerpt(process.stderr)
-            return result
-        marker = 'KEEL_NETWORK_RESULT='
-        lines = [line.split(marker,1)[1] for line in (process.stdout+'\n'+process.stderr).splitlines() if marker in line]
-        value = json.loads(lines[-1] if lines else process.stdout)
-        return {'status': 'completed', 'observation': value}
+        with tempfile.TemporaryDirectory(prefix='keel-probe-process-') as directory:
+            root=Path(directory);log=root/'probe.log'
+            # Same bounded process containment as APT workloads. Raw proxy/tool
+            # output stays off the console; reports retain only redacted snippets.
+            process=run_harness(command,cwd=root,log_path=log,timeout=timeout,echo_output=False)
+            with log.open('rb') as stream:raw=stream.read(4_000_001)
+            if len(raw)>4_000_000:return {'status':'probe_output_limit'}
+            text=raw.decode('utf-8',errors='replace')
+            if process.returncode:
+                lower=text.lower()
+                category=('permission_boundary' if 'permission denied' in lower or 'access is denied' in lower
+                          else 'image_unavailable' if 'no such image' in lower else 'process_error')
+                result={'status':category,'returncode':process.returncode}
+                if category=='process_error':result['diagnostic']=diagnostic_excerpt(text)
+                return result
+            marker='KEEL_NETWORK_RESULT='
+            lines=[line.split(marker,1)[1] for line in text.splitlines() if marker in line]
+            value=json.loads(lines[-1] if lines else text)
+            return {'status':'completed','observation':value}
     except subprocess.TimeoutExpired:
-        return {'status': 'timeout'}
-    except (OSError, ValueError) as error:
-        return {'status': 'probe_error', 'error_type': type(error).__name__}
+        return {'status':'timeout'}
+    except (OSError,ValueError) as error:
+        return {'status':'probe_error','error_type':type(error).__name__}
 
 
 APT_PROBE = r'''
@@ -144,6 +150,15 @@ with tempfile.TemporaryDirectory(prefix='keel-apt-') as directory:
    result['returncode']=process.returncode
    if process.returncode:
     result['failure_kind']='apt_download_failed'
+    detail=(stdout+stderr).decode('utf-8',errors='replace').lower()
+    for kind,markers in [('tls',('certificate','tls handshake')),('dns',('could not resolve','temporary failure resolving')),
+                         ('connection',('unable to connect','could not connect','connection refused')),
+                         ('timeout',('timed out','timeout'))]:
+     if any(marker in detail for marker in markers):
+      result['failure_hint']=kind
+      break
+    status=re.search(r'\b(4\d\d|5\d\d)\s+(?:bad|not|forbidden|service|gateway)',detail)
+    if status:result['http_status']=int(status[1])
    if os.path.isfile(destination):
     result['downloaded_bytes']=os.path.getsize(destination)
     result['download_complete']=process.returncode==0 and 0<result['downloaded_bytes']<=cap

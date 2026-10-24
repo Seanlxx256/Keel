@@ -19,6 +19,11 @@ if __name__ == '__main__':
     if os.environ.get('KEEL_HARNESS_PLUGIN_POLICY'):
         from keel.harness_plugins import install_plugin_policy
         install_plugin_policy(os.environ['KEEL_HARNESS_PLUGIN_POLICY'])
+    if os.environ.get('KEEL_HARNESS_COMPATIBILITY'):
+        import json
+        from keel.dependency_compatibility import install_compatibility_policy
+        install_compatibility_policy(json.loads(Path(os.environ['KEEL_HARNESS_COMPATIBILITY']).read_text(encoding='utf-8')))
+    # Hash the final recipe, including compatibility implementation and pins.
     if os.environ.get('KEEL_HARNESS_CACHE_SCOPE'):
         from keel.harness_cache import install_cache_scope
         install_cache_scope(os.environ['KEEL_HARNESS_CACHE_SCOPE'])

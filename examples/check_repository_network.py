@@ -38,12 +38,12 @@ def extract_apt(script):
     return command
 
 
-def apt_workload(script_path, image, output, timeout, *, attempts=1, transport='original'):
+def apt_workload(script_path, image, output, timeout, *, attempts=1, transport='original', progress_budget=None):
     if not 60 <= timeout <= 7200:
         raise ValueError('APT workload deadline must be 60..7200 seconds')
     if not 1 <= attempts <= 3:
         raise ValueError('APT attempts must be 1..3')
-    if transport not in ('original', 'no_pipeline'):
+    if transport not in ('original', 'no_pipeline', 'retry_acquire'):
         raise ValueError('Unsupported transport policy')
     deadline = time.monotonic()+timeout
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._/:@-]*', image) or image.startswith('sha256:'):
@@ -63,19 +63,33 @@ def apt_workload(script_path, image, output, timeout, *, attempts=1, transport='
         identity = inspected.stdout.strip()
         result['base_image_id'] = identity
         key = hashlib.sha256(identity.encode()).hexdigest()[:24]
+        result['archive_cache_id']='keel-apt-'+key
         context = output/'build-context'
         context.mkdir()
-        prefix = ''
-        if transport == 'no_pipeline':
-            prefix = "printf '%s\\n' 'Acquire::http::Pipeline-Depth \"0\";' > /tmp/keel-apt-transport.conf\nexport APT_CONFIG=/tmp/keel-apt-transport.conf\n"
-        (context/'apt.sh').write_bytes(('#!/bin/bash\nset -euxo pipefail\n'+prefix+command+'\n').encode('utf-8'))
+        from keel.apt_transport import transport_prefix,CACHE_PROBE
+        prefix=transport_prefix(transport)
+        (context/'cache_probe.py').write_text(CACHE_PROBE,encoding='utf-8',newline='\n')
+        inventory="python /keel-cache-probe.py before || true\ntrap 'status=$?; python /keel-cache-probe.py after || true; exit \"$status\"' EXIT\n"
+        (context/'apt.sh').write_bytes(('#!/bin/bash\nset -euxo pipefail\n'+prefix+inventory+command+'\n').encode('utf-8'))
         (context/'Dockerfile').write_text('FROM '+image+'\nCOPY apt.sh /keel-apt.sh\n'
+            'COPY cache_probe.py /keel-cache-probe.py\n'
             'RUN rm -f /etc/apt/apt.conf.d/docker-clean\n'
             'RUN --mount=type=cache,id=keel-apt-'+key+',target=/var/cache/apt/archives,sharing=locked '
             '/bin/bash /keel-apt.sh\n', encoding='utf-8', newline='\n')
         def execute(log, remaining):
-            return run_harness(['docker', 'build', '--pull=false', '--no-cache', '--progress=plain',
-                '-t', tag, str(context.resolve())], cwd=output.resolve(), log_path=log, timeout=remaining)
+            options={}
+            if progress_budget:
+                from keel.stage_progress import AptProgressBudget
+                budget=AptProgressBudget(remaining,**progress_budget)
+                options['progress_budget']=budget
+            else:budget=None
+            try:
+                return run_harness(['docker', 'build', '--pull=false', '--no-cache', '--progress=plain',
+                    '-t', tag, str(context.resolve())], cwd=output.resolve(), log_path=log, timeout=remaining,**options)
+            finally:
+                if budget:
+                    result['progress_budget']=budget.receipt()
+                    save()
         def save_attempts(rows):
             result['attempts'] = list(rows)
             save()
@@ -88,11 +102,25 @@ def apt_workload(script_path, image, output, timeout, *, attempts=1, transport='
             result['status'] = 'base_identity_changed'
     except BaseException as error:
         result.update(status='diagnostic_error', error_type=type(error).__name__)
+        if isinstance(error,subprocess.TimeoutExpired) and progress_budget:
+            result.update(status='stage_budget_exhausted',
+                          stop_reason=result.get('progress_budget',{}).get('stop_reason'))
         if isinstance(error, subprocess.CalledProcessError):
             result['diagnostic'] = diagnostic_excerpt(error.stderr or '')
         if isinstance(error, (KeyboardInterrupt, SystemExit)):
             raise
     finally:
+        try:
+            inventories=[]
+            for log in sorted(output.glob('apt-build-attempt-*.log'))[-3:]:
+                for line in log.read_text(encoding='utf-8',errors='replace').splitlines():
+                    if 'KEEL_APT_CACHE=' in line:
+                        try:inventories.append({'log':log.name,**json.loads(line.split('KEEL_APT_CACHE=',1)[1])})
+                        except (ValueError,TypeError):pass
+            result['cache_observations']=inventories
+            result['cache_observation_status']='recorded' if inventories else 'unavailable'
+        except OSError as error:
+            result.update(cache_observation_status='unavailable',cache_observation_error_type=type(error).__name__)
         save()
         try:
             subprocess.run(['docker', 'image', 'rm', tag], capture_output=True, timeout=5)
@@ -109,6 +137,8 @@ def main():
     parser.add_argument('--apt-script', type=Path, help='Diagnose the original update/upgrade/install chain in a separate cached build')
     parser.add_argument('--timeout', type=int, default=1800)
     parser.add_argument('--attempts', type=int, default=1, help='APT workload attempts, 1..3, sharing the total deadline')
+    parser.add_argument('--transport',choices=['original','no_pipeline','retry_acquire'],default='original')
+    parser.add_argument('--progress-aware',action='store_true',help='Bounded soft600s renewal including BuildKit export phases')
     parser.add_argument('--failed-workload', type=Path, help='Previous workload evidence for bounded model diagnosis')
     parser.add_argument('--model-config', type=Path)
     parser.add_argument('--image', help='Existing local image; never pulled')
@@ -153,9 +183,11 @@ def main():
                 timeout=args.timeout)
             print(json.dumps(result, indent=2))
             return
-        result = apt_workload(args.apt_script, args.image, args.output, args.timeout, attempts=args.attempts)
+        result = apt_workload(args.apt_script, args.image, args.output, args.timeout, attempts=args.attempts,transport=args.transport,
+                              progress_budget={} if not args.progress_aware else {'soft_seconds':600,'extension_seconds':120,
+                                  'freshness_seconds':120,'phase_grace_seconds':240})
         print(json.dumps(result, indent=2))
-        return
+        return 0 if result.get('status')=='apt_completed' else 1
     result = diagnose(args.url, args.image, download=args.download, build=args.build, max_bytes=args.max_bytes, apt_build=args.apt_build,
         progress=lambda stage: print('[Network] '+stage, flush=True))
     (args.output/'diagnosis.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
@@ -163,4 +195,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

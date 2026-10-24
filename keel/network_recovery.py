@@ -19,24 +19,36 @@ def workload_feedback(directory):
     return logs
 
 
+def failed_workload_inputs(previous, script, image):
+    """Select terminal fetch errors, not early successful downloads or BuildKit excerpts."""
+    initial=json.loads((previous/'diagnosis.json').read_text(encoding='utf-8'))
+    if (initial.get('status')!='apt_failed' or initial.get('image')!=image
+            or initial.get('source_sha256')!=hashlib.sha256(script.read_bytes()).hexdigest()):
+        raise ValueError('Failed workload identity does not match script/image')
+    paths=sorted(previous.glob('apt-build-attempt-*.log'),
+                 key=lambda p:int(re.search(r'(\d+)\.log$',p.name)[1]))
+    logs=[p.read_text(encoding='utf-8',errors='replace') for p in paths]
+    urls=[]
+    from urllib.parse import urlsplit
+    for log in reversed(logs):
+        matches=re.findall(r'E: Failed to fetch (https?://[^\s]+)',log)
+        for url in reversed(matches):
+            parsed=urlsplit(url)
+            if (not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment
+                    or parsed.port not in (None,80 if parsed.scheme=='http' else 443)):
+                raise ValueError('Unsafe failed source URL')
+            if url not in urls:urls.append(url)
+    if not urls:raise ValueError('No failed package-source URLs available')
+    return initial,paths,logs,urls[:3]
+
+
 def recover_network(previous, script, image, output, model, workload, *, timeout=1800, max_steps=6):
     if not 60 <= timeout <= 7200 or not 1 <= max_steps <= 9:
         raise ValueError('Invalid network diagnosis limits')
-    initial = json.loads((previous/'diagnosis.json').read_text(encoding='utf-8'))
-    if initial.get('status') != 'apt_failed' or initial.get('image') != image or initial.get('source_sha256') != hashlib.sha256(script.read_bytes()).hexdigest():
-        raise ValueError('Failed workload identity does not match script/image')
-    paths = sorted(previous.glob('apt-build-attempt-*.log'), key=lambda p: int(re.search(r'(\d+)\.log$',p.name)[1]))
-    logs = [path.read_text(encoding='utf-8', errors='replace') for path in paths]
+    initial,paths,logs,urls=failed_workload_inputs(previous,script,image)
     text = '\n'.join(logs)
     # Latest failed stage first, then older distinct targets; not the first
     # packages from the oldest installation attempt.
-    urls = list(dict.fromkeys(url for log in reversed(logs)
-        for url in re.findall(r'E: Failed to fetch (https?://[^\s]+)',log)))[:3]
-    if not urls:
-        raise ValueError('No failed package-source URLs available')
-    from urllib.parse import urlsplit
-    if any(urlsplit(url).username or urlsplit(url).password or urlsplit(url).query for url in urls):
-        raise ValueError('Credential/query URLs are not diagnostic targets')
     budget = Budget(Limits(max_wallclock=timeout, max_model_calls=max_steps, max_tool_calls=max_steps, max_tokens=60000))
     # Experience is advisory and matched to exact setup/image identity; it never
     # grants new actions, skips probes, or certifies the official task.

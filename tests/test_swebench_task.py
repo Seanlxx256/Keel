@@ -13,6 +13,30 @@ from keel.runtime import validate
 
 
 class SwebenchTaskTests(unittest.TestCase):
+    def test_shared_deadline_deducts_preparation_and_bounds_final_grade(self):
+        from examples.run_swebench_task import execute
+        from types import SimpleNamespace
+        clock=[100.0]
+        def prepared(*args, **kwargs):
+            clock[0]+=100
+            return repo
+        def ran(config, *args, **kwargs):
+            self.assertEqual(config['budget']['max_wallclock'],1080)
+            clock[0]+=700
+            return {'status':'failed','budget':{}}
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp); row=self.task(root); reference=self.policy_reference(root,row)
+            repo=root/'repo';repo.mkdir()
+            with patch('examples.run_swebench_task.time.monotonic',side_effect=lambda:clock[0]), patch('examples.run_swebench_task.subprocess.run',return_value=SimpleNamespace(stdout='3.0.0')), patch('examples.run_swebench_task.prepare_snapshot',side_effect=prepared), patch('examples.run_swebench_task.run',side_effect=ran), patch('examples.run_swebench_task.export_prediction'), patch('examples.run_swebench_task.grade',return_value={'status':'graded','official_resolved':False}) as grader:
+                result=execute(root,root/'task',reference,{'name':'test'},'python',root/'trial',total_seconds=1800)
+            self.assertEqual(grader.call_args.kwargs['timeout'],980)
+            self.assertEqual(result['shared_deadline']['agent_allocation_seconds'],1080)
+
+    def test_shared_deadline_rejects_conflicting_inner_limit_before_dispatch(self):
+        from examples.run_swebench_task import execute
+        with self.assertRaisesRegex(ValueError,'not both'):
+            execute(None,None,None,{},None,None,total_seconds=1800,budget_limits={'max_wallclock':600})
+
     def test_failed_unchanged_seed_skips_grade_but_changed_candidate_is_graded(self):
         from examples.run_swebench_task import execute
         from types import SimpleNamespace

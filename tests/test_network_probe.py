@@ -10,6 +10,13 @@ import json
 
 
 class NetworkProbeTests(unittest.TestCase):
+    @staticmethod
+    def logged_result(returncode,stdout='',stderr=''):
+        def run(command,**kwargs):
+            kwargs['log_path'].write_text(stdout+'\n'+stderr,encoding='utf-8')
+            return SimpleNamespace(returncode=returncode)
+        return run
+
     def test_unsigned_message_requires_matching_transient_inrelease_failure(self):
         from keel.network_probe import transient_apt_download
         fetch = 'E: Failed to fetch http://archive.ubuntu.com/ubuntu/dists/jammy/InRelease 502 Bad Gateway\n'
@@ -104,8 +111,7 @@ class NetworkProbeTests(unittest.TestCase):
 
     def test_failed_build_keeps_bounded_redacted_diagnostics(self):
         with patch.dict('os.environ', {'KEEL_MODEL_API_KEY': 'sensitive-value'}), \
-             patch('keel.network_probe.subprocess.run', return_value=SimpleNamespace(
-                 returncode=1, stdout='', stderr='ERROR invalid reference format sensitive-value http://user:pass@example.com')):
+             patch('examples.swebench_bridge.run_harness',side_effect=self.logged_result(1,stderr='ERROR invalid reference format sensitive-value http://user:pass@example.com')):
             result = run_probe(['docker', 'build'])
         self.assertIn('invalid reference format', result['diagnostic'])
         self.assertNotIn('sensitive-value', result['diagnostic'])
@@ -126,8 +132,7 @@ class NetworkProbeTests(unittest.TestCase):
             self.assertLessEqual(value['sample_bytes'], cap+1)
 
     def test_buildkit_stderr_result_is_read(self):
-        with patch('keel.network_probe.subprocess.run', return_value=SimpleNamespace(
-                returncode=0, stdout='', stderr='#8 0.2 KEEL_NETWORK_RESULT={"reachable":true}')):
+        with patch('examples.swebench_bridge.run_harness',side_effect=self.logged_result(0,stderr='#8 0.2 KEEL_NETWORK_RESULT={"reachable":true}')):
             self.assertTrue(run_probe(['docker'])['observation']['reachable'])
 
     def test_build_uses_exact_local_identity_and_disposable_tag(self):
@@ -158,8 +163,7 @@ class NetworkProbeTests(unittest.TestCase):
             self.assertEqual(build_probe('local:test', [])['status'], 'base_identity_changed_or_unverified')
 
     def test_permissions_are_not_classified_as_remote_outage(self):
-        with patch('keel.network_probe.subprocess.run', return_value=SimpleNamespace(
-                returncode=1, stdout='', stderr='permission denied secret-value')):
+        with patch('examples.swebench_bridge.run_harness',side_effect=self.logged_result(1,stderr='permission denied secret-value')):
             result = run_probe(['docker'])
         self.assertEqual(result['status'], 'permission_boundary')
         self.assertNotIn('secret-value', str(result))

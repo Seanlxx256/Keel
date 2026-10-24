@@ -71,7 +71,9 @@ def select(rows, excluded_ids, excluded_repos, seed=42, count=3, repositories=2)
     return chosen
 
 
-def prepare(root, dataset, model_file, harness_python, output, seed=42, count=3, repositories=2, recover_environment=False):
+def prepare(root, dataset, model_file, harness_python, output, seed=42, count=3, repositories=2, recover_environment=False, recover_network=False,recover_compatibility=False):
+    if recover_environment and (recover_network or recover_compatibility):
+        raise ValueError('Packaging recovery cannot stack with transport or dependency reconciliation')
     if not 1 <= repositories <= count <= 20:
         raise ValueError('Require 1 <= repositories <= tasks <= 20')
     if dataset.suffix == '.parquet':
@@ -109,6 +111,12 @@ def prepare(root, dataset, model_file, harness_python, output, seed=42, count=3,
     if recover_environment:
         payload['environment_recovery'] = {'attempts': 3, 'max_steps':9, 'max_model_calls_batch': 9*count,
                                            'scope': 'packaging tools only; reconstructed conditions reported separately'}
+    if recover_network:
+        payload['network_recovery']={'timeout_seconds':1800,'max_steps':4,'max_model_calls_batch':4*count,
+            'scope':'Explicit recovery arm; original reference failures retained, reconstructed conditions separate'}
+    if recover_compatibility:
+        payload['compatibility_recovery']={'timeout_seconds':1800,'attempts':1,'model_calls':0,
+            'scope':'Evidence-gated SCM/declared dependency reconciliation and fresh reference grading'}
     plan = {**payload, 'plan_sha256': digest(payload)}
     (output/'plan.json').write_text(json.dumps(plan, indent=2), encoding='utf-8')
     return plan
@@ -176,6 +184,43 @@ def execute(root, output):
                         reference_dir = directory/'environment-recovery'/recovery['successful_grade']
                         reference = json.loads((reference_dir/'grading.json').read_text(encoding='utf-8'))
                         row['environment_scope'] = 'reconstructed packaging overlay'
+                if reference['status']=='grading_error' and plan.get('network_recovery'):
+                    from keel.reference_network_recovery import failure_inputs,recover_reference_network
+                    from keel.models import from_config
+                    from keel.campaign_reporting import FrozenModel
+                    try:
+                        failure_inputs(directory/'task',directory/'reference',reference_dir)
+                    except ValueError as error:
+                        row['network_recovery']={'status':'not_applicable','reason':str(error)}
+                    else:
+                        settings=plan['network_recovery']
+                        recovery=recover_reference_network(directory/'task',directory/'reference',reference_dir,
+                            directory/'network-recovery',FrozenModel(from_config(model),lambda:verify_plan(root,output)),
+                            python=plan['harness_python'],timeout=settings['timeout_seconds'],
+                            max_steps=settings['max_steps'],grader=grade)
+                        row['network_recovery']=recovery
+                        if recovery['status'] in ('reference_verified','reference_verified_reconstructed'):
+                            reference_dir=directory/'network-recovery/reference-grade'
+                            reference=recovery['grading']
+                            if recovery['status']=='reference_verified_reconstructed':
+                                row['environment_scope']='reconstructed APT transport policy'
+                        elif plan.get('compatibility_recovery') and recovery.get('grading',{}).get('status')=='graded':
+                            reference_dir=directory/'network-recovery/reference-grade'
+                            reference=recovery['grading']
+                if (reference.get('status')=='graded' and reference.get('official_resolved') is False
+                        and plan.get('compatibility_recovery')):
+                    from keel.reference_recovery import recover_reference
+                    try:
+                        recovery=recover_reference(directory/'task',directory/'reference',reference_dir,
+                            directory/'compatibility-recovery',python=plan['harness_python'],
+                            timeout=plan['compatibility_recovery']['timeout_seconds'],grader=grade)
+                    except ValueError as error:
+                        recovery={'status':'not_applicable','reason':str(error)}
+                    row['compatibility_recovery']=recovery
+                    if recovery['status']=='reference_verified_reconstructed':
+                        reference_dir=directory/'compatibility-recovery/reference-grade'
+                        reference=recovery['grading']
+                        row['environment_scope']='reconstructed compatibility and any declared transport policies'
                 row['reference_resolved'] = reference['official_resolved']
                 if reference['status'] != 'graded' or reference['official_resolved'] is not True:
                     row.update(status='reference_failed_or_error', error=reference.get('error'))
@@ -218,11 +263,13 @@ def main():
     parser.add_argument('--tasks', type=int, default=None)
     parser.add_argument('--repositories', type=int, default=None)
     parser.add_argument('--recover-environment', action='store_true')
+    parser.add_argument('--recover-network', action='store_true')
+    parser.add_argument('--recover-compatibility',action='store_true')
     parser.add_argument('--execute', action='store_true')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     if args.execute:
-        if args.dataset or args.model_config or args.harness_python or args.tasks is not None or args.repositories is not None or args.recover_environment:
+        if args.dataset or args.model_config or args.harness_python or args.tasks is not None or args.repositories is not None or args.recover_environment or args.recover_network or args.recover_compatibility:
             parser.error('Execute frozen output only')
         docker = Path('D:/Docker/Desktop/resources/bin')
         if not shutil.which('docker') and (docker/'docker.exe').is_file():
@@ -235,7 +282,7 @@ def main():
         plan = prepare(root, args.dataset.resolve(), args.model_config.resolve(), args.harness_python.resolve(), args.output.resolve(), args.seed,
                        count=args.tasks if args.tasks is not None else 3,
                        repositories=args.repositories if args.repositories is not None else 2,
-                       recover_environment=args.recover_environment)
+                       recover_environment=args.recover_environment, recover_network=args.recover_network,recover_compatibility=args.recover_compatibility)
         print(json.dumps({'status': 'prepared_only', 'tasks': [{key: row[key] for key in ('instance_id', 'repo')} for row in plan['tasks']],
                           'limits': plan['limits'], 'benchmark_ready': False}, indent=2))
     return 0

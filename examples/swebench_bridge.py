@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-import threading
+import codecs
 import time
 import uuid
 
@@ -15,8 +15,8 @@ from keel.evaluation_protocol import file_hash
 from keel.swebench import prepare, verify_task, export_prediction, grading_outcome, reference_prediction, validate_harness_schema
 
 
-def run_harness(command, *, cwd, log_path, timeout, heartbeat=10):
-    """Tee unbuffered child output and report liveness even during quiet phases."""
+def run_harness(command, *, cwd, log_path, timeout, heartbeat=10, echo_output=True, progress_budget=None):
+    """Persist full output, stream bounded console chunks, and enforce timeout cleanup."""
     started = time.monotonic()
     # IOENCODING covers stdio only. UTF8 also covers harness open(..., 'w') logs.
     environment = {**os.environ, 'PYTHONUNBUFFERED': '1', 'PYTHONIOENCODING': 'utf-8', 'PYTHONUTF8': '1'}
@@ -24,6 +24,9 @@ def run_harness(command, *, cwd, log_path, timeout, heartbeat=10):
     environment.pop('KEEL_HARNESS_NETWORK_POLICY', None)
     environment.pop('KEEL_HARNESS_PLUGIN_POLICY', None)
     environment.pop('KEEL_HARNESS_CACHE_SCOPE', None)
+    environment.pop('KEEL_HARNESS_COMPATIBILITY',None)
+    if (cwd/'compatibility-policy.json').is_file():
+        environment['KEEL_HARNESS_COMPATIBILITY']=str((cwd/'compatibility-policy.json').resolve())
     if (cwd/'instance-cache.json').is_file():
         environment['KEEL_HARNESS_CACHE_SCOPE'] = json.loads((cwd/'instance-cache.json').read_text(encoding='utf-8'))['scope']
     if (cwd/'plugin-policy.json').is_file():
@@ -33,62 +36,109 @@ def run_harness(command, *, cwd, log_path, timeout, heartbeat=10):
     if (cwd/'environment-overlay.json').is_file():
         environment['KEEL_HARNESS_ENV_OVERLAY'] = str((cwd/'environment-overlay.json').resolve())
     print(f'[SWE-bench] starting; log: {log_path}', flush=True)
-    with log_path.open('wb') as stream:
-        process = subprocess.Popen(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                   stdin=subprocess.DEVNULL, shell=False, env=environment)
-        (cwd/'harness-process.json').write_text(json.dumps({'pid': process.pid, 'status': 'running',
-                                                           'started_at_unix': time.time()}), encoding='utf-8')
-        def forward():
-            while True:
-                chunk = process.stdout.read1(8192)
-                if not chunk:
-                    break
-                stream.write(chunk)
-                stream.flush()
-                print(chunk.decode('utf-8', errors='replace'), end='', flush=True)
-        reader = threading.Thread(target=forward, daemon=True)
-        reader.start()
+    if timeout<=0 or heartbeat<=0:
+        raise ValueError('Positive process timeout and heartbeat required')
+    # Direct file output has no reader-thread/pipe lock to block timeout cleanup.
+    with log_path.open('wb',buffering=0) as stream, log_path.open('rb',buffering=0) as tail:
+        flags={'creationflags':subprocess.CREATE_NO_WINDOW} if os.name=='nt' else {'start_new_session':True}
+        job=None
+        actual_command=command
+        if os.name=='nt':
+            from keel.process_job import WindowsJob
+            job=WindowsJob()
+            actual_command,flags['startupinfo']=job.command(command)
         try:
-            while True:
-                remaining = timeout-(time.monotonic()-started)
-                if remaining <= 0:
-                    raise subprocess.TimeoutExpired(command, timeout)
-                try:
-                    code = process.wait(timeout=min(heartbeat, remaining))
-                    break
-                except subprocess.TimeoutExpired:
-                    logs = list((cwd/'logs').rglob('*.log')) if (cwd/'logs').exists() else []
-                    latest = max(logs, key=lambda path: path.stat().st_mtime) if logs else None
-                    detail = f'; latest internal log: {latest}' if latest else '; no internal build log yet'
-                    print(f'[SWE-bench +{time.monotonic()-started:.0f}s] process alive; output bytes={stream.tell()}{detail}', flush=True)
-            reader.join(timeout=5)
-            return subprocess.CompletedProcess(command, code)
+            process = subprocess.Popen(actual_command, cwd=cwd, stdout=stream, stderr=subprocess.STDOUT,
+                                       stdin=subprocess.DEVNULL, shell=False, env=environment,**flags)
+        except BaseException:
+            if job:job.close()
+            raise
         finally:
-            if process.poll() is None:
-                process.kill()
-                process.wait(timeout=5)
-            reader.join(timeout=5)
-            process.stdout.close()
-            (cwd/'harness-process.json').write_text(json.dumps({'pid': process.pid, 'status': 'exited',
-                                                               'returncode': process.returncode}), encoding='utf-8')
+            if job and job.handle:job.finish_launch()
+        receipt=cwd/'harness-process.json'
+        decoder=codecs.getincrementaldecoder('utf-8')(errors='replace')
+        forwarded=0
+        def forward():
+            nonlocal forwarded
+            chunk=tail.read(65536)
+            if chunk:
+                forwarded+=len(chunk)
+                decoded=decoder.decode(chunk)
+                if progress_budget:progress_budget.observe(decoded,time.monotonic()-started)
+                if echo_output:print(decoded,end='',flush=True)
+        status='exited'
+        cleanup={'method':'root_exit','root_exited':False,'descendants_verified':False}
+        next_heartbeat=time.monotonic()+heartbeat
+        try:
+            receipt.write_text(json.dumps({'pid':process.pid,'status':'running','started_at_unix':time.time()}),encoding='utf-8')
+            while True:
+                forward()
+                remaining=timeout-(time.monotonic()-started)
+                if progress_budget:
+                    remaining=min(remaining,progress_budget.remaining(time.monotonic()-started))
+                if remaining<=0:
+                    status='timed_out'
+                    raise subprocess.TimeoutExpired(command,timeout)
+                try:
+                    code=process.wait(timeout=min(.2,heartbeat,remaining))
+                    forward()
+                    return subprocess.CompletedProcess(command,code)
+                except subprocess.TimeoutExpired:
+                    if time.monotonic()>=next_heartbeat:
+                        logs=list((cwd/'logs').rglob('*.log')) if (cwd/'logs').exists() else []
+                        latest=max(logs,key=lambda path:path.stat().st_mtime) if logs else None
+                        detail=f'; latest internal log: {latest}' if latest else '; no internal build log yet'
+                        print(f'[SWE-bench +{time.monotonic()-started:.0f}s] process alive; output bytes={log_path.stat().st_size}{detail}',flush=True)
+                        next_heartbeat=time.monotonic()+heartbeat
+        except BaseException as error:
+            if status!='timed_out':status='interrupted' if isinstance(error,KeyboardInterrupt) else 'error'
+            raise
+        finally:
+            from examples.continue_index_validation import stop_tree
+            if job:
+                cleanup=job.terminate()
+                if process.poll() is None:
+                    try:process.kill()
+                    except OSError:pass
+                try:process.wait(timeout=5)
+                except subprocess.TimeoutExpired:cleanup['wait_timed_out']=True
+                cleanup['root_exited']=process.poll() is not None
+            elif process.poll() is None or os.name!='nt':
+                cleanup=stop_tree(process,timeout=5,process_group=os.name!='nt')
+            else:
+                cleanup['root_exited']=True
+            forward()
+            receipt.write_text(json.dumps({'pid':process.pid,'status':status,'returncode':process.poll(),
+                'cleanup':cleanup,'console_forwarded_bytes':forwarded if echo_output else 0,
+                'log_bytes':log_path.stat().st_size,'console_output_complete':echo_output and forwarded>=log_path.stat().st_size,
+                'progress_budget':progress_budget.receipt() if progress_budget else None,
+                'scope':'Local process cleanup only; Docker daemon build cancellation is not independently verified'}),encoding='utf-8')
 
 
-def grade(task_dir, export_dir, output, *, python=sys.executable, timeout=1800, environment_overlay=None, network_policy=None, plugin_policy=None, instance_cache_scope=None):
+def grade(task_dir, export_dir, output, *, python=sys.executable, timeout=1800, environment_overlay=None, network_policy=None, plugin_policy=None, instance_cache_scope=None,compatibility_policy=None):
     if instance_cache_scope is not None:
         from keel.harness_cache import validate_scope
         validate_scope(instance_cache_scope)
     if type(timeout) not in (int, float) or not 0 < timeout <= 86400:
         raise ValueError('Harness timeout must be positive and at most 86400 seconds')
-    if network_policy not in (None, 'no_pipeline') or (network_policy and environment_overlay):
+    if network_policy not in (None, 'no_pipeline','retry_acquire') or (network_policy and environment_overlay):
         raise ValueError('Use one registered network policy without stacking packaging overlays')
     if plugin_policy not in (None,'remove_unused_vcs_versioning') or (plugin_policy and environment_overlay):
         raise ValueError('Use registered plugin recovery without packaging overlay stacking')
+    if compatibility_policy is not None:
+        from keel.dependency_compatibility import validate_policy
+        if environment_overlay is not None:raise ValueError('Do not stack packaging and dependency overlays')
+        if isinstance(compatibility_policy,(str,Path)):
+            compatibility_policy=json.loads(Path(compatibility_policy).read_text(encoding='utf-8'))
+        validate_policy(compatibility_policy)
     task = verify_task(task_dir)
     receipt = json.loads((export_dir/'export-receipt.json').read_text(encoding='utf-8'))
     if (receipt['predictions_sha256'] != file_hash(export_dir/'predictions.jsonl') or
             receipt['task_receipt_sha256'] != file_hash(task_dir/'task-receipt.json')):
         raise ValueError('Export inputs changed')
     output.mkdir(parents=True, exist_ok=False)
+    if compatibility_policy is not None:
+        (output/'compatibility-policy.json').write_text(json.dumps(compatibility_policy,indent=2),encoding='utf-8')
     if instance_cache_scope is not None:
         (output/'instance-cache.json').write_text(json.dumps({'scope': instance_cache_scope}), encoding='utf-8')
     if plugin_policy:
@@ -104,7 +154,7 @@ def grade(task_dir, export_dir, output, *, python=sys.executable, timeout=1800, 
                '--dataset_name', str((output/'grader-input.json').resolve()),
                '--predictions_path', str((export_dir/'predictions.jsonl').resolve()),
                '--instance_ids', task['instance_id'], '--max_workers', '1', '--run_id', run_id]
-    if environment_overlay is not None or network_policy or plugin_policy or instance_cache_scope:
+    if environment_overlay is not None or network_policy or plugin_policy or instance_cache_scope or compatibility_policy:
         command.extend(['--cache_level', 'instance'])
     result = {'status': 'running', 'official_resolved': None, 'runtime_status': receipt['runtime_status'],
               'command': command, 'run_id': run_id, 'benchmark_ready': False, 'timeout_seconds': timeout,
@@ -123,6 +173,9 @@ def grade(task_dir, export_dir, output, *, python=sys.executable, timeout=1800, 
         result['plugin_policy']=plugin_policy
         result['plugin_policy_sha256']=file_hash(output/'plugin-policy.json')
         result['environment_scope']='Explicit SCM plugin recovery and any declared network adaptation; unchanged source/tests; reconstructed environment, not original-condition score'
+    if compatibility_policy:
+        result['compatibility_policy_sha256']=file_hash(output/'compatibility-policy.json')
+        result['environment_scope']='Declared consumer dependency reconciliation plus any plugin/transport policies; unchanged project source/tests, not original-condition score'
     try:
         result['harness_version'] = (importlib.metadata.version('swebench') if python == sys.executable else
             subprocess.run([python, '-c', 'import importlib.metadata; print(importlib.metadata.version("swebench"))'],
@@ -198,7 +251,10 @@ def grade_snapshot(task_dir, repo, reference_dir, output, *, python, timeout):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=('prepare', 'export', 'reference', 'grade','recover-reference','grade-snapshot'))
+    parser.add_argument('action', choices=('prepare', 'export', 'reference', 'grade','recover-reference','recover-reference-network','grade-snapshot'))
+    parser.add_argument('--harness-python',type=Path)
+    parser.add_argument('--model-config',type=Path)
+    parser.add_argument('--max-network-steps',type=int,default=4)
     parser.add_argument('--reference-grade',type=Path)
     parser.add_argument('--failed-grade',type=Path)
     parser.add_argument('--dataset', type=Path)
@@ -209,8 +265,9 @@ def main():
     parser.add_argument('--model-name', default='keel')
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--execute', action='store_true')
-    parser.add_argument('--network-policy', choices=['no_pipeline'])
+    parser.add_argument('--network-policy', choices=['no_pipeline','retry_acquire'])
     parser.add_argument('--instance-cache-scope', help='Retain session/recipe-scoped image; fresh containers and test scores')
+    parser.add_argument('--compatibility-policy',type=Path)
     parser.add_argument('--timeout', type=int, default=1800,
                         help='Total grading deadline in seconds, including image builds (default: 1800)')
     args = parser.parse_args()
@@ -234,6 +291,21 @@ def main():
         else:
             result=grade_snapshot(args.task.resolve(),args.run.resolve(),args.reference_grade.resolve(),
                                   args.output.resolve(),python=sys.executable,timeout=args.timeout)
+    elif args.action=='recover-reference-network':
+        if not args.task or not args.export_dir or not args.failed_grade or not args.model_config:
+            parser.error('recover-reference-network requires task, reference export, failed-grade and model-config')
+        from keel.reference_network_recovery import failure_inputs,recover_reference_network
+        failure_inputs(args.task.resolve(),args.export_dir.resolve(),args.failed_grade.resolve())
+        if not args.execute:
+            result={'status':'plan_only','max_model_calls':args.max_network_steps,
+                'scope':'Bounded original APT retry, registered transport diagnosis and fresh reference grading; not source repair'}
+        else:
+            from keel.models import from_config
+            model=from_config(json.loads(args.model_config.read_text(encoding='utf-8')))
+            preflight=getattr(model,'check_credentials',None)
+            if callable(preflight):preflight()
+            result=recover_reference_network(args.task.resolve(),args.export_dir.resolve(),args.failed_grade.resolve(),
+                args.output.resolve(),model,python=str(args.harness_python.resolve()) if args.harness_python else sys.executable,timeout=args.timeout,max_steps=args.max_network_steps,grader=grade)
     elif args.action=='recover-reference':
         if not args.task or not args.export_dir or not args.failed_grade:
             parser.error('recover-reference requires task, export and failed-grade')
@@ -249,7 +321,7 @@ def main():
         if not args.execute:
             result = {'status': 'plan_only', 'next': 'Invoke official Docker harness with --execute', 'benchmark_ready': False}
         else:
-            result = grade(args.task.resolve(), args.export_dir.resolve(), args.output.resolve(), timeout=args.timeout, network_policy=args.network_policy, instance_cache_scope=args.instance_cache_scope)
+            result = grade(args.task.resolve(), args.export_dir.resolve(), args.output.resolve(), timeout=args.timeout, network_policy=args.network_policy, instance_cache_scope=args.instance_cache_scope,compatibility_policy=args.compatibility_policy)
     print(json.dumps(result, indent=2))
     return 1 if result.get('status') in ('grading_error','environment_unresolved') else 0
 

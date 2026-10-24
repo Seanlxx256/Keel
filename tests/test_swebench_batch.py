@@ -19,7 +19,7 @@ class SwebenchBatchTests(unittest.TestCase):
                  'base_commit': 'a'*40, 'problem_statement': 'Issue', 'patch': 'gold', 'test_patch': 'tests'}
                 for repo in ('alpha', 'beta', 'gamma') for number in range(1, 4)]
 
-    def fixture(self, root):
+    def fixture(self, root, **settings):
         (root/'examples').mkdir()
         (root/'examples/evaluation_development_registry.json').write_text('{"tasks":[]}')
         source = root/'data.json'
@@ -27,7 +27,7 @@ class SwebenchBatchTests(unittest.TestCase):
         model = root/'model.json'
         model.write_text('{"name":"test"}')
         with patch('examples.run_swebench_batch.seen_tasks', return_value=(set(), {}, [])):
-            return prepare(root, source, model, root/'python', root/'batch')
+            return prepare(root, source, model, root/'python', root/'batch', **settings)
 
     def test_exposure_scan_skips_environments_but_keeps_experiment_receipts(self):
         from examples.run_swebench_batch import seen_tasks
@@ -89,6 +89,19 @@ class SwebenchBatchTests(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 execute(root, root/'batch')
 
+    def test_network_recovery_is_opt_in_and_hands_verified_reference_to_agent(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);plan=self.fixture(root,recover_network=True)
+            self.assertEqual(plan['network_recovery']['max_steps'],4)
+            grades=[{'status':'grading_error','official_resolved':None}]+[{'status':'graded','official_resolved':True}]*2
+            recovered={'status':'reference_verified_reconstructed','grading':{'status':'graded','official_resolved':True}}
+            with patch('examples.run_swebench_batch.grade',side_effect=grades), patch('keel.reference_network_recovery.failure_inputs'), patch('keel.reference_network_recovery.recover_reference_network',return_value=recovered) as recovery, patch('examples.run_swebench_batch.run_task',return_value={'status':'completed','runtime_status':'passed','official_resolved':True}) as agent:
+                result=execute(root,root/'batch')
+            recovery.assert_called_once()
+            self.assertEqual(agent.call_args_list[0].args[2],root/'batch'/plan['tasks'][0]['directory']/'network-recovery/reference-grade')
+            self.assertEqual(result['records'][0]['environment_scope'],'reconstructed APT transport policy')
+            self.assertEqual(result['counts']['resolved_reconstructed_environment'],1)
+
     def test_changed_reference_cannot_enter_trial(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -97,3 +110,18 @@ class SwebenchBatchTests(unittest.TestCase):
             reference.write_text('{}')
             with self.assertRaisesRegex(ValueError, 'reference changed'):
                 verify_plan(root, root/'batch')
+
+    def test_compatibility_recovery_automatically_hands_fresh_reference_to_agent(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);plan=self.fixture(root,recover_compatibility=True)
+            self.assertEqual(plan['compatibility_recovery']['model_calls'],0)
+            grades=[{'status':'graded','official_resolved':False}]+[{'status':'graded','official_resolved':True}]*2
+            recovered={'status':'reference_verified_reconstructed','grading':{'status':'graded','official_resolved':True}}
+            with patch('examples.run_swebench_batch.grade',side_effect=grades), \
+                    patch('keel.reference_recovery.recover_reference',return_value=recovered) as recovery, \
+                    patch('examples.run_swebench_batch.run_task',return_value={
+                        'status':'completed','runtime_status':'passed','official_resolved':True}) as agent:
+                result=execute(root,root/'batch')
+            recovery.assert_called_once()
+            self.assertEqual(agent.call_args_list[0].args[2],root/'batch'/plan['tasks'][0]['directory']/'compatibility-recovery/reference-grade')
+            self.assertEqual(result['counts']['resolved_reconstructed_environment'],1)

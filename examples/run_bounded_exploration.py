@@ -1,6 +1,7 @@
 """Run one frozen repair attempt under a total wall-clock deadline; never restart it."""
 import argparse
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -33,12 +34,24 @@ def execute(plan_path):
               'scope': 'One development continuation; timeout is not a failed acceptance score'}
     receipt.write_text(json.dumps(result, indent=2), encoding='utf-8')
     with log.open('wb') as stream:
-        child = subprocess.Popen([plan['python'], *plan['arguments']], cwd=root,
-                                 stdout=stream, stderr=subprocess.STDOUT)
+        command=[plan['python'],*plan['arguments']]
+        job=None
+        options={'creationflags':subprocess.CREATE_NO_WINDOW} if os.name=='nt' else {'start_new_session':True}
+        if os.name=='nt':
+            from keel.process_job import WindowsJob
+            job=WindowsJob();command,options['startupinfo']=job.command(command)
+        try:
+            child = subprocess.Popen(command,cwd=root,stdout=stream,stderr=subprocess.STDOUT,**options)
+        except BaseException:
+            if job:job.close()
+            raise
+        finally:
+            if job and job.handle:job.finish_launch()
         try:
             while child.poll() is None:
                 if time.monotonic()-started >= plan['max_seconds']:
-                    stop_tree(child)
+                    if job:result['cleanup']=job.terminate()
+                    stop_tree(child,process_group=os.name!='nt')
                     result['status'] = 'deadline_exceeded'
                     break
                 print(f"[Exploration] elapsed={int(time.monotonic()-started)}s; log={log}", flush=True)
@@ -46,10 +59,11 @@ def execute(plan_path):
             else:
                 result['status'] = 'passed' if child.returncode == 0 else 'unresolved'
         finally:
+            if job and job.handle:result['cleanup']=job.terminate()
             if child.poll() is None:
-                stop_tree(child)
+                stop_tree(child,process_group=os.name!='nt')
             result.update(returncode=child.poll(), seconds=round(time.monotonic()-started, 3),
-                          cleanup_scope='Child process tree stopped; Docker cleanup is not independently certified')
+                          cleanup_scope='Local containment termination attempted; Docker daemon cleanup is not independently certified')
             receipt.write_text(json.dumps(result, indent=2), encoding='utf-8')
     print(json.dumps(result), flush=True)
     return 0 if result['status'] == 'passed' else 1

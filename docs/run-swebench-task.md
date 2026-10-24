@@ -100,3 +100,5 @@ AST changes still do not prove semantic progress. Other execution modes retain
 their existing contracts. Old frozen implementation plans must not be rerun after
 this migration. No new live recovery result is implied by local test success.
 
+
+For a shared end-to-end deadline use `--total-seconds 1780 --final-grade-reserve 600` inside a1800s outer watchdog. Do not also pass `--max-agent-seconds`. Preparation is deducted, Agent includes in-loop verification, and final grading receives actual remaining time. The reserve is a scheduling allocation, not proof grading will finish. Existing Token/tool/model and profile ceilings remain active; trial.json records allocations under shared_deadline.
