@@ -13,6 +13,21 @@ from keel.runtime import validate
 
 
 class SwebenchTaskTests(unittest.TestCase):
+    def test_empty_candidate_skips_grading_without_losing_runtime_failure(self):
+        from examples.run_swebench_task import execute
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);row=self.task(root);reference=self.policy_reference(root,row)
+            repo=root/'repo';repo.mkdir()
+            failure={'category':'model_error','stage':'implementer','message':'ambiguous edit'}
+            with patch('examples.run_swebench_task.subprocess.run',return_value=SimpleNamespace(stdout='3.0.0')), patch('examples.run_swebench_task.prepare_snapshot',return_value=repo), patch('examples.run_swebench_task.run',return_value={'status':'failed','budget':{},'failure':failure}), patch('examples.run_swebench_task.export_prediction',return_value={'empty_patch':True}), patch('examples.run_swebench_task.grade') as grader:
+                report=execute(root,root/'task',reference,{'name':'test'},'python',root/'trial')
+            grader.assert_not_called()
+            self.assertEqual(report['failure'],failure)
+            self.assertEqual(report['final_grading']['status'],'skipped_no_candidate')
+            self.assertIsNone(report['official_resolved'])
+            self.assertEqual(json.loads((root/'trial/trial.json').read_text())['status'],'unresolved')
+
     def test_shared_deadline_deducts_preparation_and_bounds_final_grade(self):
         from examples.run_swebench_task import execute
         from types import SimpleNamespace

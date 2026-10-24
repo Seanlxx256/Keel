@@ -350,9 +350,14 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
         if result.get('selected_repair_candidate'):
             report['selected_repair_candidate'] = {k:v for k,v in result['selected_repair_candidate'].items() if k != 'verification'}
         frozen()
-        export_prediction(task_dir, output/'run', output/'prediction', 'keel',**({'source_repo':repo} if continuation else {}))
+        exported = export_prediction(task_dir, output/'run', output/'prediction', 'keel',**({'source_repo':repo} if continuation else {}))
         if (result.get('failure') or {}).get('category') == 'environment_blocked':
             report['status'] = 'environment_blocked'
+            return report
+        if isinstance(exported, dict) and exported.get('empty_patch') is True:
+            report.update(status='unresolved', official_resolved=None,
+                final_grading={'status':'skipped_no_candidate',
+                    'scope':'Empty exported patch; no official tests dispatched, no acceptance score.'})
             return report
         if continuation and result['status'] != 'passed':
             from keel.swebench import workspace_patch

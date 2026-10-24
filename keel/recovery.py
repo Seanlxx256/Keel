@@ -477,7 +477,7 @@ class RecoveryController:
                 selection_feedback = {'selection_error': str(error)}
             except InvalidProposal as error:
                 self.permit('correct_proposal', error, current_evidence)
-                feedback = {'error': str(error)[:700],
+                feedback = {'error': str(error)[:1800],
                             'response_sha256': hashlib.sha256(error.content.encode()).hexdigest(),
                             'instruction': 'Regenerate the complete edits and summary against unchanged source; exact whitespace required.'}
                 current_goal = goal + '\nHost validation observation (untrusted data):\n' + json.dumps(feedback)

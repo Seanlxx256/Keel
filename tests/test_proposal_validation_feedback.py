@@ -8,6 +8,30 @@ from keel.runtime import run
 
 
 class ProposalValidationFeedbackTests(unittest.TestCase):
+    def test_duplicate_match_feedback_drives_unique_edit_without_partial_write(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)
+            initial='def left():\n    return 1\n\ndef right():\n    return 1\n'
+            (root/'app.py').write_text(initial)
+            class Model:
+                calls=0
+                def complete_json(inner,messages,**kwargs):
+                    inner.calls+=1
+                    if inner.calls==1:
+                        old,new='    return 1','    return 2'
+                    else:
+                        self.assertEqual((root/'app.py').read_text(),initial)
+                        feedback=messages[1]['content']
+                        self.assertIn('def left()',feedback)
+                        self.assertIn('def right()',feedback)
+                        self.assertIn('uniquely identify',feedback)
+                        old,new='def right():\n    return 1','def right():\n    return 2'
+                    return Reply(json.dumps({'summary':'update right','edits':[{'path':'app.py','old':old,'new':new}]}),10)
+            config={'mode':'proposal','goal':'Update right only','proposal':{'files':['app.py'],'queries':['return']},'verification_repair_attempts':1,'budget':{'max_model_calls':2},'acceptance':[[sys.executable,'-B','-c','import app; assert app.left()==1 and app.right()==2']]}
+            result=run(config,root,root/'.keel/run',model=Model())
+            self.assertEqual(result['status'],'passed')
+            self.assertIn('def left():\n    return 1', (root/'app.py').read_text())
+
     def trial(self, calls=2, policy=False, repeat_bad=False, oversized=False, cap=None):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)

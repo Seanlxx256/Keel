@@ -234,6 +234,26 @@ def proposal_request(goal, files, evidence, settings, *, structured=True, depend
     return messages, schema, size
 
 
+def ambiguous_edit_feedback(index, name, source, old, matches):
+    """Bounded current-source hints; never choose a replacement occurrence."""
+    locations = []
+    offset = 0
+    lines = source.splitlines()
+    for _ in range(min(matches, 3)):
+        start = source.find(old, offset)
+        if start < 0:
+            break
+        line = source.count('\n', 0, start) + 1
+        column = start - source.rfind('\n', 0, start)
+        context = '\n'.join(text[:80] for text in lines[max(0, line-2):min(len(lines), line+1)])
+        locations.append({'line': line, 'column': column, 'context': context})
+        offset = start + len(old)
+    return (f'Edit {index}: old text matched {matches} occurrences; expected exactly one. '
+            + json.dumps({'path':name, 'matches':locations, 'omitted':max(0,matches-len(locations))}, ensure_ascii=False)
+            + ' Expand old and new with unchanged surrounding source to uniquely identify the intended edit; '
+              'do not choose the first match or alter all occurrences.')
+
+
 class InvalidProposal(ModelError):
     def __init__(self, message, content):
         super().__init__(message)
@@ -386,7 +406,8 @@ def _propose_once(model, workspace, goal, files, evidence, settings, *, dependen
             old, new = aligned_old, aligned_new
             matches = before.count(old)
             if matches != 1:
-                raise ValueError(f'Edit {index}: old text matched {matches} occurrences; expected exactly one')
+                raise ValueError(ambiguous_edit_feedback(index, name, before, old, matches) if matches > 1 else
+                                 f'Edit {index}: old text matched 0 occurrences; expected exactly one')
             if old == new:
                 unchanged.append(index)
                 continue
