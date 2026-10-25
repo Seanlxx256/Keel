@@ -60,6 +60,12 @@ def reference_policies(reference_dir):
         if file_hash(path)!=result['compatibility_policy_sha256']:raise ValueError('Reference compatibility policy changed')
         validate_policy(json.loads(path.read_text(encoding='utf-8')))
         policies['compatibility_policy']=str(path.resolve())
+    if result.get('apt_archives_sha256'):
+        from keel.apt_archive_bridge import validate_artifact
+        path=reference_dir/'apt-archives.json'
+        if file_hash(path)!=result['apt_archives_sha256']:raise ValueError('Reference archive artifact changed')
+        validate_artifact(json.loads(path.read_text(encoding='utf-8')))
+        policies['apt_archives']=str(path.resolve())
     return policies
 
 

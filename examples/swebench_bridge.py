@@ -25,6 +25,9 @@ def run_harness(command, *, cwd, log_path, timeout, heartbeat=10, echo_output=Tr
     environment.pop('KEEL_HARNESS_PLUGIN_POLICY', None)
     environment.pop('KEEL_HARNESS_CACHE_SCOPE', None)
     environment.pop('KEEL_HARNESS_COMPATIBILITY',None)
+    environment.pop('KEEL_HARNESS_APT_ARCHIVES',None)
+    if (cwd/'apt-archives.json').is_file():
+        environment['KEEL_HARNESS_APT_ARCHIVES']=str((cwd/'apt-archives.json').resolve())
     if (cwd/'compatibility-policy.json').is_file():
         environment['KEEL_HARNESS_COMPATIBILITY']=str((cwd/'compatibility-policy.json').resolve())
     if (cwd/'instance-cache.json').is_file():
@@ -115,7 +118,7 @@ def run_harness(command, *, cwd, log_path, timeout, heartbeat=10, echo_output=Tr
                 'scope':'Local process cleanup only; Docker daemon build cancellation is not independently verified'}),encoding='utf-8')
 
 
-def grade(task_dir, export_dir, output, *, python=sys.executable, timeout=1800, environment_overlay=None, network_policy=None, plugin_policy=None, instance_cache_scope=None,compatibility_policy=None):
+def grade(task_dir, export_dir, output, *, python=sys.executable, timeout=1800, environment_overlay=None, network_policy=None, plugin_policy=None, instance_cache_scope=None,compatibility_policy=None,apt_archives=None):
     # Direct API callers may supply PathLike interpreters; persisted commands
     # must contain strings before either launch or required receipt writes.
     python=os.fsdecode(python)
@@ -135,11 +138,18 @@ def grade(task_dir, export_dir, output, *, python=sys.executable, timeout=1800, 
             compatibility_policy=json.loads(Path(compatibility_policy).read_text(encoding='utf-8'))
         validate_policy(compatibility_policy)
     task = verify_task(task_dir)
+    if apt_archives is not None:
+        from keel.apt_archive_bridge import validate_artifact
+        if isinstance(apt_archives,(str,Path)):
+            apt_archives=json.loads(Path(apt_archives).read_text(encoding='utf-8'))
+        validate_artifact(apt_archives)
     receipt = json.loads((export_dir/'export-receipt.json').read_text(encoding='utf-8'))
     if (receipt['predictions_sha256'] != file_hash(export_dir/'predictions.jsonl') or
             receipt['task_receipt_sha256'] != file_hash(task_dir/'task-receipt.json')):
         raise ValueError('Export inputs changed')
     output.mkdir(parents=True, exist_ok=False)
+    if apt_archives is not None:
+        (output/'apt-archives.json').write_text(json.dumps(apt_archives,indent=2),encoding='utf-8')
     if compatibility_policy is not None:
         (output/'compatibility-policy.json').write_text(json.dumps(compatibility_policy,indent=2),encoding='utf-8')
     if instance_cache_scope is not None:
@@ -157,7 +167,7 @@ def grade(task_dir, export_dir, output, *, python=sys.executable, timeout=1800, 
                '--dataset_name', str((output/'grader-input.json').resolve()),
                '--predictions_path', str((export_dir/'predictions.jsonl').resolve()),
                '--instance_ids', task['instance_id'], '--max_workers', '1', '--run_id', run_id]
-    if environment_overlay is not None or network_policy or plugin_policy or instance_cache_scope or compatibility_policy:
+    if environment_overlay is not None or network_policy or plugin_policy or instance_cache_scope or compatibility_policy or apt_archives:
         command.extend(['--cache_level', 'instance'])
     result = {'status': 'running', 'official_resolved': None, 'runtime_status': receipt['runtime_status'],
               'command': command, 'run_id': run_id, 'benchmark_ready': False, 'timeout_seconds': timeout,
@@ -179,6 +189,9 @@ def grade(task_dir, export_dir, output, *, python=sys.executable, timeout=1800, 
     if compatibility_policy:
         result['compatibility_policy_sha256']=file_hash(output/'compatibility-policy.json')
         result['environment_scope']='Declared consumer dependency reconciliation plus any plugin/transport policies; unchanged project source/tests, not original-condition score'
+    if apt_archives:
+        result['apt_archives_sha256']=file_hash(output/'apt-archives.json')
+        result['environment_scope']='Declared archive-cache import and any registered environment policies; fresh tests, unchanged source; not original-condition score'
     try:
         result['harness_version'] = (importlib.metadata.version('swebench') if python == sys.executable else
             subprocess.run([python, '-c', 'import importlib.metadata; print(importlib.metadata.version("swebench"))'],
@@ -264,6 +277,7 @@ def main():
                         help='Explicit original reference build directory for a cached-image failure')
     parser.add_argument('--preserve-compatibility',action='store_true',
                         help='Network recovery must carry hash-verified existing plugin/dependency policies unchanged')
+    parser.add_argument('--bridge-archives',action='store_true',help='Export completed diagnostic archives for official build; stop if unavailable')
     parser.add_argument('--dataset', type=Path)
     parser.add_argument('--instance-id')
     parser.add_argument('--task', type=Path)
@@ -274,6 +288,7 @@ def main():
     parser.add_argument('--execute', action='store_true')
     parser.add_argument('--network-policy', choices=['no_pipeline','retry_acquire'])
     parser.add_argument('--plugin-policy', choices=['remove_unused_vcs_versioning'])
+    parser.add_argument('--apt-archives',type=Path,help='Explicit hash-bound diagnostic archive image artifact')
     parser.add_argument('--instance-cache-scope', help='Retain session/recipe-scoped image; fresh containers and test scores')
     parser.add_argument('--compatibility-policy',type=Path)
     parser.add_argument('--timeout', type=int, default=1800,
@@ -315,7 +330,8 @@ def main():
             if callable(preflight):preflight()
             result=recover_reference_network(args.task.resolve(),args.export_dir.resolve(),args.failed_grade.resolve(),
                 args.output.resolve(),model,python=str(args.harness_python.resolve()) if args.harness_python else sys.executable,timeout=args.timeout,max_steps=args.max_network_steps,grader=grade,
-                **({'preserve_compatibility':True} if args.preserve_compatibility else {}))
+                **({'preserve_compatibility':True} if args.preserve_compatibility else {}),
+                **({'bridge_archives':True} if args.bridge_archives else {}))
     elif args.action=='recover-reference':
         if not args.task or not args.export_dir or not args.failed_grade:
             parser.error('recover-reference requires task, export and failed-grade')
@@ -333,7 +349,8 @@ def main():
             result = {'status': 'plan_only', 'next': 'Invoke official Docker harness with --execute', 'benchmark_ready': False}
         else:
             result = grade(args.task.resolve(), args.export_dir.resolve(), args.output.resolve(), timeout=args.timeout, network_policy=args.network_policy, instance_cache_scope=args.instance_cache_scope,compatibility_policy=args.compatibility_policy,
-                           **({'plugin_policy':args.plugin_policy} if args.plugin_policy else {}))
+                           **({'plugin_policy':args.plugin_policy} if args.plugin_policy else {}),
+                           **({'apt_archives':args.apt_archives} if args.apt_archives else {}))
     print(json.dumps(result, indent=2))
     if args.execute and args.action in {'grade', 'grade-snapshot'}:
         # A successful harness process only means scoring completed. A reference

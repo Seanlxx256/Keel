@@ -27,7 +27,7 @@ def failure_inputs(task, export, failed, *, preserve_compatibility=False):
     if old.get('network_policy') or old.get('environment_overlay_sha256'):
         raise ValueError('Do not stack recovery policies')
     policy_inputs=[]
-    if old.get('plugin_policy') or old.get('compatibility_policy_sha256'):
+    if old.get('plugin_policy') or old.get('compatibility_policy_sha256') or old.get('apt_archives_sha256'):
         if not preserve_compatibility:
             raise ValueError('Existing compatibility policies require explicit preservation')
         if old.get('plugin_policy'):
@@ -36,6 +36,12 @@ def failure_inputs(task, export, failed, *, preserve_compatibility=False):
             if (old['plugin_policy']!=POLICY or file_hash(path)!=old.get('plugin_policy_sha256')
                     or json.loads(path.read_text(encoding='utf-8'))!={'policy':POLICY,'version':1}):
                 raise ValueError('Prior plugin policy changed')
+            policy_inputs.append(path)
+        if old.get('apt_archives_sha256'):
+            from .apt_archive_bridge import validate_artifact
+            path=failed/'apt-archives.json'
+            if file_hash(path)!=old['apt_archives_sha256']:raise ValueError('Prior archive artifact changed')
+            validate_artifact(json.loads(path.read_text(encoding='utf-8')))
             policy_inputs.append(path)
         if old.get('compatibility_policy_sha256'):
             from .dependency_compatibility import validate_policy
@@ -68,7 +74,7 @@ def failure_inputs(task, export, failed, *, preserve_compatibility=False):
     return row,old,script,match[1],[task/'task-receipt.json',failed/'grading.json',failed/'grader-input.json',export/'predictions.jsonl',export/'export-receipt.json',log,script,dockerfile,*policy_inputs]
 
 
-def recover_reference_network(task,export,failed,output,model,*,python,timeout=1800,max_steps=4,grader=None,workload=None,network_recover=None,image_identity=None,preserve_compatibility=False):
+def recover_reference_network(task,export,failed,output,model,*,python,timeout=1800,max_steps=4,grader=None,workload=None,network_recover=None,image_identity=None,preserve_compatibility=False,bridge_archives=False,archive_exporter=None):
     if type(timeout) is not int or not 900<=timeout<=7200 or type(max_steps) is not int or not 1<=max_steps<=6:
         raise ValueError('Recovery requires900..7200seconds and1..6model steps')
     row,old,script,image,inputs=failure_inputs(task,export,failed,preserve_compatibility=preserve_compatibility)
@@ -146,13 +152,34 @@ def recover_reference_network(task,export,failed,output,model,*,python,timeout=1
         if old.get('plugin_policy'):kwargs['plugin_policy']=old['plugin_policy']
         if old.get('compatibility_policy_sha256'):
             kwargs['compatibility_policy']=json.loads((failed/'compatibility-policy.json').read_text(encoding='utf-8'))
+        if old.get('apt_archives_sha256'):
+            kwargs['apt_archives']=json.loads((failed/'apt-archives.json').read_text(encoding='utf-8'))
+        if bridge_archives and 'apt_archives' not in kwargs:
+            from .apt_archive_bridge import export_archives
+            candidates=[]
+            for path in output.rglob('diagnosis.json'):
+                if path.is_symlink() or not path.resolve().is_relative_to(output.resolve()):
+                    raise ValueError('Archive diagnosis escapes owned output')
+                value=json.loads(path.read_text(encoding='utf-8'))
+                if value.get('status')=='apt_completed' and value.get('source_sha256')==file_hash(script):
+                    candidates.append(path)
+            if len(candidates)!=1:raise ValueError('Require one completed owned APT diagnosis for archive export')
+            seconds=min(300,int(remaining())-600)
+            if seconds<30:raise TimeoutError('Insufficient archive export time after grading reserve')
+            report['status']='archive_export';save()
+            exported=(archive_exporter or export_archives)(candidates[0],script,output/'archive-export',timeout=seconds)
+            report['archive_bridge']=exported;save();check()
+            if exported.get('status')!='completed':
+                report.update(status='environment_unresolved',stop_reason='archive_export_unavailable_no_blind_redownload')
+                return report
+            kwargs['apt_archives']=exported['artifact']
         scope=old.get('instance_cache',{}).get('scope')
         if scope:kwargs['instance_cache_scope']=scope
         result=grader(task,export,output/'reference-grade',python=python,timeout=remaining(),**kwargs)
         report['grading']=result
         check()
         passed=result.get('status')=='graded' and result.get('official_resolved') is True
-        reconstructed=policy or old.get('plugin_policy') or old.get('compatibility_policy_sha256')
+        reconstructed=policy or old.get('plugin_policy') or old.get('compatibility_policy_sha256') or kwargs.get('apt_archives')
         report['status']=('reference_verified_reconstructed' if reconstructed else 'reference_verified') if passed else 'environment_unresolved'
     except Exception as error:
         report.update(status='environment_unresolved',error_type=type(error).__name__)

@@ -23,7 +23,11 @@ if __name__ == '__main__':
         import json
         from keel.dependency_compatibility import install_compatibility_policy
         install_compatibility_policy(json.loads(Path(os.environ['KEEL_HARNESS_COMPATIBILITY']).read_text(encoding='utf-8')))
-    # Hash the final recipe, including compatibility implementation and pins.
+    if os.environ.get('KEEL_HARNESS_APT_ARCHIVES'):
+        import json
+        from keel.apt_archive_bridge import install_archive_policy
+        install_archive_policy(json.loads(Path(os.environ['KEEL_HARNESS_APT_ARCHIVES']).read_text(encoding='utf-8')))
+    # Hash the final recipe, including compatibility implementation, pins and archives.
     if os.environ.get('KEEL_HARNESS_CACHE_SCOPE'):
         from keel.harness_cache import install_cache_scope
         install_cache_scope(os.environ['KEEL_HARNESS_CACHE_SCOPE'])

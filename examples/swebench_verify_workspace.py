@@ -14,7 +14,7 @@ from keel.swebench import verify_task, workspace_patch
 from keel.verification_feedback import failure_feedback
 
 
-def verify(repo, task_dir, output, harness_python, timeout=600, environment_overlay=None, network_policy=None, plugin_policy=None, instance_cache_scope=None,compatibility_policy=None):
+def verify(repo, task_dir, output, harness_python, timeout=600, environment_overlay=None, network_policy=None, plugin_policy=None, instance_cache_scope=None,compatibility_policy=None,apt_archives=None):
     task = verify_task(task_dir)
     patch = workspace_patch(repo, task)
     output.mkdir(parents=True, exist_ok=False)
@@ -36,6 +36,8 @@ def verify(repo, task_dir, output, harness_python, timeout=600, environment_over
             kwargs['plugin_policy']=plugin_policy
         if compatibility_policy:
             kwargs['compatibility_policy']=compatibility_policy
+        if apt_archives:
+            kwargs['apt_archives']=apt_archives
         if instance_cache_scope is not None:
             kwargs['instance_cache_scope'] = instance_cache_scope
         result = grade(task_dir, export, output/'grading', python=harness_python, timeout=timeout, **kwargs)
@@ -71,12 +73,13 @@ def main():
     parser.add_argument('--plugin-policy',choices=['remove_unused_vcs_versioning'])
     parser.add_argument('--instance-cache-scope')
     parser.add_argument('--compatibility-policy',type=Path)
+    parser.add_argument('--apt-archives',type=Path)
     args = parser.parse_args()
     try:
         overlay = json.loads(args.environment_overlay.read_text(encoding='utf-8')) if args.environment_overlay else None
         feedback = verify(Path.cwd(), args.task.resolve(), args.output_root.resolve()/uuid.uuid4().hex,
                           args.harness_python, environment_overlay=overlay, network_policy=args.network_policy,plugin_policy=args.plugin_policy,
-                          instance_cache_scope=args.instance_cache_scope,compatibility_policy=args.compatibility_policy)
+                          instance_cache_scope=args.instance_cache_scope,compatibility_policy=args.compatibility_policy,apt_archives=args.apt_archives)
         print(json.dumps(feedback))
         return 0 if feedback['official_resolved'] is True else (2 if feedback['official_resolved'] is None else 1)
     except Exception as error:

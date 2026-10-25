@@ -4,10 +4,108 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from examples.run_swebench_batch import select, prepare, execute, verify_plan
+from examples.run_swebench_batch import select, prepare, execute, verify_plan,prepare_continuation
 
 
 class SwebenchBatchTests(unittest.TestCase):
+    def test_strict_batch_exit_requires_agent_runtime_and_official_acceptance(self):
+        from examples.run_swebench_batch import main
+        for runtime,accepted,expected in [('passed',True,0),('failed',True,1),('passed',False,1)]:
+            with self.subTest(runtime=runtime,accepted=accepted),patch('sys.argv',[
+                    'batch','--output','unused','--execute','--require-all-resolved']),patch(
+                    'examples.run_swebench_batch.shutil.which',return_value='docker'),patch(
+                    'examples.run_swebench_batch.execute',return_value={'records':[
+                        {'runtime_status':runtime,'official_resolved':accepted}]}):
+                self.assertEqual(main(),expected)
+
+    def test_archived_failure_continuation_skips_duplicate_initial_grade_and_launches_fresh_agent(self):
+        from tests.test_reference_network_recovery import ReferenceNetworkRecoveryTests
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);task,export,failed=ReferenceNetworkRecoveryTests().fixture(root)
+            (root/'examples').mkdir();model=root/'model.json';model.write_text('{}')
+            plan=prepare_continuation(root,task,failed,model,root/'python',root/'batch',
+                preparation_roots=[root],trial_options={'record_model_transcript':True,'budget_limits':{'max_model_calls':2}})
+            def pipeline(t,e,f,out,**kwargs):
+                self.assertEqual(f,failed)
+                target=out/'1-apt_retry';target.mkdir(parents=True)
+                (target/'grading.json').write_text(json.dumps({'status':'graded','official_resolved':True,
+                    'instance_cache':{'scope':'a'*32,'cache_level':'instance'},'environment_scope':'reconstructed'}))
+                return {'status':'reference_verified','reference_grade':str(target)}
+            with patch('examples.run_swebench_batch.grade') as grader,patch(
+                    'keel.reference_pipeline.recover_pipeline',side_effect=pipeline),patch(
+                    'examples.run_swebench_batch.run_task',return_value={'status':'completed','runtime_status':'passed',
+                        'official_resolved':True}) as agent:
+                result=execute(root,root/'batch')
+            grader.assert_not_called()
+            self.assertEqual(result['counts']['agent_executed'],1)
+            self.assertEqual(agent.call_args.kwargs['budget_limits'],{'max_model_calls':2})
+            self.assertTrue(agent.call_args.kwargs['record_model_transcript'])
+            self.assertNotIn('saved_repo',agent.call_args.kwargs)
+            self.assertEqual(result['records'][0]['instance_id'],plan['tasks'][0]['instance_id'])
+            next(failed.rglob('build_image.log')).write_text('changed')
+            with self.assertRaisesRegex(ValueError,'preparation evidence changed'):
+                verify_plan(root,root/'batch')
+
+    def test_discovery_roots_are_frozen_and_only_verified_recovery_enters_original_agent(self):
+        for success in (True,False):
+            with self.subTest(success=success),tempfile.TemporaryDirectory() as temp:
+                root=Path(temp);evidence=root/'evidence';evidence.mkdir()
+                plan=self.fixture(root,recover_network=True,recover_compatibility=True,preparation_roots=[evidence])
+                self.assertEqual(plan['reference_pipeline']['preparation_roots'],[str(evidence.resolve())])
+                def pipeline(task,export,failed,out,**kwargs):
+                    self.assertEqual(kwargs['preparation_roots'],[str(evidence.resolve())])
+                    if not success:return {'status':'environment_unresolved','reference_grade':None}
+                    target=out/'1-apt_retry';target.mkdir(parents=True)
+                    (target/'grading.json').write_text(json.dumps({'status':'graded','official_resolved':True,
+                        'environment_scope':'reconstructed','instance_cache':{'scope':'b'*32,'cache_level':'instance'}}))
+                    return {'status':'reference_verified','reference_grade':str(target)}
+                grades=[{'status':'grading_error','official_resolved':None}]+[{'status':'graded','official_resolved':True}]*2
+                with patch('examples.run_swebench_batch.grade',side_effect=grades),patch(
+                        'keel.reference_pipeline.recover_pipeline',side_effect=pipeline),patch(
+                        'examples.run_swebench_batch.run_task',return_value={'status':'completed',
+                            'runtime_status':'passed','official_resolved':True}) as agent:
+                    result=execute(root,root/'batch')
+                first=root/'batch'/plan['tasks'][0]['directory']
+                self.assertEqual(result['records'][0]['instance_id'],plan['tasks'][0]['instance_id'])
+                if success:
+                    self.assertEqual(agent.call_args_list[0].args[1],first/'task')
+                    self.assertEqual(agent.call_args_list[0].args[2],first/'reference-pipeline/1-apt_retry')
+                    self.assertTrue(agent.call_args_list[0].kwargs['reuse_reference_image'])
+                    self.assertEqual(agent.call_count,3)
+                else:
+                    self.assertEqual(agent.call_count,2)
+                    self.assertEqual(result['records'][0]['status'],'reference_failed_or_error')
+                    self.assertNotIn(first/'task',[call.args[1] for call in agent.call_args_list])
+
+    def test_discovery_configuration_rejected_before_output_without_combined_recovery(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);evidence=root/'evidence';evidence.mkdir()
+            with self.assertRaisesRegex(ValueError,'combined'):
+                self.fixture(root,preparation_roots=[evidence])
+            self.assertFalse((root/'batch').exists())
+
+    def test_joint_recovery_chains_then_automatically_launches_original_task(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);plan=self.fixture(root,recover_network=True,recover_compatibility=True)
+            self.assertEqual(plan['reference_pipeline']['model_calls'],0)
+            def pipeline(task,export,failed,out,**kwargs):
+                self.assertLessEqual(kwargs['timeout'],1800)
+                target=out/'2-apt_retry';target.mkdir(parents=True)
+                result={'status':'graded','official_resolved':True,'environment_scope':'reconstructed',
+                        'instance_cache':{'scope':'a'*32,'cache_level':'instance'}}
+                (target/'grading.json').write_text(json.dumps(result))
+                return {'status':'reference_verified','reference_grade':str(target),'stages':[]}
+            grades=[{'status':'graded','official_resolved':False}]+[{'status':'graded','official_resolved':True}]*2
+            with patch('examples.run_swebench_batch.grade',side_effect=grades), \
+                    patch('keel.reference_pipeline.recover_pipeline',side_effect=pipeline) as chain, \
+                    patch('examples.run_swebench_batch.run_task',return_value={
+                        'status':'completed','runtime_status':'passed','official_resolved':True}) as agent:
+                result=execute(root,root/'batch')
+            chain.assert_called_once()
+            self.assertEqual(agent.call_args_list[0].kwargs['reuse_reference_image'],True)
+            self.assertEqual(result['counts']['agent_executed'],3)
+            self.assertEqual(result['records'][0]['instance_id'],plan['tasks'][0]['instance_id'])
+
     def test_configurable_five_repository_selection(self):
         rows = [{'instance_id': f'r{i}__lib-1', 'repo': f'r{i}/lib'} for i in range(6)]
         chosen = select(rows, set(), set(), count=5, repositories=5)

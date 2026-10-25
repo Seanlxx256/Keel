@@ -15,3 +15,35 @@ The same task configuration applies to every task: 30 model calls, 180000 tokens
 Prepare using `--dataset LOCAL_PARQUET_OR_JSON --model-config CONFIG --harness-python PYTHON --output NEW_BATCH_DIR`. Then execute using only `--output BATCH_DIR --execute`. Preparation performs no model/Docker calls; execution uses the configured paid model API and official Docker harness. Dataset and task artifacts include curator-only reference answers; do not mount the batch directory as a solver workspace.
 
 Four unit tests verify seeded order-independent selection, exclusions, model-setting drift rejection, reference integrity, retaining failed preflights while continuing other tasks, and preventing accidental re-execution. Live batch results remain separate from these unit tests.
+# Preparation discovery in the combined recovery mode
+
+When preparing a new plan, `--recover-network --recover-compatibility` may now
+be combined with repeatable `--preparation-root PATH`. The plan freezes those
+authorized directories; execution cannot add or replace them. The recovery
+controller searches each directory and its direct children, verifies matching
+task, policies, archives and live image identities, then performs fresh reference
+tests. Selected evidence hashes are recorded by the controller when consumed.
+The directory is a search scope, not a guarantee that compatible assets exist.
+
+Only successful reference verification launches the original task Agent, using
+the recovered reference directory and its recipe-scoped build cache. A failed
+discovery or recovery retains the original task/failure and never launches its
+Agent; other predeclared batch tasks retain their existing execution behavior.
+This setting is available only with both recovery flags. Without it, existing
+batch behavior is unchanged. Old plans and scores are not migrated automatically.
+
+The discovery and handoff checks are covered by `tests.test_swebench_batch` and
+`tests.test_reference_pipeline`. Real discovery plus fresh reference scoring was
+verified separately in `reference-discovery-live-v1`; the newly integrated batch
+discovery-to-Agent path has regression coverage, not a new live model repair score.
+
+For an explicitly exposed existing failure, the Python preparation API
+`prepare_continuation` freezes one original task and its archived reference
+failure. It does not rerun the initial failed grade or inherit a candidate patch.
+The standard batch execution path then performs recovery and starts the original
+Agent only after fresh reference acceptance. `--require-all-resolved` makes
+execution exit nonzero unless every declared Agent runtime and official grade
+passes. The prepared `recovery-agent-e2e-v1` experiment uses this path with
+20 model calls / 180000 tokens, a 600-second recovery allowance and a 1200-second
+Agent/final-grade allowance; its outer watchdog adds 60 seconds for containment.
+It is a new exposed development attempt, not a resumed conversation or first score.

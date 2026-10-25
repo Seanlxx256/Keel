@@ -11,6 +11,37 @@ from keel.swebench import prepare,reference_prediction
 
 
 class ReferenceNetworkRecoveryTests(unittest.TestCase):
+    def test_archive_bridge_reuses_completed_diagnosis_before_fresh_grading(self):
+        from tests.test_apt_archive_bridge import artifact
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);task,export,failed=self.fixture(root);grader=Mock(return_value={'status':'graded','official_resolved':True})
+            script=next(failed.rglob('setup_repo.sh'))
+            def workload(s,image,out,*a,**kwargs):
+                result={'status':'apt_completed','source_sha256':hashlib.sha256(s.read_bytes()).hexdigest()}
+                (out/'diagnosis.json').write_text(json.dumps(result))
+                return result
+            exporter=Mock(return_value={'status':'completed','artifact':artifact()})
+            result=recover_reference_network(task,export,failed,root/'out',Mock(),python='python',
+                workload=workload,grader=grader,image_identity=lambda _:'sha256:'+'b'*64,
+                bridge_archives=True,archive_exporter=exporter)
+            self.assertEqual(result['status'],'reference_verified_reconstructed')
+            self.assertEqual(exporter.call_args.args[1],script)
+            self.assertLessEqual(exporter.call_args.kwargs['timeout'],300)
+            self.assertEqual(grader.call_args.kwargs['apt_archives'],artifact())
+
+    def test_requested_archive_bridge_failure_does_not_silently_redownload(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);task,export,failed=self.fixture(root);grader=Mock()
+            def workload(s,image,out,*a,**kwargs):
+                result={'status':'apt_completed','source_sha256':hashlib.sha256(s.read_bytes()).hexdigest()}
+                (out/'diagnosis.json').write_text(json.dumps(result));return result
+            result=recover_reference_network(task,export,failed,root/'out',Mock(),python='python',
+                workload=workload,grader=grader,image_identity=lambda _:'sha256:'+'b'*64,
+                bridge_archives=True,archive_exporter=Mock(return_value={'status':'unavailable'}))
+            self.assertEqual(result['status'],'environment_unresolved')
+            self.assertEqual(result['stop_reason'],'archive_export_unavailable_no_blind_redownload')
+            grader.assert_not_called()
+
     def compatibility_fixture(self,root):
         task,export,failed=self.fixture(root)
         from keel.harness_plugins import POLICY

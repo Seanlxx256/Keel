@@ -14,6 +14,20 @@ from keel.swebench_transport import linux_artifact_writes
 
 
 class SwebenchBridgeTests(unittest.TestCase):
+    def test_archive_identity_is_persisted_and_reference_policy_roundtrips(self):
+        from tests.test_apt_archive_bridge import artifact
+        from examples.run_swebench_task import reference_policies
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);_,run=self.fixture(root)
+            export_prediction(root/'task',run,root/'export','keel')
+            with patch('examples.swebench_bridge.importlib.metadata.version',return_value='3.0.0'), \
+                    patch('examples.swebench_bridge.run_harness',return_value=SimpleNamespace(returncode=0)):
+                result=grade(root/'task',root/'export',root/'grade',apt_archives=artifact())
+            self.assertEqual(result['apt_archives_sha256'],__import__('hashlib').sha256((root/'grade/apt-archives.json').read_bytes()).hexdigest())
+            self.assertEqual(reference_policies(root/'grade')['apt_archives'],str((root/'grade/apt-archives.json').resolve()))
+            (root/'grade/apt-archives.json').write_text('{}')
+            with self.assertRaisesRegex(ValueError,'archive artifact changed'):reference_policies(root/'grade')
+
     def test_grade_cli_preserves_all_explicit_recovery_policies(self):
         from examples.swebench_bridge import main
         with patch.object(sys, 'argv', ['swebench_bridge.py','grade','--task','task',

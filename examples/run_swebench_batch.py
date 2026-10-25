@@ -71,7 +71,14 @@ def select(rows, excluded_ids, excluded_repos, seed=42, count=3, repositories=2)
     return chosen
 
 
-def prepare(root, dataset, model_file, harness_python, output, seed=42, count=3, repositories=2, recover_environment=False, recover_network=False,recover_compatibility=False):
+def prepare(root, dataset, model_file, harness_python, output, seed=42, count=3, repositories=2, recover_environment=False, recover_network=False,recover_compatibility=False,bridge_archives=False,preparation_roots=None):
+    if preparation_roots and not (recover_network and recover_compatibility):
+        raise ValueError('Preparation discovery requires the combined reference recovery pipeline')
+    preparation_roots=[Path(p).resolve() for p in (preparation_roots or [])]
+    if any(not p.is_dir() for p in preparation_roots):
+        raise ValueError('Preparation evidence root unavailable')
+    if bridge_archives and (not recover_network or recover_compatibility):
+        raise ValueError('Archive bridge requires diagnostic network mode; combined chain skips redundant APT diagnosis')
     if recover_environment and (recover_network or recover_compatibility):
         raise ValueError('Packaging recovery cannot stack with transport or dependency reconciliation')
     if not 1 <= repositories <= count <= 20:
@@ -114,11 +121,63 @@ def prepare(root, dataset, model_file, harness_python, output, seed=42, count=3,
     if recover_network:
         payload['network_recovery']={'timeout_seconds':1800,'max_steps':4,'max_model_calls_batch':4*count,
             'scope':'Explicit recovery arm; original reference failures retained, reconstructed conditions separate'}
+        if bridge_archives:payload['network_recovery']['bridge_archives']=True
     if recover_compatibility:
         payload['compatibility_recovery']={'timeout_seconds':1800,'attempts':1,'model_calls':0,
             'scope':'Evidence-gated SCM/declared dependency reconciliation and fresh reference grading'}
+    if recover_network and recover_compatibility:
+        payload['reference_pipeline']={'timeout_seconds':1800,'model_calls':0,
+            'scope':'Shared-deadline registered compatibility/network chain; no task replacement'}
+        if preparation_roots:
+            payload['reference_pipeline']['preparation_roots']=[str(p) for p in preparation_roots]
     plan = {**payload, 'plan_sha256': digest(payload)}
     (output/'plan.json').write_text(json.dumps(plan, indent=2), encoding='utf-8')
+    return plan
+
+
+def prepare_continuation(root, task, failed_reference, model_file, harness_python, output,
+                         *, preparation_roots, trial_options=None):
+    """Freeze one exposed task's real failure, not a replacement or first attempt."""
+    from keel.reference_pipeline import _grade_record, _files
+    from examples.run_swebench_task import trial_budget
+    task,failed_reference,output=map(lambda p:Path(p).resolve(),(task,failed_reference,output))
+    verify_task(task)
+    record=json.loads((task/'grader-dataset.jsonl').read_text(encoding='utf-8'))
+    old=_grade_record(failed_reference,record)
+    if old.get('status') not in ('graded','grading_error') or old.get('official_resolved') is True:
+        raise ValueError('Continuation requires an unresolved reference')
+    roots=[str(Path(p).resolve()) for p in preparation_roots]
+    if not roots or any(not Path(p).is_dir() for p in roots):raise ValueError('Require available evidence roots')
+    options=dict(trial_options or {})
+    allowed={'budget_limits','total_seconds','final_grade_reserve','critic_max_output','proposal_context_policy',
+             'record_model_transcript','infrastructure_guard','recovery_progress','model_transport_retries'}
+    if set(options)-allowed:raise ValueError('Unsupported continuation trial option')
+    limits=trial_budget(options.get('budget_limits'))
+    if options.get('total_seconds') is not None:
+        total=options['total_seconds'];reserve=options.get('final_grade_reserve',600)
+        if type(total) is not int or type(reserve) is not int or not 0<reserve<total-20:
+            raise ValueError('Invalid continuation total/final-grade budget')
+        if 'max_wallclock' in options.get('budget_limits',{}):raise ValueError('Use total deadline or Agent wallclock, not both')
+    output.mkdir(parents=True,exist_ok=False)
+    directory=output/'task-1';directory.mkdir()
+    source=directory/'dataset.jsonl';source.write_text(json.dumps(record)+'\n',encoding='utf-8')
+    prepare_task(source,record['instance_id'],directory/'task')
+    reference_prediction(directory/'task',directory/'reference')
+    row={'instance_id':record['instance_id'],'repo':record['repo'],'directory':'task-1',
+         'receipt_sha256':file_hash(directory/'task/task-receipt.json'),
+         'reference_sha256':file_hash(directory/'reference/predictions.jsonl'),
+         'reference_receipt_sha256':file_hash(directory/'reference/export-receipt.json'),
+         'failed_reference':str(failed_reference)}
+    payload={'tasks':[row],'dataset_path':str(source),'dataset_sha256':file_hash(source),
+        'model_file':str(Path(model_file).resolve()),'model_sha256':file_hash(Path(model_file)),
+        'harness_python':str(Path(harness_python).resolve()),'implementation':implementation_hashes(root),
+        'preparation_inputs':{str(p):file_hash(p) for p in _files(failed_reference)},
+        'reference_pipeline':{'timeout_seconds':600,'model_calls':0,'preparation_roots':roots},
+        'trial_options':options,'benchmark_ready':False,'heldout_tasks':0,
+        'limits':{'tasks':1,'max_model_calls_batch':limits['max_model_calls'],'max_tokens':limits['max_tokens']},
+        'scope':'Explicit exposed-task development continuation from archived reference failure; new budgets/score, no first-attempt or independent generalization claim'}
+    plan={**payload,'plan_sha256':digest(payload)}
+    (output/'plan.json').write_text(json.dumps(plan,indent=2)+'\n',encoding='utf-8')
     return plan
 
 
@@ -130,6 +189,9 @@ def verify_plan(root, output):
         raise ValueError('Implementation or model settings changed after freeze')
     if file_hash(Path(plan['dataset_path'])) != plan['dataset_sha256']:
         raise ValueError('Dataset changed after freeze')
+    for name,expected in plan.get('preparation_inputs',{}).items():
+        if file_hash(Path(name))!=expected:
+            raise ValueError('Continuation preparation evidence changed')
     for row in plan['tasks']:
         directory = output/row['directory']
         if not directory.resolve().is_relative_to(output.resolve()):
@@ -170,8 +232,31 @@ def execute(root, output):
             save()
             print(f"[Batch] reference preflight {row['instance_id']}", flush=True)
             try:
-                reference = grade(directory/'task', directory/'reference', directory/'reference-grade', python=plan['harness_python'])
-                reference_dir = directory/'reference-grade'
+                pipeline_seconds=(plan.get('reference_pipeline') or {}).get('timeout_seconds')
+                reference_started=time.monotonic()
+                if row.get('failed_reference'):
+                    from keel.reference_pipeline import _grade_record
+                    reference_dir=Path(row['failed_reference'])
+                    record=json.loads((directory/'task/grader-dataset.jsonl').read_text(encoding='utf-8'))
+                    reference=_grade_record(reference_dir,record)
+                else:
+                    reference = grade(directory/'task', directory/'reference', directory/'reference-grade', python=plan['harness_python'],
+                        **({'timeout':min(1200,pipeline_seconds-120)} if pipeline_seconds else {}))
+                    reference_dir = directory/'reference-grade'
+                if plan.get('reference_pipeline') and reference.get('official_resolved') is not True:
+                    from keel.reference_pipeline import recover_pipeline
+                    available=int(pipeline_seconds-(time.monotonic()-reference_started))
+                    recovery=({'status':'budget_exhausted','reference_grade':None,'stages':[]}
+                        if available<120 else recover_pipeline(directory/'task',directory/'reference',reference_dir,
+                            directory/'reference-pipeline',python=plan['harness_python'],timeout=available,grader=grade,
+                            **({'preparation_roots':plan['reference_pipeline']['preparation_roots']}
+                               if plan['reference_pipeline'].get('preparation_roots') else {})))
+                    row['reference_pipeline']=recovery
+                    if recovery['status']=='reference_verified':
+                        reference_dir=Path(recovery['reference_grade'])
+                        reference=json.loads((reference_dir/'grading.json').read_text(encoding='utf-8'))
+                        if reference.get('environment_scope'):
+                            row['environment_scope']=reference['environment_scope']
                 if reference['status'] == 'grading_error' and plan.get('environment_recovery'):
                     from examples.recover_swebench_environment import recover
                     from keel.models import from_config
@@ -184,7 +269,7 @@ def execute(root, output):
                         reference_dir = directory/'environment-recovery'/recovery['successful_grade']
                         reference = json.loads((reference_dir/'grading.json').read_text(encoding='utf-8'))
                         row['environment_scope'] = 'reconstructed packaging overlay'
-                if reference['status']=='grading_error' and plan.get('network_recovery'):
+                if reference['status']=='grading_error' and plan.get('network_recovery') and not plan.get('reference_pipeline'):
                     from keel.reference_network_recovery import failure_inputs,recover_reference_network
                     from keel.models import from_config
                     from keel.campaign_reporting import FrozenModel
@@ -197,7 +282,8 @@ def execute(root, output):
                         recovery=recover_reference_network(directory/'task',directory/'reference',reference_dir,
                             directory/'network-recovery',FrozenModel(from_config(model),lambda:verify_plan(root,output)),
                             python=plan['harness_python'],timeout=settings['timeout_seconds'],
-                            max_steps=settings['max_steps'],grader=grade)
+                            max_steps=settings['max_steps'],grader=grade,
+                            **({'bridge_archives':True} if settings.get('bridge_archives') else {}))
                         row['network_recovery']=recovery
                         if recovery['status'] in ('reference_verified','reference_verified_reconstructed'):
                             reference_dir=directory/'network-recovery/reference-grade'
@@ -208,7 +294,7 @@ def execute(root, output):
                             reference_dir=directory/'network-recovery/reference-grade'
                             reference=recovery['grading']
                 if (reference.get('status')=='graded' and reference.get('official_resolved') is False
-                        and plan.get('compatibility_recovery')):
+                        and plan.get('compatibility_recovery') and not plan.get('reference_pipeline')):
                     from keel.reference_recovery import recover_reference
                     try:
                         recovery=recover_reference(directory/'task',directory/'reference',reference_dir,
@@ -229,7 +315,10 @@ def execute(root, output):
                 row['status'] = 'agent_running'
                 save()
                 print(f"[Batch] Keel repair {row['instance_id']}", flush=True)
-                trial = run_task(root, directory/'task', reference_dir, model, plan['harness_python'], directory/'trial')
+                reuse=bool(plan.get('reference_pipeline') and reference.get('instance_cache',{}).get('cache_level')=='instance')
+                trial = run_task(root, directory/'task', reference_dir, model, plan['harness_python'], directory/'trial',
+                                 **({'reuse_reference_image':True} if reuse else {}),
+                                 **plan.get('trial_options',{}))
                 row.update(status=trial['status'], agent_executed='runtime_status' in trial,
                            official_resolved=trial['official_resolved'], runtime_status=trial.get('runtime_status'),
                            failure=trial.get('failure'), budget=trial.get('budget'), recovery=trial.get('recovery'),
@@ -265,11 +354,14 @@ def main():
     parser.add_argument('--recover-environment', action='store_true')
     parser.add_argument('--recover-network', action='store_true')
     parser.add_argument('--recover-compatibility',action='store_true')
+    parser.add_argument('--bridge-archives',action='store_true')
+    parser.add_argument('--preparation-root',type=Path,action='append',help='Freeze an authorized evidence directory for combined reference recovery asset discovery')
     parser.add_argument('--execute', action='store_true')
+    parser.add_argument('--require-all-resolved',action='store_true',help='Exit nonzero unless every declared Agent run passes runtime and official grading')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     if args.execute:
-        if args.dataset or args.model_config or args.harness_python or args.tasks is not None or args.repositories is not None or args.recover_environment or args.recover_network or args.recover_compatibility:
+        if args.dataset or args.model_config or args.harness_python or args.tasks is not None or args.repositories is not None or args.recover_environment or args.recover_network or args.recover_compatibility or args.bridge_archives or args.preparation_root:
             parser.error('Execute frozen output only')
         docker = Path('D:/Docker/Desktop/resources/bin')
         if not shutil.which('docker') and (docker/'docker.exe').is_file():
@@ -277,14 +369,19 @@ def main():
         report = execute(root, args.output.resolve())
         print(json.dumps(report, indent=2))
     else:
+        if args.require_all_resolved:parser.error('--require-all-resolved is an execution-only result check')
         if not args.dataset or not args.model_config or not args.harness_python:
             parser.error('Preparation requires dataset, model config, harness python')
         plan = prepare(root, args.dataset.resolve(), args.model_config.resolve(), args.harness_python.resolve(), args.output.resolve(), args.seed,
                        count=args.tasks if args.tasks is not None else 3,
                        repositories=args.repositories if args.repositories is not None else 2,
-                       recover_environment=args.recover_environment, recover_network=args.recover_network,recover_compatibility=args.recover_compatibility)
+                       recover_environment=args.recover_environment, recover_network=args.recover_network,recover_compatibility=args.recover_compatibility,bridge_archives=args.bridge_archives,
+                       preparation_roots=args.preparation_root)
         print(json.dumps({'status': 'prepared_only', 'tasks': [{key: row[key] for key in ('instance_id', 'repo')} for row in plan['tasks']],
                           'limits': plan['limits'], 'benchmark_ready': False}, indent=2))
+    if args.execute and args.require_all_resolved:
+        return 0 if all(row.get('official_resolved') is True and row.get('runtime_status')=='passed'
+                        for row in report['records']) else 1
     return 0
 
 
