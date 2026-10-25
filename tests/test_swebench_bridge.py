@@ -14,6 +14,29 @@ from keel.swebench_transport import linux_artifact_writes
 
 
 class SwebenchBridgeTests(unittest.TestCase):
+    def test_grade_cli_preserves_all_explicit_recovery_policies(self):
+        from examples.swebench_bridge import main
+        with patch.object(sys, 'argv', ['swebench_bridge.py','grade','--task','task',
+                '--export','export','--output','grading','--execute',
+                '--network-policy','retry_acquire','--plugin-policy','remove_unused_vcs_versioning',
+                '--compatibility-policy','policy.json']), patch('examples.swebench_bridge.grade',
+                return_value={'status':'graded','official_resolved':True}) as grader, \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(main(),0)
+        self.assertEqual(grader.call_args.kwargs['network_policy'],'retry_acquire')
+        self.assertEqual(grader.call_args.kwargs['plugin_policy'],'remove_unused_vcs_versioning')
+        self.assertEqual(grader.call_args.kwargs['compatibility_policy'],Path('policy.json'))
+
+    def test_grade_cli_exit_requires_official_acceptance(self):
+        from examples.swebench_bridge import main
+        for resolved, expected in ((True, 0), (False, 1), (None, 1)):
+            with self.subTest(resolved=resolved), patch.object(sys, 'argv', [
+                    'swebench_bridge.py', 'grade', '--task', 'task', '--export', 'export',
+                    '--output', 'grading', '--execute']), patch(
+                    'examples.swebench_bridge.grade', return_value={
+                        'status': 'graded', 'official_resolved': resolved}), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(main(), expected)
+
     def test_pathlike_interpreter_is_serializable_before_harness_launch(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp);_,run=self.fixture(root)

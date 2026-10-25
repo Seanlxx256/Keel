@@ -11,6 +11,44 @@ from keel.swebench import prepare,reference_prediction
 
 
 class ReferenceNetworkRecoveryTests(unittest.TestCase):
+    def compatibility_fixture(self,root):
+        task,export,failed=self.fixture(root)
+        from keel.harness_plugins import POLICY
+        plugin=failed/'plugin-policy.json';plugin.write_text(json.dumps({'policy':POLICY,'version':1}))
+        compat=failed/'compatibility-policy.json'
+        compat.write_text(json.dumps({'pins':{'consumer':'1.0'},'anchors':{'provider':'2.0'}}))
+        old=json.loads((failed/'grading.json').read_text())
+        old.update(plugin_policy=POLICY,plugin_policy_sha256=hashlib.sha256(plugin.read_bytes()).hexdigest(),
+                   compatibility_policy_sha256=hashlib.sha256(compat.read_bytes()).hexdigest())
+        (failed/'grading.json').write_text(json.dumps(old))
+        return task,export,failed
+
+    def test_network_revalidation_preserves_verified_compatibility(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);task,export,failed=self.compatibility_fixture(root)
+            grader=Mock(return_value={'status':'graded','official_resolved':True})
+            model=Mock()
+            result=recover_reference_network(task,export,failed,root/'out',model,python='python',
+                workload=Mock(return_value={'status':'apt_completed'}),grader=grader,
+                image_identity=lambda _: 'sha256:'+'b'*64,preserve_compatibility=True)
+            self.assertEqual(result['status'],'reference_verified_reconstructed')
+            self.assertEqual(grader.call_args.kwargs['plugin_policy'],'remove_unused_vcs_versioning')
+            self.assertEqual(grader.call_args.kwargs['compatibility_policy'],
+                json.loads((failed/'compatibility-policy.json').read_text()))
+            self.assertIn(str(failed/'compatibility-policy.json'),result['original_inputs'])
+            model.complete_json.assert_not_called()
+
+    def test_preservation_requires_opt_in_and_unchanged_policy_receipts(self):
+        for kind in ('no_opt_in','changed_policy','same_category'):
+            with self.subTest(kind=kind),tempfile.TemporaryDirectory() as temp:
+                root=Path(temp);task,export,failed=self.compatibility_fixture(root)
+                if kind=='changed_policy':(failed/'compatibility-policy.json').write_text('{}')
+                if kind=='same_category':
+                    old=json.loads((failed/'grading.json').read_text());old['network_policy']='no_pipeline'
+                    (failed/'grading.json').write_text(json.dumps(old))
+                with self.assertRaises(ValueError):
+                    failure_inputs(task,export,failed,preserve_compatibility=kind!='no_opt_in')
+
     def fixture(self,root):
         row={'instance_id':'org__lib-1','repo':'org/lib','base_commit':'a'*40,'problem_statement':'issue','patch':'REFERENCE','test_patch':'TEST'}
         source=root/'data.jsonl';source.write_text(json.dumps(row))

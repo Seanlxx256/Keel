@@ -260,6 +260,10 @@ def main():
     parser.add_argument('--max-network-steps',type=int,default=4)
     parser.add_argument('--reference-grade',type=Path)
     parser.add_argument('--failed-grade',type=Path)
+    parser.add_argument('--recipe-grade',type=Path,
+                        help='Explicit original reference build directory for a cached-image failure')
+    parser.add_argument('--preserve-compatibility',action='store_true',
+                        help='Network recovery must carry hash-verified existing plugin/dependency policies unchanged')
     parser.add_argument('--dataset', type=Path)
     parser.add_argument('--instance-id')
     parser.add_argument('--task', type=Path)
@@ -269,6 +273,7 @@ def main():
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--execute', action='store_true')
     parser.add_argument('--network-policy', choices=['no_pipeline','retry_acquire'])
+    parser.add_argument('--plugin-policy', choices=['remove_unused_vcs_versioning'])
     parser.add_argument('--instance-cache-scope', help='Retain session/recipe-scoped image; fresh containers and test scores')
     parser.add_argument('--compatibility-policy',type=Path)
     parser.add_argument('--timeout', type=int, default=1800,
@@ -298,7 +303,8 @@ def main():
         if not args.task or not args.export_dir or not args.failed_grade or not args.model_config:
             parser.error('recover-reference-network requires task, reference export, failed-grade and model-config')
         from keel.reference_network_recovery import failure_inputs,recover_reference_network
-        failure_inputs(args.task.resolve(),args.export_dir.resolve(),args.failed_grade.resolve())
+        failure_inputs(args.task.resolve(),args.export_dir.resolve(),args.failed_grade.resolve(),
+                       preserve_compatibility=args.preserve_compatibility)
         if not args.execute:
             result={'status':'plan_only','max_model_calls':args.max_network_steps,
                 'scope':'Bounded original APT retry, registered transport diagnosis and fresh reference grading; not source repair'}
@@ -308,7 +314,8 @@ def main():
             preflight=getattr(model,'check_credentials',None)
             if callable(preflight):preflight()
             result=recover_reference_network(args.task.resolve(),args.export_dir.resolve(),args.failed_grade.resolve(),
-                args.output.resolve(),model,python=str(args.harness_python.resolve()) if args.harness_python else sys.executable,timeout=args.timeout,max_steps=args.max_network_steps,grader=grade)
+                args.output.resolve(),model,python=str(args.harness_python.resolve()) if args.harness_python else sys.executable,timeout=args.timeout,max_steps=args.max_network_steps,grader=grade,
+                **({'preserve_compatibility':True} if args.preserve_compatibility else {}))
     elif args.action=='recover-reference':
         if not args.task or not args.export_dir or not args.failed_grade:
             parser.error('recover-reference requires task, export and failed-grade')
@@ -317,15 +324,21 @@ def main():
         else:
             from keel.reference_recovery import recover_reference
             result=recover_reference(args.task.resolve(),args.export_dir.resolve(),args.failed_grade.resolve(),
-                args.output.resolve(),python=sys.executable,timeout=args.timeout,grader=grade)
+                args.output.resolve(),python=sys.executable,timeout=args.timeout,grader=grade,
+                **({'recipe_grade':args.recipe_grade.resolve()} if args.recipe_grade else {}))
     else:
         if not args.task or not args.export_dir:
             parser.error('grade requires task and export')
         if not args.execute:
             result = {'status': 'plan_only', 'next': 'Invoke official Docker harness with --execute', 'benchmark_ready': False}
         else:
-            result = grade(args.task.resolve(), args.export_dir.resolve(), args.output.resolve(), timeout=args.timeout, network_policy=args.network_policy, instance_cache_scope=args.instance_cache_scope,compatibility_policy=args.compatibility_policy)
+            result = grade(args.task.resolve(), args.export_dir.resolve(), args.output.resolve(), timeout=args.timeout, network_policy=args.network_policy, instance_cache_scope=args.instance_cache_scope,compatibility_policy=args.compatibility_policy,
+                           **({'plugin_policy':args.plugin_policy} if args.plugin_policy else {}))
     print(json.dumps(result, indent=2))
+    if args.execute and args.action in {'grade', 'grade-snapshot'}:
+        # A successful harness process only means scoring completed. A reference
+        # or candidate with failed tests must not make its watchdog report pass.
+        return 0 if result.get('status') == 'graded' and result.get('official_resolved') is True else 1
     return 1 if result.get('status') in ('grading_error','environment_unresolved') else 0
 
 

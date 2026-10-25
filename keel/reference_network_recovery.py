@@ -10,7 +10,7 @@ from .network_probe import transient_apt_download
 from .swebench import verify_task
 
 
-def failure_inputs(task, export, failed):
+def failure_inputs(task, export, failed, *, preserve_compatibility=False):
     verify_task(task)
     row=json.loads((task/'grader-dataset.jsonl').read_text(encoding='utf-8'))
     old=json.loads((failed/'grading.json').read_text(encoding='utf-8'))
@@ -24,8 +24,26 @@ def failure_inputs(task, export, failed):
             or receipt['predictions_sha256']!=file_hash(export/'predictions.jsonl')
             or prediction.get('instance_id')!=row['instance_id'] or prediction.get('model_patch')!=row['patch']):
         raise ValueError('Require unchanged reference export, never an Agent patch')
-    if old.get('network_policy') or old.get('plugin_policy') or old.get('environment_overlay_sha256'):
+    if old.get('network_policy') or old.get('environment_overlay_sha256'):
         raise ValueError('Do not stack recovery policies')
+    policy_inputs=[]
+    if old.get('plugin_policy') or old.get('compatibility_policy_sha256'):
+        if not preserve_compatibility:
+            raise ValueError('Existing compatibility policies require explicit preservation')
+        if old.get('plugin_policy'):
+            from .harness_plugins import POLICY
+            path=failed/'plugin-policy.json'
+            if (old['plugin_policy']!=POLICY or file_hash(path)!=old.get('plugin_policy_sha256')
+                    or json.loads(path.read_text(encoding='utf-8'))!={'policy':POLICY,'version':1}):
+                raise ValueError('Prior plugin policy changed')
+            policy_inputs.append(path)
+        if old.get('compatibility_policy_sha256'):
+            from .dependency_compatibility import validate_policy
+            path=failed/'compatibility-policy.json'
+            if file_hash(path)!=old['compatibility_policy_sha256']:
+                raise ValueError('Prior compatibility policy changed')
+            validate_policy(json.loads(path.read_text(encoding='utf-8')))
+            policy_inputs.append(path)
     entries=[]
     for log in (failed/'logs/build_images/instances').glob('*/build_image.log'):
         if log.parent.name.startswith('sweb.eval.x86_64.'+row['instance_id']+'__'):
@@ -47,13 +65,13 @@ def failure_inputs(task, export, failed):
     match=re.search(r'^FROM(?: --platform=\S+)? (sweb\.env\.[A-Za-z0-9._-]+:[A-Za-z0-9._-]+)\s*$',dockerfile.read_text(encoding='utf-8'),re.M)
     if not match:
         raise ValueError('Require named official local environment image')
-    return row,old,script,match[1],[task/'task-receipt.json',failed/'grading.json',failed/'grader-input.json',export/'predictions.jsonl',export/'export-receipt.json',log,script,dockerfile]
+    return row,old,script,match[1],[task/'task-receipt.json',failed/'grading.json',failed/'grader-input.json',export/'predictions.jsonl',export/'export-receipt.json',log,script,dockerfile,*policy_inputs]
 
 
-def recover_reference_network(task,export,failed,output,model,*,python,timeout=1800,max_steps=4,grader=None,workload=None,network_recover=None,image_identity=None):
+def recover_reference_network(task,export,failed,output,model,*,python,timeout=1800,max_steps=4,grader=None,workload=None,network_recover=None,image_identity=None,preserve_compatibility=False):
     if type(timeout) is not int or not 900<=timeout<=7200 or type(max_steps) is not int or not 1<=max_steps<=6:
         raise ValueError('Recovery requires900..7200seconds and1..6model steps')
-    row,old,script,image,inputs=failure_inputs(task,export,failed)
+    row,old,script,image,inputs=failure_inputs(task,export,failed,preserve_compatibility=preserve_compatibility)
     hashes={str(p):file_hash(p) for p in inputs}
     if grader is None:
         from examples.swebench_bridge import grade
@@ -125,13 +143,17 @@ def recover_reference_network(task,export,failed,output,model,*,python,timeout=1
         print('[Reference network] workload completed; independently regrade unchanged reference',flush=True)
         check()
         kwargs={'network_policy':policy} if policy else {}
+        if old.get('plugin_policy'):kwargs['plugin_policy']=old['plugin_policy']
+        if old.get('compatibility_policy_sha256'):
+            kwargs['compatibility_policy']=json.loads((failed/'compatibility-policy.json').read_text(encoding='utf-8'))
         scope=old.get('instance_cache',{}).get('scope')
         if scope:kwargs['instance_cache_scope']=scope
         result=grader(task,export,output/'reference-grade',python=python,timeout=remaining(),**kwargs)
         report['grading']=result
         check()
         passed=result.get('status')=='graded' and result.get('official_resolved') is True
-        report['status']=('reference_verified_reconstructed' if policy else 'reference_verified') if passed else 'environment_unresolved'
+        reconstructed=policy or old.get('plugin_policy') or old.get('compatibility_policy_sha256')
+        report['status']=('reference_verified_reconstructed' if reconstructed else 'reference_verified') if passed else 'environment_unresolved'
     except Exception as error:
         report.update(status='environment_unresolved',error_type=type(error).__name__)
     finally:

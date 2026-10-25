@@ -157,6 +157,42 @@ class SwebenchTaskTests(unittest.TestCase):
             self.assertEqual(command[command.index('--instance-cache-scope')+1], scope)
             self.assertEqual(grade.call_args.kwargs['instance_cache_scope'], scope)
 
+    def test_explicit_reference_image_reuse_preserves_scope_but_regrades(self):
+        from examples.run_swebench_task import execute
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);row=self.task(root);reference=self.policy_reference(root,row)
+            receipt=reference/'grading.json';data=json.loads(receipt.read_text())
+            data['instance_cache']={'scope':'a'*32,'cache_level':'instance'}
+            receipt.write_text(json.dumps(data))
+            repo=root/'repo';repo.mkdir()
+            with patch('examples.run_swebench_task.subprocess.run',return_value=SimpleNamespace(stdout='3.0.0')), \
+                    patch('examples.run_swebench_task.prepare_snapshot',return_value=repo), \
+                    patch('examples.run_swebench_task.run',return_value={'status':'passed','budget':{}}) as agent, \
+                    patch('examples.run_swebench_task.export_prediction'), \
+                    patch('examples.run_swebench_task.grade',return_value={'status':'graded','official_resolved':True}) as grade:
+                report=execute(root,root/'task',reference,{'name':'test'},'python',root/'trial',reuse_reference_image=True)
+            self.assertEqual(report['instance_cache_scope'],'a'*32)
+            self.assertTrue(report['reuse_reference_image'])
+            command=agent.call_args.args[0]['acceptance'][0]
+            self.assertEqual(command[command.index('--instance-cache-scope')+1],'a'*32)
+            self.assertEqual(grade.call_args.kwargs['instance_cache_scope'],'a'*32)
+            grade.assert_called_once()
+
+    def test_reference_image_reuse_requires_valid_cache_and_retention(self):
+        from examples.run_swebench_task import execute
+        for kind in ('missing','bad_scope','disabled'):
+            with self.subTest(kind=kind),tempfile.TemporaryDirectory() as temp:
+                root=Path(temp);row=self.task(root);reference=self.policy_reference(root,row)
+                if kind=='bad_scope':
+                    p=reference/'grading.json';v=json.loads(p.read_text());v['instance_cache']={'scope':'bad','cache_level':'instance'};p.write_text(json.dumps(v))
+                with patch('examples.run_swebench_task.prepare_snapshot') as checkout:
+                    with self.assertRaises(ValueError):
+                        execute(root,root/'task',reference,{'name':'test'},'python',root/'trial',
+                            reuse_reference_image=True,retain_instance_image=kind!='disabled')
+                checkout.assert_not_called()
+                self.assertFalse((root/'trial').exists())
+
     def test_infrastructure_preflight_stops_before_checkout_or_agent(self):
         from examples.run_swebench_task import execute
         from types import SimpleNamespace

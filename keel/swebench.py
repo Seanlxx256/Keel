@@ -120,8 +120,14 @@ def reference_prediction(task_dir, output):
 
 
 def workspace_patch(repo, task):
+    """Export Git-normalized text, preserving attributes and binary blob semantics.
+
+    Saved Windows sources may be CRLF even when HEAD stores LF. Input conversion
+    avoids exporting that transport difference as a whole-file edit; Git retains
+    CRLF blobs and paths explicitly marked -text. Never rewrite the workspace.
+    """
     def git(*args):
-        result = subprocess.run(['git', '-c', 'safe.directory='+repo.resolve().as_posix(), '-c', 'core.autocrlf=false',
+        result = subprocess.run(['git', '-c', 'safe.directory='+repo.resolve().as_posix(), '-c', 'core.autocrlf=input',
                                  '-C', str(repo), *args], check=True, capture_output=True, timeout=30)
         return result.stdout.decode('utf-8')
     if git('rev-parse', 'HEAD').strip() != task['base_commit']:

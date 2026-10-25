@@ -14,6 +14,55 @@ from keel.swebench import prepare,reference_prediction
 
 
 class ReferenceRecoveryTests(unittest.TestCase):
+    def recipe_source(self,root,failed):
+        source=root/'original-grade'
+        recipe=source/'logs/build_images/instances/sweb.eval.x86_64.org__lib-1__latest'
+        recipe.mkdir(parents=True)
+        (recipe/'Dockerfile').write_text('FROM base\nCOPY setup_repo.sh /root/\n')
+        (recipe/'setup_repo.sh').write_text('echo fixture\n')
+        (source/'grader-input.json').write_bytes((failed/'grader-input.json').read_bytes())
+        (source/'grading.json').write_text(json.dumps({'runtime_status':'reference_only'}))
+        return source,recipe
+
+    def test_cached_grade_uses_explicit_same_task_recipe_without_copying_logs(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);failed=self.fixture(root);source,recipe=self.recipe_source(root,failed)
+            grader=Mock(return_value={'status':'graded','official_resolved':True})
+            with patch('keel.reference_recovery.inspect_image',return_value=self.inspection()) as inspect:
+                result=recover_reference(root/'task',root/'reference',failed,root/'recovery',
+                    python='python',timeout=300,grader=grader,recipe_grade=source)
+            self.assertEqual(result['status'],'reference_verified_reconstructed')
+            self.assertEqual(inspect.call_args.args[0],source)
+            self.assertFalse(inspect.call_args.kwargs['allow_restore'])
+            self.assertIn(str(recipe/'setup_repo.sh'),result['inputs'])
+            self.assertFalse((failed/'logs/build_images').exists())
+            grader.assert_called_once()
+
+    def test_unrelated_recipe_is_rejected_before_inspection(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);failed=self.fixture(root);source,_=self.recipe_source(root,failed)
+            (source/'grader-input.json').write_text('[]')
+            with patch('keel.reference_recovery.inspect_image') as inspect:
+                with self.assertRaisesRegex(ValueError,'different frozen task'):
+                    recover_reference(root/'task',root/'reference',failed,root/'recovery',
+                        python='python',timeout=300,grader=Mock(),recipe_grade=source)
+            inspect.assert_not_called()
+            self.assertFalse((root/'recovery').exists())
+
+    def test_recipe_drift_during_inspection_blocks_revalidation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);failed=self.fixture(root);source,recipe=self.recipe_source(root,failed)
+            def changed(*args,**kwargs):
+                (recipe/'setup_repo.sh').write_text('changed\n')
+                return self.inspection()
+            grader=Mock()
+            with patch('keel.reference_recovery.inspect_image',side_effect=changed):
+                result=recover_reference(root/'task',root/'reference',failed,root/'recovery',
+                    python='python',timeout=300,grader=grader,recipe_grade=source)
+            self.assertEqual(result['status'],'environment_unresolved')
+            self.assertIn('evidence changed',result['error'])
+            grader.assert_not_called()
+
     def fixture(self,root):
         row={'instance_id':'org__lib-1','repo':'org/lib','base_commit':'a'*40,
              'problem_statement':'issue','patch':'REFERENCE','test_patch':'TEST'}

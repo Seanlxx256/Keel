@@ -113,7 +113,7 @@ def config_for(task, task_dir, output, model_config, harness_python, environment
     return config
 
 
-def execute(root, task_dir, reference_dir, model_config, harness_python, output, *, mcp_config=None, localization_tool_steps=6, require_external_tool=False, local_exploration=False, resume_snapshot=None, saved_repo=None, diagnostic_inspection=False, recovery_progress=False, targeted_source_review=False, diagnosis_supervision=False, budget_driven_recovery=False, record_model_transcript=False, infrastructure_guard=False, model_transport_retries=0, retain_instance_image=True, diagnostic_handoff=False, budget_limits=None, budget_profile='standard', diagnostic_report=None, diagnostic_execution=None, comparison_plan=None, comparison_report=None, proposal_context_hard_bytes=None, proposal_context_policy=None, critic_max_output=None, total_seconds=None, final_grade_reserve=600, operational_knowledge=None):
+def execute(root, task_dir, reference_dir, model_config, harness_python, output, *, mcp_config=None, localization_tool_steps=6, require_external_tool=False, local_exploration=False, resume_snapshot=None, saved_repo=None, diagnostic_inspection=False, recovery_progress=False, targeted_source_review=False, diagnosis_supervision=False, budget_driven_recovery=False, record_model_transcript=False, infrastructure_guard=False, model_transport_retries=0, retain_instance_image=True, diagnostic_handoff=False, budget_limits=None, budget_profile='standard', diagnostic_report=None, diagnostic_execution=None, comparison_plan=None, comparison_report=None, proposal_context_hard_bytes=None, proposal_context_policy=None, critic_max_output=None, total_seconds=None, final_grade_reserve=600, operational_knowledge=None, reuse_reference_image=False):
     started = time.monotonic()
     from keel.operational_knowledge import validate_config as validate_knowledge
     validate_knowledge(operational_knowledge)
@@ -161,6 +161,15 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
         credential_check()
     overlay = check_reference(task_dir, reference_dir)
     policies=reference_policies(reference_dir)
+    if type(reuse_reference_image) is not bool or (reuse_reference_image and not retain_instance_image):
+        raise ValueError('Reference image reuse requires retained images and boolean opt-in')
+    if reuse_reference_image:
+        from keel.harness_cache import validate_scope
+        prior=json.loads((reference_dir/'grading.json').read_text(encoding='utf-8'))
+        cache=prior.get('instance_cache',{})
+        if cache.get('cache_level')!='instance':
+            raise ValueError('Reference has no recipe-scoped retained instance cache')
+        instance_cache_scope=validate_scope(cache.get('scope'))
     reference_hash=file_hash(reference_dir/'grading.json')
     if bool(resume_snapshot)!=bool(saved_repo):
         raise ValueError('Saved-source continuation requires both snapshot grading and saved repo')
@@ -238,6 +247,7 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
               'infrastructure_guard': infrastructure_guard,
               'model_transport_retries': model_transport_retries,
               'instance_cache_scope': instance_cache_scope,
+              'reuse_reference_image': reuse_reference_image,
               'limits': limits,
               'critic_max_output': critic_max_output or 1024,
               'proposal_context_policy': proposal_context_policy or {'soft_bytes':48000,'hard_bytes':proposal_context_hard_bytes or 48000},
@@ -434,6 +444,7 @@ def main():
     parser.add_argument('--record-model-transcript', action='store_true', help='Persist full model messages and replies locally; excludes provider headers/config')
     parser.add_argument('--infrastructure-guard', action='store_true', help='Check Docker server before inference; retry unavailable acceptance once on the same candidate')
     parser.add_argument('--model-transport-retries', type=int, choices=range(3), default=0, help='Explicit transient provider retries per call, charged to shared budgets; requires transcript')
+    parser.add_argument('--reuse-reference-image',action='store_true',help='Explicitly share verified reference recipe cache; tests and scores remain fresh')
     parser.add_argument('--retain-instance-image', action=argparse.BooleanOptionalAction, default=True, help='Retain recipe-scoped instance images within this trial; fresh test containers and scores')
     parser.add_argument('--diagnostic-handoff', action='store_true', help='Review actual localized edit scope against the pending Critic check before planning writes')
     parser.add_argument('--critic-max-output',type=int,help='Explicit Critic role output budget,1..4096; legacy default unchanged')
@@ -479,6 +490,12 @@ def main():
     if args.critic_max_output is not None and not 1<=args.critic_max_output<=4096:
         parser.error('--critic-max-output must be1..4096')
     check_reference(args.task, args.reference_grade)
+    if args.reuse_reference_image:
+        from keel.harness_cache import validate_scope
+        cache=json.loads((args.reference_grade/'grading.json').read_text(encoding='utf-8')).get('instance_cache',{})
+        if not args.retain_instance_image or cache.get('cache_level')!='instance':
+            parser.error('--reuse-reference-image requires a retained recipe-scoped reference image')
+        validate_scope(cache.get('scope'))
     if bool(args.resume_snapshot) != bool(args.saved_repo):
         parser.error('--resume-snapshot and --saved-repo must be supplied together')
     if args.resume_snapshot:
@@ -511,7 +528,7 @@ def main():
                      saved_repo=args.saved_repo.resolve() if args.saved_repo else None,
                      diagnostic_inspection=args.diagnostic_inspection == 'required',
                      recovery_progress=args.recovery_progress, targeted_source_review=args.targeted_source_review,
-                     diagnosis_supervision=args.diagnosis_supervision, budget_driven_recovery=args.budget_driven_recovery, record_model_transcript=args.record_model_transcript, infrastructure_guard=args.infrastructure_guard, model_transport_retries=args.model_transport_retries, retain_instance_image=args.retain_instance_image, diagnostic_handoff=args.diagnostic_handoff, operational_knowledge=knowledge_config, total_seconds=args.total_seconds, final_grade_reserve=args.final_grade_reserve, budget_limits=({k:v for k,v in limits.items() if k != "max_wallclock"} if args.total_seconds is not None else limits), budget_profile=args.budget_profile, diagnostic_report=args.diagnostic_report.resolve() if args.diagnostic_report else None, diagnostic_execution=json.loads(args.diagnostic_probe_config.read_text(encoding='utf-8')) if args.diagnostic_probe_config else None, comparison_plan=args.comparison_plan.resolve() if args.comparison_plan else None, comparison_report=args.comparison_report.resolve() if args.comparison_report else None, proposal_context_hard_bytes=args.proposal_context_hard_bytes, proposal_context_policy=proposal_policy, critic_max_output=args.critic_max_output)
+                     diagnosis_supervision=args.diagnosis_supervision, budget_driven_recovery=args.budget_driven_recovery, record_model_transcript=args.record_model_transcript, infrastructure_guard=args.infrastructure_guard, model_transport_retries=args.model_transport_retries, retain_instance_image=args.retain_instance_image, reuse_reference_image=args.reuse_reference_image, diagnostic_handoff=args.diagnostic_handoff, operational_knowledge=knowledge_config, total_seconds=args.total_seconds, final_grade_reserve=args.final_grade_reserve, budget_limits=({k:v for k,v in limits.items() if k != "max_wallclock"} if args.total_seconds is not None else limits), budget_profile=args.budget_profile, diagnostic_report=args.diagnostic_report.resolve() if args.diagnostic_report else None, diagnostic_execution=json.loads(args.diagnostic_probe_config.read_text(encoding='utf-8')) if args.diagnostic_probe_config else None, comparison_plan=args.comparison_plan.resolve() if args.comparison_plan else None, comparison_report=args.comparison_report.resolve() if args.comparison_report else None, proposal_context_hard_bytes=args.proposal_context_hard_bytes, proposal_context_policy=proposal_policy, critic_max_output=args.critic_max_output)
     print(json.dumps({key: value for key, value in report.items() if key != 'implementation'}, indent=2))
     return 0 if (report['official_resolved'] is True and
                  (not args.budget_driven_recovery or report.get('runtime_status') == 'passed')) else 1

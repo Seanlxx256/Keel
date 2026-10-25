@@ -11,7 +11,7 @@ from .environment_probe import DEPENDENCY_PROGRAM,retained_image,run_image_progr
 from .dependency_compatibility import resolution_request,validate_resolution,RESOLVE_PROGRAM
 
 
-def recover_reference(task, export, failed, output, *, python, timeout, grader):
+def recover_reference(task, export, failed, output, *, python, timeout, grader, recipe_grade=None):
     if not 120<=timeout<=7200:
         raise ValueError('Reference recovery deadline must be 120..7200 seconds')
     verify_task(task)
@@ -46,13 +46,31 @@ def recover_reference(task, export, failed, output, *, python, timeout, grader):
             if file_hash(path)!=old.get(key+'_sha256') or json.loads(path.read_text(encoding='utf-8'))!={'policy':old[key],'version':1}:
                 raise ValueError('Prior recovery policy changed')
             inputs[str(path)]=file_hash(path)
-    for path in (failed/'logs/build_images/instances').glob('*/Dockerfile'):
+    recipe_directory=failed
+    if recipe_grade is not None:
+        recipe_directory=Path(recipe_grade)
+        source_input=recipe_directory/'grader-input.json'
+        source_grade=recipe_directory/'grading.json'
+        if json.loads(source_input.read_text(encoding='utf-8')) != [record]:
+            raise ValueError('Recipe source belongs to a different frozen task')
+        if json.loads(source_grade.read_text(encoding='utf-8')).get('runtime_status') != 'reference_only':
+            raise ValueError('Recipe source must be a reference grading')
+        recipes=list((recipe_directory/'logs/build_images/instances').glob('*/Dockerfile'))
+        if len(recipes)!=1 or recipes[0].parent.name.rsplit('__',1)[0] != 'sweb.eval.x86_64.'+record['instance_id']:
+            raise ValueError('Expected one matching original reference recipe')
+        for path in [source_input,source_grade,*recipes[0].parent.iterdir()]:
+            if path.is_symlink():raise ValueError('Recipe source must not contain symlinks')
+            if path.is_file():inputs[str(path)]=file_hash(path)
+    for path in (recipe_directory/'logs/build_images/instances').glob('*/Dockerfile'):
         inputs[str(path)]=file_hash(path)
     output.mkdir(parents=True,exist_ok=False)
     deadline=time.monotonic()+timeout
     report={'status':'inspecting','benchmark_ready':False,'original_grade_sha256':file_hash(failed/'grading.json'),
             'model_calls':0,'inputs':inputs,'actions':[],'observations':[],
             'scope':'Evidence-gated compatibility recovery and fresh reference grading; not agent repair or original-condition score'}
+    if recipe_grade is not None:
+        report['recipe_source']={'directory':str(recipe_directory),
+            'scope':'Explicit same-task original reference build; cached failure remains the diagnosis source'}
     def save():
         (output/'recovery.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
     save()
@@ -69,7 +87,7 @@ def recover_reference(task, export, failed, output, *, python, timeout, grader):
             report['observations'].append({'kind':'scm_providers','artifact':'inspection.json','status':'running'})
             save()
             print('[Reference recovery] inspecting plugin providers',flush=True)
-            inspection=inspect_image(failed,['setuptools_scm'],['setuptools-scm','vcs-versioning'],
+            inspection=inspect_image(recipe_directory,['setuptools_scm'],['setuptools-scm','vcs-versioning'],
                                      timeout=min(45,check()),plugin_probe=True,allow_restore=False)
             (output/'inspection.json').write_text(json.dumps(inspection,indent=2),encoding='utf-8')
             report['observations'][-1]['status']='completed'
@@ -86,7 +104,7 @@ def recover_reference(task, export, failed, output, *, python, timeout, grader):
             save();check()
         if dependency_failure:
             if check()<540:raise TimeoutError('Reserve300s grading plus bounded inspection/resolution')
-            image=retained_image(failed)
+            image=retained_image(recipe_directory)
             report['status']='dependency_inspection'
             report['observations'].append({'kind':'dependency_constraints','artifact':'dependencies/result.json','status':'running'})
             save()
