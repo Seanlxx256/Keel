@@ -113,8 +113,10 @@ def config_for(task, task_dir, output, model_config, harness_python, environment
     return config
 
 
-def execute(root, task_dir, reference_dir, model_config, harness_python, output, *, mcp_config=None, localization_tool_steps=6, require_external_tool=False, local_exploration=False, resume_snapshot=None, saved_repo=None, diagnostic_inspection=False, recovery_progress=False, targeted_source_review=False, diagnosis_supervision=False, budget_driven_recovery=False, record_model_transcript=False, infrastructure_guard=False, model_transport_retries=0, retain_instance_image=True, diagnostic_handoff=False, budget_limits=None, budget_profile='standard', diagnostic_report=None, diagnostic_execution=None, comparison_plan=None, comparison_report=None, proposal_context_hard_bytes=None, proposal_context_policy=None, critic_max_output=None, total_seconds=None, final_grade_reserve=600):
+def execute(root, task_dir, reference_dir, model_config, harness_python, output, *, mcp_config=None, localization_tool_steps=6, require_external_tool=False, local_exploration=False, resume_snapshot=None, saved_repo=None, diagnostic_inspection=False, recovery_progress=False, targeted_source_review=False, diagnosis_supervision=False, budget_driven_recovery=False, record_model_transcript=False, infrastructure_guard=False, model_transport_retries=0, retain_instance_image=True, diagnostic_handoff=False, budget_limits=None, budget_profile='standard', diagnostic_report=None, diagnostic_execution=None, comparison_plan=None, comparison_report=None, proposal_context_hard_bytes=None, proposal_context_policy=None, critic_max_output=None, total_seconds=None, final_grade_reserve=600, operational_knowledge=None):
     started = time.monotonic()
+    from keel.operational_knowledge import validate_config as validate_knowledge
+    validate_knowledge(operational_knowledge)
     deadline = None
     if total_seconds is not None:
         if type(total_seconds) is not int or type(final_grade_reserve) is not int or not 0 < final_grade_reserve < total_seconds - 20:
@@ -280,7 +282,7 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
         repo = prepare_snapshot(task['repo'], task['base_commit'], output/'repo', timeout=min(180, remaining(final_grade_reserve)) if deadline else 180,
                                 **({'source':str(saved_repo.resolve())} if saved_repo else {}))
         if seed_patch:
-            subprocess.run(['git','-c','safe.directory='+repo.as_posix(),'-C',str(repo),'apply','--binary','-'],
+            subprocess.run(['git','-c','safe.directory='+repo.as_posix(),'-c','core.autocrlf=false','-C',str(repo),'apply','--binary','-'],
                 input=seed_patch.encode(),capture_output=True,check=True,timeout=30)
             from keel.workspace import Workspace
             from keel.core import Budget,Limits,Ledger,Trace
@@ -291,6 +293,17 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
                     with_seed.path(name,write=True)
             finally:
                 with_seed.ledger.close()
+            from keel.saved_repair import restore_seed_bytes
+            bindings=dict(continuation['provenance']['source_files'])
+            if diagnostic_evidence:
+                for observation in diagnostic_evidence['observations']:
+                    for item in observation['candidate_manifest'].values():
+                        if item['path'] in bindings and bindings[item['path']]!=item['sha256']:
+                            raise ValueError('Conflicting verified seed source hashes')
+                        bindings[item['path']]=item['sha256']
+            report['seed_restoration']=restore_seed_bytes(repo,saved_repo,bindings,
+                timeout=min(30,remaining(final_grade_reserve)) if deadline else 30)
+            save()
         if diagnostic_report is not None:
             from keel.diagnostic_evidence import load_diagnostic_evidence
             if load_diagnostic_evidence(diagnostic_report, repo) != diagnostic_evidence:
@@ -312,6 +325,8 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
                             budget_limits=limits, budget_profile=budget_profile, proposal_context_hard_bytes=proposal_context_hard_bytes, proposal_context_policy=proposal_context_policy, critic_max_output=critic_max_output)
         if instance_cache_scope is not None:
             config['acceptance'][0].extend(['--instance-cache-scope', instance_cache_scope])
+        if operational_knowledge is not None:
+            config['operational_knowledge']=operational_knowledge
         config['verification_infrastructure_retries'] = 1 if infrastructure_guard else 0
         config['require_diagnostic_inspection'] = diagnostic_inspection
         config['recovery']['monitor_progress'] = recovery_progress
@@ -338,6 +353,8 @@ def execute(root, task_dir, reference_dir, model_config, harness_python, output,
         report['status'] = 'agent_running'
         save()
         result = run(config, repo, output/'run', model=model)
+        if 'operational_knowledge' in result:
+            report['operational_knowledge']=result['operational_knowledge']
         report.update(runtime_status=result['status'], failure=result.get('failure'), budget=result['budget'],
                       external_tool_calls=result.get('external_tool_calls', {}),
                       external_tool_validation=result.get('external_tool_validation', {}),
@@ -428,6 +445,7 @@ def main():
     parser.add_argument('--max-tokens', type=int)
     parser.add_argument('--max-agent-seconds', type=int)
     parser.add_argument('--total-seconds', type=int, help='Shared preparation/Agent/final-grade deadline; replaces max-agent-seconds')
+    parser.add_argument('--operational-knowledge-config',type=Path,help='Explicit operational store path/catalog hash JSON; advice only')
     parser.add_argument('--final-grade-reserve', type=int, default=600)
     parser.add_argument('--resume-snapshot',type=Path)
     parser.add_argument('--saved-repo',type=Path)
@@ -451,6 +469,9 @@ def main():
     if args.require_external_tool and not args.mcp_config:
         parser.error('--require-external-tool requires --mcp-config')
     proposal_policy=json.loads(args.proposal_context_policy.read_text(encoding='utf-8')) if args.proposal_context_policy else None
+    knowledge_config=json.loads(args.operational_knowledge_config.read_text(encoding='utf-8')) if args.operational_knowledge_config else None
+    from keel.operational_knowledge import validate_config as validate_knowledge
+    validate_knowledge(knowledge_config)
     from keel.proposals import proposal_context_limits
     proposal_context_limits({'max_context_bytes':48000,
         **({'proposal_context_hard_bytes':args.proposal_context_hard_bytes} if args.proposal_context_hard_bytes is not None else {}),
@@ -465,7 +486,7 @@ def main():
         load_saved_repair(args.task, args.reference_grade, args.resume_snapshot, args.saved_repo)
     if not args.execute:
         print(json.dumps({'status': 'plan_only', 'instance_id': verify_task(args.task)['instance_id'], 'max_model_calls': limits['max_model_calls'],
-                          'total_seconds':args.total_seconds, 'final_grade_reserve':args.final_grade_reserve, 'max_agent_seconds': None if args.total_seconds else limits['max_wallclock'], 'limits': limits, 'critic_max_output':args.critic_max_output or 1024, 'proposal_context_policy':proposal_policy or {'soft_bytes':48000,'hard_bytes':args.proposal_context_hard_bytes or 48000},
+                          'total_seconds':args.total_seconds, 'final_grade_reserve':args.final_grade_reserve, 'operational_knowledge':knowledge_config, 'max_agent_seconds': None if args.total_seconds else limits['max_wallclock'], 'limits': limits, 'critic_max_output':args.critic_max_output or 1024, 'proposal_context_policy':proposal_policy or {'soft_bytes':48000,'hard_bytes':args.proposal_context_hard_bytes or 48000},
                           'max_verification_rounds': (limits['max_model_calls'] + 1 if args.budget_driven_recovery
                                                      else 9 if args.budget_profile == 'extended' else 4),
                           'budget_driven_recovery': args.budget_driven_recovery,
@@ -490,7 +511,7 @@ def main():
                      saved_repo=args.saved_repo.resolve() if args.saved_repo else None,
                      diagnostic_inspection=args.diagnostic_inspection == 'required',
                      recovery_progress=args.recovery_progress, targeted_source_review=args.targeted_source_review,
-                     diagnosis_supervision=args.diagnosis_supervision, budget_driven_recovery=args.budget_driven_recovery, record_model_transcript=args.record_model_transcript, infrastructure_guard=args.infrastructure_guard, model_transport_retries=args.model_transport_retries, retain_instance_image=args.retain_instance_image, diagnostic_handoff=args.diagnostic_handoff, total_seconds=args.total_seconds, final_grade_reserve=args.final_grade_reserve, budget_limits=({k:v for k,v in limits.items() if k != "max_wallclock"} if args.total_seconds is not None else limits), budget_profile=args.budget_profile, diagnostic_report=args.diagnostic_report.resolve() if args.diagnostic_report else None, diagnostic_execution=json.loads(args.diagnostic_probe_config.read_text(encoding='utf-8')) if args.diagnostic_probe_config else None, comparison_plan=args.comparison_plan.resolve() if args.comparison_plan else None, comparison_report=args.comparison_report.resolve() if args.comparison_report else None, proposal_context_hard_bytes=args.proposal_context_hard_bytes, proposal_context_policy=proposal_policy, critic_max_output=args.critic_max_output)
+                     diagnosis_supervision=args.diagnosis_supervision, budget_driven_recovery=args.budget_driven_recovery, record_model_transcript=args.record_model_transcript, infrastructure_guard=args.infrastructure_guard, model_transport_retries=args.model_transport_retries, retain_instance_image=args.retain_instance_image, diagnostic_handoff=args.diagnostic_handoff, operational_knowledge=knowledge_config, total_seconds=args.total_seconds, final_grade_reserve=args.final_grade_reserve, budget_limits=({k:v for k,v in limits.items() if k != "max_wallclock"} if args.total_seconds is not None else limits), budget_profile=args.budget_profile, diagnostic_report=args.diagnostic_report.resolve() if args.diagnostic_report else None, diagnostic_execution=json.loads(args.diagnostic_probe_config.read_text(encoding='utf-8')) if args.diagnostic_probe_config else None, comparison_plan=args.comparison_plan.resolve() if args.comparison_plan else None, comparison_report=args.comparison_report.resolve() if args.comparison_report else None, proposal_context_hard_bytes=args.proposal_context_hard_bytes, proposal_context_policy=proposal_policy, critic_max_output=args.critic_max_output)
     print(json.dumps({key: value for key, value in report.items() if key != 'implementation'}, indent=2))
     return 0 if (report['official_resolved'] is True and
                  (not args.budget_driven_recovery or report.get('runtime_status') == 'passed')) else 1

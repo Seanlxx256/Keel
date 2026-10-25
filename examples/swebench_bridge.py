@@ -116,6 +116,9 @@ def run_harness(command, *, cwd, log_path, timeout, heartbeat=10, echo_output=Tr
 
 
 def grade(task_dir, export_dir, output, *, python=sys.executable, timeout=1800, environment_overlay=None, network_policy=None, plugin_policy=None, instance_cache_scope=None,compatibility_policy=None):
+    # Direct API callers may supply PathLike interpreters; persisted commands
+    # must contain strings before either launch or required receipt writes.
+    python=os.fsdecode(python)
     if instance_cache_scope is not None:
         from keel.harness_cache import validate_scope
         validate_scope(instance_cache_scope)

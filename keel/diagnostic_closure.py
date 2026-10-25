@@ -3,7 +3,9 @@
 
 def execution_ids(observations):
     return {row['evidence_id'] for row in observations
-            if row.get('kind') == 'execution' and not row.get('historical')}
+            if row.get('kind') == 'execution' and not row.get('historical')
+            and (not row.get('candidate_execution_required')
+                 or row.get('candidate_execution',{}).get('state')=='observed')}
 
 
 def blocker_ids(observations):

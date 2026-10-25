@@ -19,6 +19,12 @@ def request_view(data, schema, *, structured, limit, compact=False):
     changes=[]
     if compact and size()>limit:
         view=copy.deepcopy(data)
+        if 'operational_knowledge' in view:
+            advice=view['operational_knowledge']
+            view['operational_knowledge']={'status':'omitted_for_request_capacity',
+                'catalog_sha256':advice.get('catalog_sha256')}
+            changes.append({'omitted':'operational_knowledge','reason':'Do not displace current observations with historical advice.'})
+            messages[1]['content']=json.dumps(view)
         rows=view.get('observations',[])
         for row in rows:
             outer=row.get('execution')
@@ -40,6 +46,38 @@ def request_view(data, schema, *, structured, limit, compact=False):
                                       'omissions':changes}
             messages[1]['content']=json.dumps(view)
         refresh()
+        # Remove exact source echoes only, never arbitrary child result text.
+        sources=[row for row in rows if row.get('kind')=='source' and isinstance(row.get('text'),str)
+                 and len(row['text'].rstrip())>=200]
+        for row in rows:
+            probe=row.get('probe')
+            if not isinstance(probe,dict) or not isinstance(probe.get('stdout'),str):
+                continue
+            original=probe['stdout']; echoed=[]
+            for source in sources:
+                fragment=source['text'].rstrip()
+                for equivalent in dict.fromkeys((fragment, fragment.replace('\r\n','\n'))):
+                    if equivalent in probe['stdout']:
+                        probe['stdout']=probe['stdout'].replace(equivalent,
+                            '[Source echo omitted (CRLF/LF-equivalent); see '+source['evidence_id']+']')
+                        echoed.append(source['evidence_id'])
+            if echoed:
+                probe['stdout_view']={'raw_sha256':hashlib.sha256(original.encode()).hexdigest(),
+                    'omitted_source_echoes':echoed, 'scope':'Only exact or CRLF/LF-equivalent source echoes removed; other result text preserved; raw output remains in ledger.'}
+                changes.append({'evidence_id':row['evidence_id'],'omitted':'exact_source_echo'})
+                refresh()
+        # Earlier scripts remain in the ledger. Keep the latest script and all
+        # distinct execution output; do not repeat old multi-kilobyte programs.
+        executions=[row for row in rows if row.get('kind')=='execution']
+        for row in executions[:-1]:
+            if size()<=limit:
+                break
+            if isinstance(row.get('code'),str) and len(row['code'])>256:
+                code=row.pop('code')
+                row['code_view']={'omitted':True,'sha256':hashlib.sha256(code.encode()).hexdigest(),
+                    'bytes':len(code.encode()),'reason':'Earlier script retained in ledger; latest script and distinct output preserved.'}
+                changes.append({'evidence_id':row['evidence_id'],'omitted':'earlier_probe_code'})
+                refresh()
         # Source windows can be reacquired with read/search; execution output stays intact.
         for row in rows[:-1]:
             if size()<=limit:

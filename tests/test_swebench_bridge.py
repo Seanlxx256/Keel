@@ -14,6 +14,23 @@ from keel.swebench_transport import linux_artifact_writes
 
 
 class SwebenchBridgeTests(unittest.TestCase):
+    def test_pathlike_interpreter_is_serializable_before_harness_launch(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);_,run=self.fixture(root)
+            export_prediction(root/'task',run,root/'export','keel')
+            def harness(command,**kwargs):
+                persisted=json.loads((root/'grading/grading.json').read_text())
+                self.assertTrue(all(isinstance(value,str) for value in persisted['command']))
+                self.assertEqual(command[0],sys.executable)
+                return SimpleNamespace(returncode=0)
+            with patch('examples.swebench_bridge.importlib.metadata.version',return_value='3.0.0'), \
+                    patch('examples.swebench_bridge.run_harness',side_effect=harness) as launched:
+                result=grade(root/'task',root/'export',root/'grading',python=Path(sys.executable))
+            self.assertEqual(launched.call_count,1)
+            self.assertEqual(result['status'],'grading_error')  # no synthetic official report
+            self.assertIsNone(result['official_resolved'])
+            json.dumps(result)
+
     def test_saved_snapshot_grades_without_restarting_agent_or_overwriting_original(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp);self.fixture(root)

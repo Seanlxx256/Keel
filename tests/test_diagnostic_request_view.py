@@ -6,6 +6,37 @@ from keel.diagnostic_inspection import request_view
 
 
 class RequestViewTests(unittest.TestCase):
+    def test_optional_knowledge_yields_capacity_to_current_observations(self):
+        current={'kind':'execution','evidence_id':'E1','probe':{'stdout':'CURRENT_RESULT=7','stderr':'current failure'}}
+        data={'observations':[current],'operational_knowledge':{'catalog_sha256':'a'*64,'cards':[{'guidance':'x'*3000}]}}
+        before=copy.deepcopy(data)
+        messages,size,changes=request_view(data,{},structured=True,limit=1500,compact=True)
+        view=json.loads(messages[1]['content'])
+        self.assertLessEqual(size,1500)
+        self.assertEqual(view['observations'],[current])
+        self.assertEqual(view['operational_knowledge']['status'],'omitted_for_request_capacity')
+        self.assertEqual(data,before)
+        self.assertIn('operational_knowledge',[row['omitted'] for row in changes])
+
+    def test_source_echo_and_old_code_compact_without_losing_distinct_results(self):
+        source='def example():\n    return '+repr('x'*250)+'\n'
+        latest={'kind':'execution','evidence_id':'E2','code':'print("actual")',
+                'probe':{'stdout':source+'\nACTUAL_RESULT=7','stderr':'actual error'}}
+        data={'readable_paths':['a.py'],'observations':[
+            {'kind':'source','evidence_id':'S1','path':'a.py','text':source},
+            {'kind':'execution','evidence_id':'E1','code':'old '*1000,'probe':{'stdout':'OLD_RESULT=4'}},latest]}
+        before=copy.deepcopy(data)
+        messages,size,changes=request_view(data,{},structured=True,limit=2000,compact=True)
+        view=json.loads(messages[1]['content'])
+        self.assertLessEqual(size,2000)
+        self.assertEqual(data,before)
+        self.assertIn('ACTUAL_RESULT=7',view['observations'][-1]['probe']['stdout'])
+        self.assertEqual(view['observations'][-1]['probe']['stderr'],'actual error')
+        self.assertEqual(view['observations'][-1]['code'],latest['code'])
+        self.assertEqual(view['observations'][1]['probe']['stdout'],'OLD_RESULT=4')
+        self.assertTrue(view['observations'][1]['code_view']['omitted'])
+        self.assertIn('exact_source_echo',[row['omitted'] for row in changes])
+
     def test_duplicate_wrapper_removed_without_changing_evidence(self):
         probe={'returncode':0,'stdout':'result '*600,'stderr':'','timeout':False}
         data={'observations':[{'kind':'execution','evidence_id':'E1','probe':probe,
@@ -43,3 +74,14 @@ class RequestViewTests(unittest.TestCase):
         _,size,changes=request_view({'observations':[{'text':'x'*5000}]},{},structured=True,limit=100,compact=False)
         self.assertFalse(changes)
         self.assertGreater(size,100)
+
+    def test_crlf_source_echo_can_be_deduplicated_without_dropping_results(self):
+        text='def sample():\r\n    return '+repr('x'*220)+'\r\n'
+        data={'readable_paths':['a.py'],'observations':[
+            {'kind':'source','evidence_id':'S1','path':'a.py','text':text},
+            {'kind':'execution','evidence_id':'E1','probe':{'stdout':text.replace('\r\n','\n')+'RESULT=3'}}]}
+        messages,_,changes=request_view(data,{},structured=True,limit=700,compact=True)
+        output=json.loads(messages[1]['content'])['observations'][-1]['probe']['stdout']
+        self.assertIn('RESULT=3',output)
+        self.assertIn('CRLF/LF-equivalent',output)
+        self.assertIn('exact_source_echo',[r['omitted'] for r in changes])

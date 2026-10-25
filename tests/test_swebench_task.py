@@ -13,6 +13,34 @@ from keel.runtime import validate
 
 
 class SwebenchTaskTests(unittest.TestCase):
+    def test_verified_seed_byte_recovery_precedes_diagnostic_check_and_agent(self):
+        from examples.run_swebench_task import execute
+        from types import SimpleNamespace
+        import hashlib
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);row=self.task(root);reference=self.policy_reference(root,row)
+            source=root/'source';repo=root/'repo';source.mkdir();repo.mkdir()
+            (source/'sample.py').write_bytes(b'value=2\n');(repo/'sample.py').write_bytes(b'value=2\r\n')
+            expected=hashlib.sha256(b'value=2\n').hexdigest()
+            context={'verification':[{'returncode':1}],'changes':{},'provenance':{'source_files':{'sample.py':expected}}}
+            evidence={'report_sha256':'fixture','observations':[{'candidate_manifest':{'sample':{'path':'sample.py','sha256':expected}}}]}
+            def diagnostic(path,current):
+                self.assertEqual(hashlib.sha256((current/'sample.py').read_bytes()).hexdigest(),expected)
+                return evidence
+            def agent(*args,**kwargs):
+                self.assertEqual((repo/'sample.py').read_bytes(),b'value=2\n')
+                return {'status':'passed','budget':{}}
+            with patch('examples.run_swebench_task.subprocess.run',return_value=SimpleNamespace(stdout='3.0.0')), \
+                    patch('examples.run_swebench_task.prepare_snapshot',return_value=repo), \
+                    patch('keel.saved_repair.load_saved_repair',return_value=('seed',context)), \
+                    patch('keel.diagnostic_evidence.load_diagnostic_evidence',side_effect=diagnostic), \
+                    patch('examples.run_swebench_task.run',side_effect=agent), \
+                    patch('examples.run_swebench_task.export_prediction'), \
+                    patch('examples.run_swebench_task.grade',return_value={'status':'graded','official_resolved':True}):
+                result=execute(root,root/'task',reference,{'name':'test'},'python',root/'trial',
+                    resume_snapshot=root/'snapshot',saved_repo=source,diagnostic_report=root/'report.json')
+            self.assertEqual(result['seed_restoration']['restored_files'],1)
+
     def test_empty_candidate_skips_grading_without_losing_runtime_failure(self):
         from examples.run_swebench_task import execute
         from types import SimpleNamespace

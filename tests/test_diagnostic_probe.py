@@ -13,6 +13,63 @@ from keel.workspace import Workspace
 
 
 class ProbeTests(unittest.TestCase):
+    def test_unavailable_probe_is_removed_from_schema_and_corrected_without_execution(self):
+        owner=self
+        with tempfile.TemporaryDirectory() as temp, closing(Ledger(Path(temp)/'facts.sqlite')) as ledger:
+            root=Path(temp)/'repo';root.mkdir();ws=self.fixture(root,ledger)
+            class Model:
+                calls=0
+                def complete_json(self,messages,**kwargs):
+                    self.calls+=1;data=json.loads(messages[1]['content'])
+                    owner.assertEqual('probe' in kwargs['schema']['properties']['action']['enum'],data['probe_available'])
+                    if self.calls==3:
+                        owner.assertIn('NOT executed',data['observations'][-1]['text'])
+                        value=owner.action('answer');value['evidence_ids']=data['current_question_execution_ids']
+                        return Reply(json.dumps(value),10)
+                    value=owner.action();value['code']=f'print({self.calls})'
+                    return Reply(json.dumps(value),10)
+            with patch('keel.diagnostic_probe.run_probe',return_value={'kind':'execution','outcome':'completed'}) as probe:
+                result=investigate(Model(),ws,'Inspect','Question',[],{},
+                    execution={'backend':'docker','image':'image'},python='/python',require_probe=True,max_model_calls=3)
+            self.assertEqual(probe.call_count,1)
+            self.assertEqual(ws.budget.model_calls,3)
+            self.assertEqual(result['closure']['state'],'diagnosis_ready')
+
+    def test_candidate_receipt_needs_matching_module_hash(self):
+        from keel.diagnostic_probe import candidate_execution
+        manifest={'sample':{'sha256':'expected'}}
+        value={'module':'sample','function':'run','line':1,'sha256':'wrong'}
+        observation={'probe':{'stderr':'__KEEL_CANDIDATE_CALLS__'+json.dumps([value])}}
+        self.assertEqual(candidate_execution(observation,manifest)['state'],'not_observed')
+        value['sha256']='expected'
+        observation['probe']['stderr']='__KEEL_CANDIDATE_CALLS__'+json.dumps([value])
+        self.assertEqual(candidate_execution(observation,manifest)['state'],'observed')
+
+    def test_surrogate_probe_cannot_close_and_can_correct_to_candidate_call(self):
+        owner=self
+        with tempfile.TemporaryDirectory() as temp, closing(Ledger(Path(temp)/'facts.sqlite')) as ledger:
+            root=Path(temp)/'repo';root.mkdir();ws=self.fixture(root,ledger)
+            class Model:
+                calls=0
+                def complete_json(self,messages,**kwargs):
+                    self.calls+=1;data=json.loads(messages[1]['content'])
+                    value=owner.action('answer' if self.calls==3 else 'probe')
+                    if self.calls==2:
+                        owner.assertEqual(data['current_question_execution_ids'],[])
+                        owner.assertTrue(data['failed_probe_correction_available'])
+                    if self.calls<3:value['code']=f'print({self.calls})'
+                    else:value['evidence_ids']=data['current_question_execution_ids']
+                    return Reply(json.dumps(value),10)
+            observations=[{'kind':'execution','outcome':'completed','candidate_execution':{'state':'not_observed'}},
+                          {'kind':'execution','outcome':'completed','candidate_execution':{'state':'observed','calls':[{'function':'actual'}]}}]
+            with patch('keel.diagnostic_probe.run_probe',side_effect=observations) as probe:
+                result=investigate(Model(),ws,'Inspect','Question',[{'path':'sample.py','text':'value=1'}],{},
+                    execution={'backend':'docker','image':'image'},python='/python',require_probe=True,
+                    candidate_imports=True,correct_failed_probe=True,require_candidate_execution=True)
+            self.assertEqual(probe.call_count,2)
+            self.assertEqual(result['closure']['state'],'diagnosis_ready')
+            self.assertEqual(ws.budget.model_calls,3)
+
     def test_citation_correction_reuses_execution_without_repeating_probe(self):
         owner=self
         with tempfile.TemporaryDirectory() as temp, closing(Ledger(Path(temp)/'facts.sqlite')) as ledger:
@@ -203,7 +260,7 @@ class ProbeTests(unittest.TestCase):
 
     def test_second_failed_probe_cannot_get_a_third_execution(self):
         report,error,runs,calls=self.correction(second_fails=True)
-        self.assertIsInstance(error,PolicyDenied);self.assertEqual(runs,2);self.assertEqual(calls,3)
+        self.assertIsInstance(error,BudgetExceeded);self.assertEqual(runs,2);self.assertEqual(calls,3)
 
     def test_failed_probe_correction_does_not_reset_model_call_limit(self):
         report,error,runs,calls=self.correction(limit=2)

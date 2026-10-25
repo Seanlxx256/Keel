@@ -19,9 +19,19 @@ code=base64.b64decode(sys.argv[1]).decode('utf-8')
 if len(sys.argv)>2:
     context=json.loads(base64.b64decode(sys.argv[2]))
     code=("import json,sys\n_candidate_ns={}\nexec("+repr(context['helper'])+",_candidate_ns)\n"
+          "_candidate_calls=[]\n"
+          "def _candidate_profile(frame,event,arg):\n"
+          "    if event!='call' or frame.f_code.co_name=='<module>' or len(_candidate_calls)>=8: return\n"
+          "    for record in _loaded:\n"
+          "        if record.get('status')=='executed' and frame.f_code.co_filename==record['path']:\n"
+          "            item={'module':record['module'],'sha256':record['sha256'],'function':frame.f_code.co_name,'line':frame.f_code.co_firstlineno}\n"
+          "            if item not in _candidate_calls: _candidate_calls.append(item)\n"
           "with _candidate_ns['candidate_context']("+repr(context['root'])+","+repr(context['modules'])+") as _loaded:\n"
+          "    sys.setprofile(_candidate_profile)\n"
           "    try:\n        exec(compile("+repr(code)+",'<diagnostic-probe>','exec'))\n"
-          "    finally:\n        print('__KEEL_CANDIDATE_IMPORTS__'+json.dumps(_loaded),file=sys.stderr)\n")
+          "    finally:\n        sys.setprofile(None)\n"
+          "        print('__KEEL_CANDIDATE_IMPORTS__'+json.dumps(_loaded),file=sys.stderr)\n"
+          "        print('__KEEL_CANDIDATE_CALLS__'+json.dumps(_candidate_calls),file=sys.stderr)\n")
 def limits(): resource.setrlimit(resource.RLIMIT_FSIZE,(16384,16384))
 with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
     try:
@@ -70,8 +80,26 @@ def run_probe(workspace, execution, python, code, *, candidate_imports=False, ca
     observation['outcome'] = probe_outcome(observation)
     if manifest is not None:
         observation['candidate_manifest'] = manifest
+        observation['candidate_execution'] = candidate_execution(observation, manifest)
         observation['import_context'] = 'Qualified imports use hashed mounted candidate modules; other package dependencies remain image-provided. Loader records imports on child stderr.'
     return observation
+
+
+def candidate_execution(observation, manifest):
+    """A necessary execution signal, not proof a relevant experiment was performed."""
+    records=[]
+    for line in observation.get('probe',{}).get('stderr','').splitlines():
+        if line.startswith('__KEEL_CANDIDATE_CALLS__'):
+            try:
+                records=json.loads(line[len('__KEEL_CANDIDATE_CALLS__'):])
+            except ValueError:
+                records=[]
+    valid=[row for row in records if isinstance(row,dict)
+           and row.get('module') in manifest
+           and row.get('sha256')==manifest[row['module']]['sha256']
+           and isinstance(row.get('function'),str) and type(row.get('line')) is int] if isinstance(records,list) else []
+    return {'state':'observed' if valid else 'not_observed', 'calls':valid[:8],
+            'scope':'Instrumented candidate function calls only; experiment relevance and interpretation remain unverified.'}
 
 
 def probe_outcome(observation):
@@ -88,10 +116,14 @@ def probe_outcome(observation):
 
 def investigate(model, workspace, goal, decision, initial_evidence, settings, *, execution=None, python=None, require_probe=False,
                 candidate_imports=False, correct_failed_probe=False, continue_successful_probe=False, prior_probe_observations=None,
-                source_paths=None, max_model_calls=None):
+                source_paths=None, max_model_calls=None, require_candidate_execution=False):
     """Same action loop for read-only and probe arms; only probe availability differs."""
     if require_probe and not execution:
         raise ValueError('Required-probe policy needs operator-enabled execution')
+    if type(require_candidate_execution) is not bool:
+        raise ValueError('Candidate execution policy must be boolean')
+    if require_candidate_execution and (not require_probe or not candidate_imports):
+        raise ValueError('Candidate execution policy requires candidate imports and required probes')
     if max_model_calls is not None and (type(max_model_calls) is not int or max_model_calls < 1):
         raise ValueError('Diagnostic model-call limit must be a positive integer')
     readable_paths = [name for name,_ in workspace.files()] if source_paths is None else list(source_paths)
@@ -122,21 +154,32 @@ def investigate(model, workspace, goal, decision, initial_evidence, settings, *,
     seen = set(); used_probe = False; premature_answers = 0; invalid_probe_calls = 0; invalid_citations = 0
     probe_attempts = len(prior_probe_observations); used_probe = bool(probe_attempts)
     retry_available = False; followup_available = bool(probe_attempts and continue_successful_probe)
+    unavailable_actions = 0
     while True:
         if max_model_calls is not None and calls >= max_model_calls:
             raise RecoveryStopped('Diagnostic investigation call limit reached; unresolved, not an execution blocker')
         fresh_execution_ids = execution_ids(observations)
         available_ids = [row['evidence_id'] for row in observations]
         schema['properties']['evidence_ids']['items']['enum'] = available_ids
-        schema['properties']['action']['enum'] = ([a for a in actions if a!='answer']
-            if require_probe and not fresh_execution_ids else actions)
+        probe_available = bool(execution) and (not used_probe or retry_available or followup_available)
+        schema['properties']['action']['enum'] = [a for a in actions
+            if (a!='probe' or probe_available) and (a!='answer' or not require_probe or fresh_execution_ids)]
         calls += 1
+        from .operational_knowledge import context as knowledge_context
+        advice=knowledge_context(workspace,'diagnostic','candidate_imports' if candidate_imports else 'diagnostic_probe',
+                                 observations[-1] if observations else {})
         value = request(model,workspace,settings,'probe-comparison',{
             'goal':goal,'diagnostic_question':decision,'observations':observations,
             'available_evidence_ids':available_ids,
             'decision_questions':DECISION_QUESTIONS,
+            **({'operational_knowledge':advice} if advice is not None else {}),
             'readable_paths':readable_paths,
-            'probe_available':bool(execution) and (not used_probe or retry_available or followup_available),
+            'remaining_model_calls_including_this':max(0,workspace.budget.limits.max_model_calls-workspace.budget.model_calls),
+            'probe_preparation':('Check current function parameter/attribute access and real test fixture initialization before execution. '
+                'Do not guess that optional/default-None arguments are valid for the exercised path. '
+                'Reuse a source-backed constructor/fixture where possible; a reduced context needs evidence for all accessed members. '
+                'Prioritize reaching the target operation before unrelated helper checks, and leave a model call to interpret output.'),
+            'probe_available':probe_available,
             'probe_attempts':probe_attempts,
             'current_question_execution_ids':sorted(fresh_execution_ids),
             'verified_execution_obstacle_ids':sorted(blocker_ids(observations)),
@@ -149,6 +192,11 @@ def investigate(model, workspace, goal, decision, initial_evidence, settings, *,
                 'real package names with SHA checks; unchanged dependencies come from the image. Do not load package '
                 'files under invented top-level spec names or fake package modules. See loader markers on stderr.'
                 if candidate_imports else 'No automatic candidate import context enabled.'),
+            'candidate_execution_policy':('Invoke real functions from the mounted candidate module using qualified imports. '
+                'Do not replace those functions with a handwritten simulation or mock implementation. '
+                'Import-only checks do not satisfy this policy. Print concise observed inputs, return values and node types; '
+                'do not print entire functions already supplied as evidence. Function-call receipts are necessary, not proof of relevance.'
+                if require_candidate_execution else 'No candidate function-call requirement.'),
             'probe_policy':'required_before_answer_or_explicit_blocker' if require_probe else 'optional',
             'action_arguments':{
                 'probe':'Put runnable Python SOURCE in code; query and path must be empty, line numbers zero. An English experiment request is not executable. code must be 1..8000 UTF-8 bytes.',
@@ -204,6 +252,20 @@ def investigate(model, workspace, goal, decision, initial_evidence, settings, *,
                        'Existing execution observations remain available; do not repeat a completed probe just '
                        'to correct citations. The host does not infer which evidence you intended.'})
             continue
+        if value['action']=='probe' and not probe_available:
+            if not execution:
+                raise PolicyDenied('Probe execution is not enabled')
+            unavailable_actions += 1
+            if unavailable_actions > 1:
+                raise RecoveryStopped('Repeated unavailable diagnostic action; unresolved protocol error')
+            observations.append({'evidence_id':'unavailable-'+str(len(observations)),
+                'kind':'protocol_feedback','error_type':'PolicyDenied',
+                'text':'Probe was NOT executed: the authorized probe allowance is used. '
+                       'Choose an action from the current schema. Existing execution evidence remains available. '
+                       'Use read/search for specific missing source, or answer from evidence if closure permits. '
+                       'This feedback does not authorize another probe or expand any budget.'})
+            workspace.trace.emit('scout','diagnostic_unavailable_action_rejected',action='probe',attempt=unavailable_actions)
+            continue
         if value['action'] in ('answer','blocked'):
             if not value['answer'].strip() or not value['evidence_ids']:
                 raise ValueError('Diagnostic answer requires concrete text and observations')
@@ -252,13 +314,17 @@ def investigate(model, workspace, goal, decision, initial_evidence, settings, *,
                 probe_kwargs['candidate_paths'] = [p for p in readable_paths if p.endswith('.py')]
             row=run_probe(workspace,execution,python,value['code'],**probe_kwargs)
             outcome = row.get('outcome', probe_outcome(row))
-            retry_available = bool(correct_failed_probe and probe_attempts == 1 and outcome in ('script_failed','script_timeout'))
+            if require_candidate_execution:
+                row['candidate_execution_required']=True
+            missing_candidate = require_candidate_execution and row.get('candidate_execution',{}).get('state')!='observed'
+            retry_available = bool(correct_failed_probe and probe_attempts == 1 and
+                                   (outcome in ('script_failed','script_timeout') or missing_candidate))
             followup_available = bool(continue_successful_probe and probe_attempts == 1 and outcome == 'completed')
             row['code'] = value['code']
             row['failed_probe_correction_available'] = retry_available
             row['successful_probe_followup_available'] = followup_available
             if retry_available:
-                row['correction_scope'] = 'One different script may correct this child failure within the unchanged global call/tool/time budgets; not a new task attempt.'
+                row['correction_scope'] = 'One different script may correct child failure or missing candidate function execution within unchanged global budgets; not a new task attempt.'
         else:
             if value['path'] not in readable_paths:
                 raise PolicyDenied('Diagnostic read path is outside frozen source catalog')

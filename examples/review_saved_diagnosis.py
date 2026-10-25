@@ -156,6 +156,8 @@ def execute_probe_pair(output, plan, identity, model=None):
         budget=Budget(Limits(max_model_calls=3,max_tokens=60000,max_tool_calls=8,max_wallclock=120))
         ledger=Ledger(target/'ledger.sqlite');trace=Trace(target/'trace.jsonl')
         workspace=Workspace(root,budget,ledger,trace);before=workspace.snapshot()
+        from keel.operational_knowledge import attach as attach_knowledge
+        attach_knowledge(workspace,plan.get('operational_knowledge'),identity)
         prior=plan.get('prior_probe_observations',[])
         if prior:
             from keel.candidate_imports import module_manifest
@@ -198,6 +200,7 @@ def execute_probe_pair(output, plan, identity, model=None):
                 execution=({'backend':'docker','image':image,'cpus':1,'memory_mb':768,'pids_limit':64} if arm=='probe' else None),
                 python=plan['probe_python'],require_probe=plan.get('probe_policy')=='required',
                 candidate_imports=plan.get('candidate_imports',False),
+                require_candidate_execution=plan.get('require_candidate_execution',False),
                 correct_failed_probe=plan.get('correct_failed_probe',False),
                 continue_successful_probe=plan.get('continue_successful_probe',False),
                 prior_probe_observations=prior)
@@ -205,6 +208,9 @@ def execute_probe_pair(output, plan, identity, model=None):
         except RecoveryStopped as error:report.update(status='evidence_blocked',reason=str(error))
         except Exception as error:report.update(status='incomplete',error_type=type(error).__name__,reason=str(error)[:700])
         finally:
+            if getattr(workspace,'operational_knowledge',None):
+                workspace.operational_knowledge.finish(report['status'])
+                report['operational_knowledge']=workspace.operational_knowledge.report()
             report.update(new_provider_calls=proxy.calls,budget=budget.report(),workspace_unchanged=workspace.snapshot()==before,
                           acceptance='not_executed',image_id=image)
             if not report['workspace_unchanged']:report.update(status='incomplete',reason='Unexpected source mutation')

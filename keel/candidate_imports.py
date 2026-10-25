@@ -23,6 +23,9 @@ def candidate_context(root, modules):
             raise ValueError('Candidate module source escapes the snapshot')
         entries[name] = (path, row['sha256'])
     roots = {name.split('.')[0] for name in entries}
+    parents={'.'.join(name.split('.')[:count]) for name in entries
+             for count in range(1,len(name.split('.')))}
+    parent_providers=list(sys.meta_path)
     if any(name.split('.')[0] in roots for name in sys.modules):
         raise RuntimeError('Candidate package already imported; use a fresh interpreter')
     loaded = []
@@ -62,7 +65,27 @@ def candidate_context(root, modules):
     class Finder(importlib.abc.MetaPathFinder):
         def find_spec(self, fullname, path=None, target=None):
             if fullname not in entries:
-                return None
+                if fullname not in parents:
+                    return None
+                # Probe code may reinsert the thin snapshot after entry-time
+                # cleanup. Resolve real parents through the original providers
+                # with that root excluded, retaining editable finder support.
+                search=list(sys.path)
+                namespace=None
+                try:
+                    sys.path[:]=[value for value in search if not snapshot_search_entry(value)]
+                    parent_path=([value for value in path if not snapshot_search_entry(value)]
+                                 if path is not None else None)
+                    for provider in parent_providers:
+                        locate=getattr(provider,'find_spec',None)
+                        spec=locate(fullname,parent_path,target) if locate else None
+                        if spec is not None:
+                            if spec.loader is not None:
+                                return spec
+                            namespace=spec
+                    return namespace
+                finally:
+                    sys.path[:]=search
             source, sha = entries[fullname]
             locations = None
             if source.name == '__init__.py':

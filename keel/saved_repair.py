@@ -1,10 +1,54 @@
 """Bind saved source and independently observed failures for a new repair attempt."""
 import hashlib
 import json
+import time
 from pathlib import Path
 from .evaluation_protocol import file_hash
 from .swebench import verify_task, workspace_patch
 from .verification_feedback import failure_feedback
+
+
+def restore_seed_bytes(repo, source, bindings, *, timeout=30):
+    """Recover only EOL conversion from hash-verified seed bytes; never waive identity."""
+    from .audit import protected_path
+    repo=Path(repo).resolve();source=Path(source).resolve();deadline=time.monotonic()+timeout
+    if bindings and repo==source:
+        raise ValueError('Seed restoration requires a separate prepared workspace')
+    pending=[];records=[]
+    for name,expected in bindings.items():
+        if time.monotonic()>=deadline:raise TimeoutError('Seed byte restoration deadline')
+        relative=Path(name)
+        if relative.is_absolute() or relative.drive or '..' in relative.parts or protected_path(name) or relative.suffix!='.py':
+            raise ValueError('Invalid seed restoration source path')
+        paths=[]
+        for root in (repo,source):
+            path=root/relative
+            if (not path.resolve().is_relative_to(root) or not path.is_file()
+                    or any(part.is_symlink() for part in (path,*path.parents) if part.is_relative_to(root))):
+                raise ValueError('Seed restoration path missing or unsafe')
+            paths.append(path)
+        target,origin=paths;original=origin.read_bytes();current=target.read_bytes()
+        if hashlib.sha256(original).hexdigest()!=expected:
+            raise ValueError('Verified seed source changed before restoration')
+        before=hashlib.sha256(current).hexdigest()
+        row={'path':name,'expected_sha256':expected,'before_sha256':before,'status':'exact'}
+        if before!=expected:
+            if current.replace(b'\r\n',b'\n')!=original.replace(b'\r\n',b'\n'):
+                raise ValueError('Prepared seed has a real content difference: '+name)
+            pending.append((target,current,original))
+            row['status']='restored_verified_eol_bytes'
+        records.append(row)
+    # Validate the entire inventory before the first mutation.
+    for target,before,original in pending:
+        if time.monotonic()>=deadline:raise TimeoutError('Seed byte restoration deadline')
+        if target.read_bytes()!=before:raise ValueError('Prepared seed changed during restoration')
+        target.write_bytes(original)
+    for row in records:
+        row['after_sha256']=file_hash(repo/row['path'])
+        if row['after_sha256']!=row['expected_sha256']:
+            raise ValueError('Seed restoration did not preserve exact bytes')
+    return {'files':records,'restored_files':len(pending),
+            'scope':'Exact verified seed bytes restored only for LF/CRLF conversion; not a model patch or relaxed evidence check.'}
 
 
 def load_saved_repair(task_dir,reference_dir,snapshot_dir,repo):

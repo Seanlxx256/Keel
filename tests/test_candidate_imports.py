@@ -16,6 +16,33 @@ from keel.candidate_imports import candidate_context, module_manifest
 
 
 class CandidateImportTests(unittest.TestCase):
+    def test_path_inserted_inside_probe_cannot_shadow_editable_parent(self):
+        with self.fixture() as (snapshot,current):
+            installed=snapshot.parent/'installed'
+            (installed/'probe_fixture_package/__init__.py').write_text(
+                'configuration="real"\nfrom .api import value\n',encoding='utf-8')
+            (current/'api.py').write_text('from . import configuration\nfrom .helper import suffix\n'
+                                        'def value(): return configuration+suffix\n',encoding='utf-8')
+            class EditableFinder:
+                @staticmethod
+                def find_spec(fullname,path=None,target=None):
+                    if fullname=='probe_fixture_package':
+                        return importlib.machinery.PathFinder.find_spec(fullname,[str(installed)])
+                    return None
+            paths=list(sys.path);sys.path.remove(str(installed));sys.meta_path.append(EditableFinder)
+            try:
+                mapping=module_manifest(snapshot,['probe_fixture_package/api.py'])
+                with candidate_context(snapshot,mapping):
+                    # Mirrors model code adding the thin candidate root after
+                    # the context's initial path cleanup has already run.
+                    sys.path.insert(0,str(snapshot))
+                    package=importlib.import_module('probe_fixture_package')
+                    self.assertEqual(package.value(),'real:dependency')
+                    self.assertEqual(package.configuration,'real')
+                    self.assertTrue(Path(package.__file__).samefile(installed/'probe_fixture_package/__init__.py'))
+            finally:
+                sys.meta_path.remove(EditableFinder);sys.path[:]=paths
+
     def test_partial_snapshot_cannot_shadow_editable_package_parent(self):
         with self.fixture() as (snapshot,current):
             installed=snapshot.parent/'installed'
@@ -70,6 +97,21 @@ class CandidateImportTests(unittest.TestCase):
             self.assertEqual(result['stdout'].strip(),'candidate:dependency')
             self.assertIn('__KEEL_CANDIDATE_IMPORTS__',result['stderr'])
             self.assertIn(context['modules']['probe_fixture_package.api']['sha256'],result['stderr'])
+            from keel.diagnostic_probe import candidate_execution
+            observed=candidate_execution({'probe':result},context['modules'])
+            self.assertEqual(observed['state'],'observed')
+            self.assertIn('value',[row['function'] for row in observed['calls']])
+            # Importing the same candidate without calling it must not count.
+            import_only=code.rsplit('\n',1)[0]
+            argv[1]=base64.b64encode(import_only.encode()).decode()
+            capture=io.StringIO()
+            with patch.object(sys,'argv',argv), patch.dict(sys.modules,{
+                    'resource':SimpleNamespace(RLIMIT_FSIZE=1,setrlimit=lambda *args:None)}), patch(
+                    'subprocess.run',side_effect=trusted_child), redirect_stdout(capture):
+                exec(BOOTSTRAP,{'__name__':'__main__'})
+            result=json.loads(capture.getvalue())
+            self.assertEqual(result['returncode'],0,result['stderr'])
+            self.assertEqual(candidate_execution({'probe':result},context['modules'])['state'],'not_observed')
 
     @contextmanager
     def fixture(self):

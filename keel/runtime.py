@@ -50,6 +50,8 @@ def validate(config: dict):
 
 
 def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) -> dict:
+    from .operational_knowledge import validate_config as validate_knowledge, attach as attach_knowledge
+    validate_knowledge(config.get('operational_knowledge'))
     from .mcp_client import validate_servers
     validate_servers(config.get("mcp_servers", {}))
     if type(config.get("context_handoff", False)) is not bool:
@@ -171,6 +173,7 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
     lifecycle = RoleStateMachine(trace, allow_recovery=adaptive)
     workspace = Workspace(repo, budget, ledger, trace, runner=CommandRunner(config.get("execution")),
                           retrieval=config.get("retrieval"), retrieval_model=model, memoization=config.get("memoization", True))
+    attach_knowledge(workspace,config.get('operational_knowledge'),output.name)
     from .mcp_client import McpTools
     workspace.mcp_tools = McpTools(config.get("mcp_servers", {}), workspace)
     workspace.localization_tool_steps = scout_steps
@@ -713,6 +716,9 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
         if recovery:
             result['recovery'] = recovery.report()
         result["facts"] = ledger.summaries()
+        if getattr(workspace,'operational_knowledge',None):
+            workspace.operational_knowledge.finish(result['status'])
+            result['operational_knowledge']=workspace.operational_knowledge.report()
         result["memory"] = {**ledger.statistics(), "handed_off_facts": getattr(workspace, "handed_off_facts", 0),
                             "memoization": workspace.memoization, "tools": workspace.tool_metrics,
                             "snapshot_calls": workspace.snapshot_calls, "snapshot_bytes": workspace.snapshot_bytes}

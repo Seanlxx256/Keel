@@ -204,6 +204,10 @@ class RecoveryController:
                        'previous_actions': self.actions[-3:],
                        'previous_diagnoses': self.decisions[-2:], 'current_changes': changes or {},
                        'decision_questions': DECISION_QUESTIONS}
+        from .operational_knowledge import context as knowledge_context
+        advice=knowledge_context(self.ws,'verification','verification',verification)
+        if advice is not None:
+            observation['operational_knowledge']=advice
         if self.progress:
             row = self.progress.review(verification)
             if row:
@@ -258,6 +262,12 @@ class RecoveryController:
             'You cannot edit source, change acceptance or grant permissions. '+SUMMARY_GUIDANCE+' JSON schema: ' + json.dumps(schema)},
             {'role': 'user', 'content': json.dumps(observation)}]
         size = len(json.dumps(messages).encode()) + len(json.dumps(schema).encode())
+        if size > settings.get('max_context_bytes',12000) and 'operational_knowledge' in observation:
+            observation['operational_knowledge']={'status':'omitted_for_request_capacity',
+                'catalog_sha256':advice.get('catalog_sha256')}
+            messages[1]['content']=json.dumps(observation)
+            size=len(json.dumps(messages).encode())+len(json.dumps(schema).encode())
+            self.ws.trace.emit('critic','operational_knowledge_omitted',reason='request_capacity')
         # Source handoff is optional context, never a reason to displace the
         # acceptance feedback or raise the existing prompt cap.
         handoff = observation.get('previous_check_observations', {}).get('source_handoff')
