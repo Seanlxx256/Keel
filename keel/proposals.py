@@ -160,6 +160,9 @@ def proposal_context_limits(settings):
     if 'proposal_context_policy' in settings:
         from .context_budget import validate_policy
         policy=validate_policy(settings['proposal_context_policy'])
+        if policy.get('require_local_tokenizer'):
+            from .context_budget import estimate_input
+            estimate_input([],{},policy)
         if 'proposal_context_hard_bytes' in settings:
             raise ValueError('Choose token-based policy or legacy proposal headroom, not both')
         if type(soft) is not int or not 0<soft<=policy['max_request_bytes']:
@@ -233,6 +236,16 @@ def proposal_request(goal, files, evidence, settings, *, structured=True, depend
         raise ProposalCapacityExceeded(size,hard_limit,fixed)
     return messages, schema, size
 
+
+
+def repack_proposal_messages(messages):
+    """Registered lossless transport-layout/duplicate-wrapper compactor."""
+    from .context_budget import compact_json_payloads
+    packed=[dict(message) for message in messages]
+    payload=json.loads(packed[1]['content'])
+    payload['goal']=compact_goal_evidence(payload['goal'])
+    packed[1]['content']=json.dumps(payload,ensure_ascii=False,separators=(',',':'))
+    return compact_json_payloads(packed)
 
 def ambiguous_edit_feedback(index, name, source, old, matches):
     """Bounded current-source hints; never choose a replacement occurrence."""
@@ -322,9 +335,21 @@ def _propose_once(model, workspace, goal, files, evidence, settings, *, dependen
     output = settings.get('max_output', 1024)
     token_metrics=None
     if 'proposal_context_policy' in settings:
-        from .context_budget import admission
+        from .context_budget import admission_with_recovery, compact_json_payloads
+        original_messages=messages
+        def record_guard(event):
+            # Required checkpoint before retry; telemetry failure must not hide lost raw inputs.
+            fact=workspace.ledger.add('decision','implementer','Token admission guard',
+                {'event':event, 'original_messages':original_messages, 'schema':schema})
+            workspace.trace.emit('implementer','proposal_capacity_guard',fact_id=fact,**event)
         try:
-            token_metrics=admission(messages,schema if structured else {},settings['proposal_context_policy'],output,workspace.budget)
+            messages,token_metrics=admission_with_recovery(messages,schema if structured else {},
+                settings['proposal_context_policy'],output,workspace.budget,
+                repack=repack_proposal_messages,on_event=record_guard)
+            size=len(json.dumps(messages,ensure_ascii=False).encode())+(len(json.dumps(schema).encode()) if structured else 0)
+            # Registered repacking is still subject to the independent byte ceiling.
+            if size>settings['proposal_context_policy']['max_request_bytes']:
+                raise InputCapacityExceeded('Repacked request exceeds independent byte ceiling')
         except (BudgetExceeded,InputCapacityExceeded) as error:
             workspace.trace.emit('implementer','proposal_token_admission_rejected',reason=str(error),
                                  metrics=getattr(error,'context_metrics',None))

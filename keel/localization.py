@@ -138,7 +138,9 @@ def select(model, workspace, goal, settings, *, stage, data, keys, instruction, 
         if not _paginate:
             raise
         return paged_select(model, workspace, goal, settings, stage=stage, data=data, keys=keys, instruction=instruction)
-    workspace.budget.allow_model(size, settings.get('max_output', 1024))
+    from .context_budget import reserve_role_call, observe_role_usage
+    messages,token_metrics=reserve_role_call(workspace,messages,schema if structured else {},settings,
+        settings.get('max_output',1024),role='scout',stage=stage,legacy_size=size)
     workspace.trace.emit('scout', 'llm_call_started', input_bytes=size, strategy='localized-proposal', localization_stage=stage)
     try:
         reply = (model.complete_json(messages, schema=schema, timeout=workspace.budget.remaining,
@@ -151,6 +153,7 @@ def select(model, workspace, goal, settings, *, stage, data, keys, instruction, 
     if not isinstance(reply.content, str) or (reply.tokens is not None and (type(reply.tokens) is not int or reply.tokens < 0)):
         raise ModelError('Invalid localization reply')
     workspace.budget.charge_tokens(reply.tokens if reply.tokens is not None else size+len(reply.content.encode()))
+    observe_role_usage(workspace,reply,token_metrics,role='scout',stage=stage)
     workspace.budget.check()
     fact = workspace.ledger.add('decision', 'scout', 'Untrusted localization '+stage, reply.content)
     workspace.trace.emit('scout', 'llm_call_finished', fact_id=fact, tokens=reply.tokens,
@@ -187,7 +190,8 @@ def explore_for_localization(model, workspace, goal, settings, steps):
         require_external_tool=getattr(workspace, 'localization_require_external', False)
             and not getattr(workspace, 'localization_external_attempted', False),
         max_output=settings.get('max_output', 1024), require_evidence=True,
-        max_context_bytes=settings.get('max_context_bytes', 12000))
+        max_context_bytes=settings.get('max_context_bytes', 12000),
+        proposal_context_policy=settings.get('proposal_context_policy'))
     try:
         summary = session.execute({'goal': goal,
             'previous_candidate_files': previous['summary'].get('files', []) if previous and previous['summary'] else [],

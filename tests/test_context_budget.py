@@ -38,8 +38,9 @@ class ContextBudgetTests(unittest.TestCase):
         self.assertFalse(result['provider_exact'])
 
     def test_global_depletion_not_recoverable_input_error(self):
+        budget=self.budget(tokens=1000);budget.tokens=1000
         with self.assertRaises(BudgetExceeded) as caught:
-            admission([{'content':'x'*1000}],{},self.policy(),500,self.budget(tokens=1000))
+            admission([{'content':'x'*1000}],{},self.policy(),500,budget)
         self.assertNotIsInstance(caught.exception,InputCapacityExceeded)
 
     def test_context_and_per_call_caps_independent(self):

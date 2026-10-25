@@ -125,8 +125,9 @@ def score_trial(cause, observations, final):
             'scope': 'Objective probe/prediction/citation checks; prose rationale is not automatically verified.'}
 
 
-def trial(model, family, cause, arm, output, deadline):
-    budget = Budget(Limits(max_model_calls=3, max_tokens=16000, max_tool_calls=6, max_wallclock=150))
+def trial(model, family, cause, arm, output, deadline, *, guidance=None, budget=None, max_output=512, protocol_extra="", recover_guards=False):
+    budget = budget if budget is not None else Budget(Limits(
+        max_model_calls=3, max_tokens=16000, max_tool_calls=6, max_wallclock=150))
     public = {'symptom': family['symptom'], 'hypotheses': family['hypotheses'],
               'available_probes': family['probes'],
               'protocol': 'At most 3 model turns, at most 2 distinct probes. '
@@ -134,7 +135,9 @@ def trial(model, family, cause, arm, output, deadline):
               'State predictions for both hypotheses before seeing a result. '
               'For conclude use empty probe_id and cite observation IDs; prediction fields are ignored. '
               'The initial symptom alone does not distinguish the two hypotheses.'}
-    messages = [{'role': 'system', 'content': GUIDANCE[arm]},
+    if protocol_extra:
+        public['evidence_contract'] = protocol_extra
+    messages = [{'role': 'system', 'content': GUIDANCE[arm] if guidance is None else guidance},
                 {'role': 'user', 'content': json.dumps(public)}]
     observations = []; seen = set(); final = None
     record = {'status': 'running', 'steps': []}
@@ -145,14 +148,14 @@ def trial(model, family, cause, arm, output, deadline):
             remaining = min(budget.remaining, deadline - time.monotonic(), 45)
             if remaining <= 0:
                 raise TimeoutError('Diagnostic evaluation time budget exhausted')
-            budget.allow_model(len(json.dumps(messages).encode()), 512)
+            budget.allow_model(len(json.dumps(messages).encode()), max_output)
             # Persist the charged attempt before dispatch, so interruption cannot hide a paid call.
             record['budget'] = budget.report()
             record['pending_call'] = step + 1
             atomic_json(output/'trial.json', record)
             print(f'[Diagnosis] {output.name} step {step + 1}/3', flush=True)
             try:
-                reply = model.complete_json(messages, schema=SCHEMA, timeout=remaining, max_output=512)
+                reply = model.complete_json(messages, schema=SCHEMA, timeout=remaining, max_output=max_output)
             except ModelError as error:
                 if error.tokens is not None:
                     budget.charge_tokens(error.tokens)
@@ -161,11 +164,34 @@ def trial(model, family, cause, arm, output, deadline):
                                  len(json.dumps(messages).encode()) + len(reply.content.encode()))
             atomic_json(output/f'reply-{step + 1}.json', {
                 'content': reply.content, 'tokens': reply.tokens, 'metadata': reply.metadata})
+            value = None
             try:
                 value = json.loads(reply.content)
                 record['steps'].append(value)
                 validate_response(value, family['probes'], {o['id'] for o in observations})
             except (ValueError, TypeError):
+                from keel.guard_recovery import citation_incident
+                incident = citation_incident(value, {o['id'] for o in observations}) if recover_guards else None
+                # Recovery is only for the reference: all other action fields must already be valid.
+                if incident is not None:
+                    try:
+                        validate_response({**value, 'evidence_ids': []}, family['probes'], set())
+                    except (ValueError, TypeError):
+                        incident = None
+                if incident is not None:
+                    event = incident.record()
+                    can_retry = (not record.get('guard_events') and step < 2
+                                 and budget.model_calls < budget.limits.max_model_calls
+                                 and budget.remaining > 0 and deadline > time.monotonic())
+                    event.update(disposition='request_new_action' if can_retry else 'checkpoint_stop',
+                                 remaining_turns=2-step, budget=budget.report())
+                    record.setdefault('guard_events', []).append(event)
+                    record.pop('pending_call', None)
+                    atomic_json(output/'trial.json', record)
+                    if can_retry:
+                        messages.extend([{'role': 'assistant', 'content': reply.content},
+                                         {'role': 'user', 'content': json.dumps({'guard': event})}])
+                        continue
                 record['protocol_failure'] = 'Invalid response or fabricated evidence citation'
                 break
             if value['action'] == 'conclude':

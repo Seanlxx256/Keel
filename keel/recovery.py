@@ -281,7 +281,10 @@ class RecoveryController:
         output = settings.get('critic_max_output',min(settings.get('max_output', 1024), 1024))
         if type(output) is not int or not 1<=output<=4096:
             raise ValueError('critic_max_output must be 1..4096')
-        self.ws.budget.allow_model(size, output)
+        from .context_budget import reserve_role_call, observe_role_usage
+        structured = callable(getattr(model, 'complete_json', None))
+        messages,token_metrics=reserve_role_call(self.ws,messages,schema if structured else {},settings,output,
+            role='critic',stage='recovery-route',legacy_size=size)
         self.ws.trace.emit('critic', 'llm_call_started', input_bytes=size, strategy='recovery-route',
                            max_output=output,
                            recovery_progress_context=bool(observation.get('previous_check_observations')))
@@ -296,6 +299,7 @@ class RecoveryController:
         if not isinstance(reply.content, str) or (reply.tokens is not None and (type(reply.tokens) is not int or reply.tokens < 0)):
             raise ModelError('Invalid Critic reply or token usage')
         self.ws.budget.charge_tokens(reply.tokens if reply.tokens is not None else size + len(reply.content.encode()))
+        observe_role_usage(self.ws,reply,token_metrics,role='critic',stage='recovery-route')
         self.ws.budget.check()
         fact = self.ws.ledger.add('decision', 'critic', 'Untrusted recovery route', reply.content)
         self._last_decision_fact = fact
@@ -481,6 +485,7 @@ class RecoveryController:
                 capacity_failures.add(signature)
                 self.permit('reselect_evidence', error, current_evidence)
                 selection_feedback = {'capacity_error': str(error),
+                    'capacity_guard': getattr(error, 'guard_incident', None),
                     'instruction': 'Select fewer complete functions needed for repair; omit whole classes and unrelated definitions.'}
             except InvalidSelection as error:
                 self.permit('correct_evidence_selection', error, current_evidence)

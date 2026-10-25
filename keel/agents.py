@@ -19,7 +19,12 @@ def normalize_scout_envelope(action, *, role, ready):
 class AgentSession:
     """One bounded history per role/item; no implicit transfer of other histories."""
 
-    def __init__(self, role, model, workspace, *, allowed_files=(), max_steps=12, max_output=1024, require_evidence=False, max_work_items=20, max_context_bytes=None, require_change=False, require_external_tool=False):
+    def __init__(self, role, model, workspace, *, allowed_files=(), max_steps=12, max_output=1024, require_evidence=False, max_work_items=20, max_context_bytes=None, require_change=False, require_external_tool=False, proposal_context_policy=None):
+        self.token_settings={}
+        if proposal_context_policy is not None:
+            from .context_budget import validate_policy
+            validate_policy(proposal_context_policy)
+            self.token_settings['proposal_context_policy']=proposal_context_policy
         self.role, self.model, self.ws = role, model, workspace
         self.allowed_files = set(allowed_files)
         self.max_steps, self.max_output = max_steps, max_output
@@ -120,7 +125,9 @@ class AgentSession:
                 self.ws.trace.emit(self.role, 'context_window', step=step, **metrics)
             encoded = json.dumps(self.messages, ensure_ascii=False)
             estimate = len(encoded.encode("utf-8")) + schema_bytes
-            self.ws.budget.allow_model(estimate, self.max_output)
+            from .context_budget import reserve_role_call, observe_role_usage
+            self.messages,token_metrics=reserve_role_call(self.ws,self.messages,schema if structured else {},
+                self.token_settings,self.max_output,role=self.role,stage='tool-loop',legacy_size=estimate)
             self.ws.trace.emit(self.role, "llm_call_started", step=step, input_bytes=estimate)
             try:
                 if structured:
@@ -137,6 +144,7 @@ class AgentSession:
                 raise ModelError("Invalid model reply or token usage")
             self.ws.budget.charge_tokens(reply.tokens if reply.tokens is not None else
                                          estimate + len(reply.content.encode("utf-8")))
+            observe_role_usage(self.ws,reply,token_metrics,role=self.role,stage='tool-loop')
             self.ws.budget.check()
             fact_id = self.ws.ledger.add("decision", self.role, f"Model turn {step}", reply.content)
             self.ws.trace.emit(self.role, "llm_call_finished", fact_id=fact_id, tokens=reply.tokens,

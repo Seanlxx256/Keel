@@ -99,7 +99,9 @@ def request(model, workspace, settings, stage, data, schema, *, role='implemente
         workspace.trace.emit(role,'diagnostic_request_view_compacted',stage=stage,input_bytes=size,omissions=changes)
     if size>settings.get('max_context_bytes',12000):
         raise InputCapacityExceeded('Diagnostic inspection exceeds context budget')
-    workspace.budget.allow_model(size,settings.get('max_output',1024))
+    from .context_budget import reserve_role_call,observe_role_usage
+    messages,token_metrics=reserve_role_call(workspace,messages,schema if structured else {},settings,
+        settings.get('max_output',1024),role=role,stage=stage,legacy_size=size)
     workspace.trace.emit(role,'diagnostic_inspection_call_started',stage=stage,input_bytes=size)
     try:
         reply=(model.complete_json(messages,schema=schema,timeout=workspace.budget.remaining,
@@ -111,6 +113,7 @@ def request(model, workspace, settings, stage, data, schema, *, role='implemente
     if not isinstance(reply.content,str) or (reply.tokens is not None and (type(reply.tokens) is not int or reply.tokens<0)):
         raise ModelError('Invalid diagnostic inspection reply')
     workspace.budget.charge_tokens(reply.tokens if reply.tokens is not None else size+len(reply.content.encode()))
+    observe_role_usage(workspace,reply,token_metrics,role=role,stage=stage)
     workspace.budget.check()
     fact=workspace.ledger.add('decision',role,'Diagnostic inspection '+stage,reply.content)
     workspace.trace.emit(role,'diagnostic_inspection_call_finished',stage=stage,fact_id=fact)
