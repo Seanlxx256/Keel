@@ -227,7 +227,7 @@ def prepare_snapshot(repository_id, commit, directory, *, offline=False, timeout
     return directory
 
 
-def publish_snapshot(staging, directory, commit, *, attempts=4, delay=0.5):
+def publish_snapshot(staging, directory, commit, *, attempts=4, delay=0.5, verify=None):
     """Retry transient sharing violations, never delete or replace a destination."""
     events = []
     receipt = directory.parent / (directory.name + '.publication.json')
@@ -236,7 +236,7 @@ def publish_snapshot(staging, directory, commit, *, attempts=4, delay=0.5):
             raise FileExistsError(f'Snapshot destination appeared during publication: {directory}')
         try:
             staging.rename(directory)
-            check_snapshot(directory, commit)
+            (verify or check_snapshot)(directory, commit)
             events.append({'attempt': attempt, 'status': 'published'})
             receipt.write_text(json.dumps({'events': events}, indent=2), encoding='utf-8')
             return
@@ -246,3 +246,69 @@ def publish_snapshot(staging, directory, commit, *, attempts=4, delay=0.5):
             if attempt == attempts or not staging.is_dir() or directory.exists():
                 raise
             time.sleep(delay * attempt)
+
+
+def check_archive_snapshot(directory,commit):
+    """Verify a source-only Git archive export; this is not a Git worktree."""
+    directory=Path(directory);receipt=json.loads(directory.with_name(directory.name+'.export.json').read_text(encoding='utf-8'))
+    if receipt['base_commit']!=commit or file_digest(Path(receipt['archive']))!=receipt['archive_sha256']:
+        raise ValueError('Archive snapshot identity changed')
+    observed={}
+    for parent,dirs,names in os.walk(directory,followlinks=False):
+        for name in [*dirs,*names]:
+            path=Path(parent)/name
+            if path.is_symlink() or getattr(path.lstat(),'st_file_attributes',0)&1024:
+                raise ValueError('Linked archive snapshot member')
+        for name in names:
+            path=Path(parent)/name;observed[path.relative_to(directory).as_posix()]=file_digest(path)
+    if observed!=receipt['files']:raise ValueError('Archive snapshot contents changed')
+    return receipt
+
+
+def prepare_archive_snapshot(repository_id,commit,directory,*,source,timeout=180):
+    """Export a pinned local commit without fetch, shell transport or repo execution."""
+    import hashlib
+    import stat
+    import zipfile
+    repository_id=canonical_repository_id(repository_id)
+    if not isinstance(commit,str) or re.fullmatch(r'[0-9a-f]{40}',commit) is None:raise ValueError('Full base commit required')
+    directory=Path(directory).resolve();source=Path(source).resolve();started=time.monotonic()
+    def check():
+        if time.monotonic()-started>=timeout:raise TimeoutError('Local archive export deadline')
+    if directory.exists():
+        receipt=check_archive_snapshot(directory,commit)
+        if receipt['repository_id']!=repository_id or receipt['source']!=str(source):raise ValueError('Archive source identity changed')
+        return directory
+    if not source.is_dir() or not (source/'.git').exists():raise ValueError('Local Git source required')
+    directory.parent.mkdir(parents=True,exist_ok=True)
+    staging=directory.with_name(directory.name+'.partial');archive=directory.with_name(directory.name+'.archive.zip')
+    if staging.exists() or archive.exists():raise FileExistsError('Prior archive artifacts retained; use explicit recovery or a new output')
+    staging.mkdir()
+    command=['git','-c','safe.directory='+source.as_posix(),'-c','core.fsmonitor=false',
+        '-C',str(source),'archive','--format=zip','--output',str(archive),commit]
+    subprocess.run(command,check=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=timeout)
+    files={};seen=set()
+    with zipfile.ZipFile(archive) as exported:
+        if exported.comment.decode('ascii')!=commit:raise ValueError('Git archive commit comment mismatch')
+        for member in exported.infolist():
+            check();name=relative_path(member.filename)
+            if any(part.casefold()=='.git' for part in PurePosixPath(name).parts):raise ValueError('Git metadata in source export')
+            if stat.S_ISLNK(member.external_attr>>16):raise ValueError('Symlink archive member is not exported')
+            target=staging/name
+            if not target.resolve().is_relative_to(staging):raise ValueError('Archive member escaped source directory')
+            if member.is_dir():target.mkdir(parents=True,exist_ok=True);continue
+            if name.casefold() in seen:raise ValueError('Duplicate or case-colliding archive member')
+            seen.add(name.casefold());target.parent.mkdir(parents=True,exist_ok=True);identity=hashlib.sha256()
+            with exported.open(member) as stream,target.open('xb') as saved:
+                while True:
+                    check();chunk=stream.read(1048576)
+                    if not chunk:break
+                    saved.write(chunk);identity.update(chunk)
+            files[name]=identity.hexdigest()
+    receipt={'repository_id':repository_id,'base_commit':commit,'source':str(source),
+        'archive':str(archive),'archive_sha256':file_digest(archive),'files':files,
+        'scope':'Exact pinned Git archive source bytes; no Git worktree, system setup or repository code execution'}
+    directory.with_name(directory.name+'.export.json').write_text(json.dumps(receipt,indent=2),encoding='utf-8')
+    check()
+    publish_snapshot(staging,directory,commit,verify=check_archive_snapshot)
+    return directory
