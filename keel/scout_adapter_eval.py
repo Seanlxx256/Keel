@@ -54,6 +54,11 @@ def evaluation_inputs(dataset,tokenizer_run,training_run,checkpoint_step=None):
     path=root/'training/training.json';training=json.loads(path.read_text())
     if parent.get('identity',{}).get('objective','generation')!=training.get('objective','generation'):
         raise ValueError('Training objective drift')
+    from .scout_candidate_scoring import validate_score_representation
+    representation=parent.get('identity',{}).get('score_representation','legacy')
+    validate_score_representation(representation,training.get('objective','generation'))
+    if training.get('score_representation','legacy')!=representation:
+        raise ValueError('Training score representation drift')
     policy=parent.get('identity',{}).get('reproducibility','legacy')
     from .scout_reproducibility import validate_policy
     validate_policy(policy)
@@ -70,6 +75,12 @@ def evaluation_inputs(dataset,tokenizer_run,training_run,checkpoint_step=None):
     step=expected if checkpoint_step is None else checkpoint_step
     if type(step) is not int or not 1<=step<=expected:raise ValueError('Checkpoint outside completed training')
     checkpoint=root/f'training/step-{step}'
+    if training['steps'][step-1].get('score_representation','legacy')!=representation:
+        raise ValueError('Checkpoint score representation drift')
+    if representation!='legacy':
+        checkpoint_meta=json.loads((checkpoint/'step.json').read_text())
+        if checkpoint_meta.get('score_representation')!=representation:
+            raise ValueError('Saved checkpoint score representation drift')
     for name,identity in training['steps'][step-1]['checkpoint_files'].items():
         if Path(name).name!=name or weight_hash(checkpoint/name)!=identity:raise ValueError('Adapter checkpoint changed')
     return assets,receipt,training,checkpoint

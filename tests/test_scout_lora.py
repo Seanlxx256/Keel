@@ -8,6 +8,18 @@ from keel.scout_tokenizer import MODEL,REVISION,file_hash
 
 
 class ScoutLoraTests(unittest.TestCase):
+    def test_training_stage_timeout_validates_before_dispatch(self):
+        from keel.scout_training_setup import prepare
+        for value in (0,-1,True,float('inf'),float('nan')):
+            with self.subTest(value=value),self.assertRaisesRegex(ValueError,'timeout'):
+                prepare('missing','missing','missing','missing',train_timeout=value)
+
+    def test_environment_timeout_validates_before_dispatch(self):
+        from keel.scout_training_setup import prepare
+        for value in (0,-1,True,float('inf'),float('nan')):
+            with self.subTest(value=value),self.assertRaisesRegex(ValueError,'environment stage timeout'):
+                prepare('missing','missing','missing','missing',environment_timeout=value)
+
     def test_training_objective_is_validated_before_dispatch(self):
         from keel.scout_lora import validate_objective
         from keel.scout_training_setup import prepare

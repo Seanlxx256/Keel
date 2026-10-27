@@ -12,5 +12,6 @@ if __name__=='__main__':
     parser.add_argument('--candidate-permutation',default='original')
     parser.add_argument('--threshold',type=float,default=0.5)
     parser.add_argument('--max-items',type=int,default=8)
+    parser.add_argument('--score-representation')
     args=parser.parse_args();report=evaluate_scores(**vars(args))
     print(json.dumps({'status':report['status'],'summary':report['summary']}))

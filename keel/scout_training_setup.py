@@ -9,10 +9,18 @@ from .scout_tokenizer import file_hash,MODEL,REVISION
 from .scout_tokenizer_setup import observed_stage
 
 
-def prepare(dataset,tokenizer_run,torch_site,output,*,timeout=1800,recover_from=None,reuse_preparation=None,epochs=1,max_updates=None,reproducibility='legacy',objective='generation'):
+def prepare(dataset,tokenizer_run,torch_site,output,*,timeout=1800,recover_from=None,reuse_preparation=None,epochs=1,max_updates=None,reproducibility='legacy',objective='generation',score_representation='legacy',train_timeout=600,environment_timeout=60):
     from .scout_reproducibility import validate_policy
     validate_policy(reproducibility)
     validate_objective(objective)
+    from .scout_candidate_scoring import validate_score_representation
+    validate_score_representation(score_representation,objective)
+    if (isinstance(train_timeout,bool) or not isinstance(train_timeout,(int,float)) or
+            not __import__('math').isfinite(train_timeout) or train_timeout<=0):
+        raise ValueError('Positive finite training stage timeout required')
+    if (isinstance(environment_timeout,bool) or not isinstance(environment_timeout,(int,float)) or
+            not __import__('math').isfinite(environment_timeout) or environment_timeout<=0):
+        raise ValueError('Positive finite environment stage timeout required')
     if type(epochs) is not int or epochs<1:raise ValueError('Positive explicit epochs required')
     if recover_from and reuse_preparation:raise ValueError('Choose strict recovery or explicit preparation migration')
     dataset,tokenizer_run,torch_site,output=map(lambda p:Path(p).resolve(),(dataset,tokenizer_run,torch_site,output))
@@ -21,20 +29,21 @@ def prepare(dataset,tokenizer_run,torch_site,output,*,timeout=1800,recover_from=
     expected=planned_updates(count,epochs,max_updates)
     if not (torch_site/'torch/__init__.py').is_file():raise ValueError('Explicit existing Torch site required')
     identity={'model':MODEL,'revision':REVISION,'dataset':file_hash(dataset/'development.jsonl'),'tokenizer_report':file_hash(tokenizer_run/'report.json'),
-        'pins':list(PINS),'torch_site':str(torch_site),'torch_source':file_hash(torch_site/'torch/__init__.py'),'epochs':epochs,'max_updates':max_updates,'reproducibility':reproducibility,'objective':objective}
+        'pins':list(PINS),'torch_site':str(torch_site),'torch_source':file_hash(torch_site/'torch/__init__.py'),'epochs':epochs,'max_updates':max_updates,'reproducibility':reproducibility,'objective':objective,'score_representation':score_representation}
     old=None
     if recover_from or reuse_preparation:
         migration=bool(reuse_preparation)
         recover_from=recover_from or reuse_preparation
         recover_from=Path(recover_from).resolve();old=json.loads((recover_from/'report.json').read_text())
         previous_identity={**old['identity'],'epochs':old['identity'].get('epochs',1),'max_updates':old['identity'].get('max_updates'),
-                           'reproducibility':old['identity'].get('reproducibility','legacy'),'objective':old['identity'].get('objective','generation')}
+                           'reproducibility':old['identity'].get('reproducibility','legacy'),'objective':old['identity'].get('objective','generation'),
+                           'score_representation':old['identity'].get('score_representation','legacy')}
         if migration:
             fields=('model','revision','pins','torch_site','torch_source')
             if any(previous_identity[k]!=identity[k] for k in fields):raise ValueError('Preparation migration environment/model drift')
         elif previous_identity!=identity:raise ValueError('Training recovery input drift')
     output.mkdir(parents=True,exist_ok=False);started=time.monotonic()
-    report={'status':'running','identity':identity,'stages':[],'scope':'Development gradient/resource smoke, not independent evaluation'}
+    report={'status':'running','identity':identity,'stages':[],'train_timeout':train_timeout,'environment_timeout':environment_timeout,'scope':'Development gradient/resource smoke, not independent evaluation'}
     report['model_cache']=old.get('model_cache',str(output.parent/'model-cache')) if old else str(output.parent/'model-cache')
     if reuse_preparation:
         report['preparation_migration']={'source':str(recover_from),'old_identity':old['identity'],
@@ -77,7 +86,7 @@ def prepare(dataset,tokenizer_run,torch_site,output,*,timeout=1800,recover_from=
             (site/'keel-torch-source.pth').write_text(str(torch_site)+'\n',encoding='utf-8')
             stage('install',[str(python),'-m','pip','--isolated','install','--index-url','https://pypi.org/simple',
                 '--disable-pip-version-check','--retries','0','--timeout','15',*PINS],300)
-        stage('environment',[str(python),str(script),'environment','--output',str(output)],60)
+        stage('environment',[str(python),str(script),'environment','--output',str(output)],environment_timeout)
         if old and old.get('environment_sha256') and json.loads((output/'environment.json').read_text())!=previous:
             raise ValueError('Recovered environment changed')
         report['environment_sha256']=file_hash(output/'environment.json');atomic_json(output/'report.json',report)
@@ -95,10 +104,12 @@ def prepare(dataset,tokenizer_run,torch_site,output,*,timeout=1800,recover_from=
         if max_updates is not None:command+=['--max-updates',str(max_updates)]
         command+=['--reproducibility',reproducibility]
         command+=['--objective',objective]
-        stage('train',command,600)
+        command+=['--score-representation',score_representation]
+        stage('train',command,train_timeout)
         training=json.loads((output/'training/training.json').read_text())
         if training.get('reproducibility','legacy')!=reproducibility:raise ValueError('Training reproducibility policy drift')
         if training.get('objective','generation')!=objective:raise ValueError('Training objective drift')
+        if training.get('score_representation','legacy')!=score_representation:raise ValueError('Training score representation drift')
         count=training.get('sample_count',len(training['steps']))
         if training['status']!='passed' or len(training['steps'])!=expected or training.get('expected_steps',expected)!=expected:raise ValueError('Planned training incomplete')
         report.update(status='passed',training_sha256=file_hash(output/'training/training.json'))

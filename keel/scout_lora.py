@@ -79,8 +79,10 @@ def validate_objective(objective):
     return objective
 
 
-def train(dataset,tokenizer_run,weights,output,*,epochs=1,max_updates=None,reproducibility='legacy',objective='generation'):
+def train(dataset,tokenizer_run,weights,output,*,epochs=1,max_updates=None,reproducibility='legacy',objective='generation',score_representation='legacy'):
     validate_objective(objective)
+    from .scout_candidate_scoring import validate_score_representation
+    validate_score_representation(score_representation,objective)
     from .scout_reproducibility import configure_environment,configure_torch,rng_state,seed_training
     configure_environment(reproducibility)
     os.environ['HF_HUB_OFFLINE']='1';os.environ['TRANSFORMERS_OFFLINE']='1'
@@ -97,7 +99,9 @@ def train(dataset,tokenizer_run,weights,output,*,epochs=1,max_updates=None,repro
     report={'status':'running','scope':'Approved exposed development controls; no heldout quality claim',
         'steps':[],'seed':42,'lora':{'r':4,'alpha':8,'dropout':0,'target_modules':['q_proj','v_proj']},
         'dataset_sha256':receipt['identity']['inputs']['development.jsonl'],'weights':weights,'model_calls':0,
-        'reproducibility':reproducibility,'execution_policy':execution_policy,'objective':objective}
+        'reproducibility':reproducibility,'execution_policy':execution_policy,'objective':objective,
+        'score_representation':score_representation,
+        'memory_lifetime':'release_forward_before_optimizer_v1'}
     atomic_json(output/'training.json',report)
     try:
         if not torch.cuda.is_available():raise RuntimeError('CUDA unavailable; no CPU fallback')
@@ -106,10 +110,10 @@ def train(dataset,tokenizer_run,weights,output,*,epochs=1,max_updates=None,repro
         tokenizer=AutoTokenizer.from_pretrained(str(assets),local_files_only=True,trust_remote_code=False)
         raw=[json.loads(line) for line in (Path(dataset)/'development.jsonl').read_text(encoding='utf-8').splitlines()]
         if objective=='candidate_scores':
-            from .scout_candidate_scoring import encode_candidate_prompt,candidate_membership,balanced_membership_loss
+            from .scout_candidate_scoring import encode_score_input,candidate_membership,balanced_membership_loss
             examples=[]
             for row in raw:
-                features=encode_candidate_prompt(tokenizer,row['prompt'])
+                features=encode_score_input(tokenizer,row['prompt'],score_representation)
                 labels=candidate_membership(features,json.loads(row['completion'][0]['content'])['candidate_ids'])
                 examples.append({**features,'labels':labels})
         else:examples=[encode_sample(tokenizer,row) for row in raw]
@@ -133,7 +137,8 @@ def train(dataset,tokenizer_run,weights,output,*,epochs=1,max_updates=None,repro
             trainable.update({'candidate_head.'+name:p for name,p in head.named_parameters()})
             report['candidate_head']={'hidden_size':model.config.hidden_size,'output_size':1,
                 'parameters':sum(p.numel() for p in head.parameters()),'loss':'class-balanced teacher membership BCE',
-                'input':'prompt only; last fully contained token per candidate','causal_visibility':'Earlier candidates cannot see later catalog entries'}
+                'input':'prompt only; last fully contained token per candidate','score_representation':score_representation,
+                'causal_visibility':examples[0]['scope']}
         report['trainable_parameters']=sum(p.numel() for p in trainable.values())
         optimizer=torch.optim.AdamW(trainable.values(),lr=1e-4)
         # Longest first exposes resource limits before cheaper samples consume time.
@@ -159,17 +164,28 @@ def train(dataset,tokenizer_run,weights,output,*,epochs=1,max_updates=None,repro
                 logits=base.lm_head(hidden[0,positions,:]).float()
                 loss=torch.nn.functional.cross_entropy(logits,targets)
             if not torch.isfinite(loss):raise ValueError('Nonfinite loss')
+            loss_value=loss.item()
             loss.backward()
+            # Backward no longer needs the forward graph. Release Python-held
+            # outputs and inactive allocator blocks before clipping/AdamW, so
+            # their kernels have headroom outside PyTorch's tensor allocations.
+            del hidden,logits,loss
+            torch.cuda.empty_cache()
+            report.update(phase='clip',post_backward_allocated_bytes=torch.cuda.memory_allocated(),
+                          post_backward_reserved_bytes=torch.cuda.memory_reserved())
+            atomic_json(output/'training.json',report)
             grads=[p.grad for p in trainable.values() if p.grad is not None]
             if not grads or not all(torch.isfinite(g).all().item() for g in grads):raise ValueError('Missing/nonfinite gradients')
             norm=torch.nn.utils.clip_grad_norm_(list(trainable.values()),1.0)
             if not torch.isfinite(norm) or norm.item()==0:raise ValueError('Zero/nonfinite gradient norm')
+            report['phase']='optimizer';atomic_json(output/'training.json',report)
             optimizer.step();torch.cuda.synchronize()
             changed=sum(not torch.equal(before[name],p.detach().cpu()) for name,p in trainable.items())
             if not changed:raise ValueError('Optimizer did not change adapter weights')
             step={'sample':index,'epoch':epoch,'input_tokens':len(example['input_ids']),'labelled_tokens':len(positions) if head is None else 0,
-                'loss':loss.item(),'gradient_norm':norm.item(),'changed_adapter_tensors':changed,
+                'loss':loss_value,'gradient_norm':norm.item(),'changed_adapter_tensors':changed,
                 'peak_allocated_bytes':torch.cuda.max_memory_allocated(),'peak_reserved_bytes':torch.cuda.max_memory_reserved()}
+            step['score_representation']=score_representation
             if head is not None:
                 step['labelled_candidates']=len(positions)
                 step['changed_parameter_tensors']=changed
@@ -182,7 +198,7 @@ def train(dataset,tokenizer_run,weights,output,*,epochs=1,max_updates=None,repro
             step['checkpoint_files']={p.name:weight_hash(p) for p in temporary.iterdir() if p.is_file()}
             atomic_json(temporary/'step.json',step);temporary.rename(destination)
             report['steps'].append(step);atomic_json(output/'training.json',report)
-            del hidden,logits,loss,ids,targets;torch.cuda.empty_cache()
+            del ids,targets;torch.cuda.empty_cache()
         training_inputs(dataset,tokenizer_run)
         report.update(status='passed',phase='completed')
     except Exception as error:

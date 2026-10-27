@@ -6,17 +6,25 @@ from .scout_tokenizer import file_hash
 from .scout_adapter_eval import evaluation_inputs,score,validate_task_control,transfer_task_ids
 from .scout_id_training import original_examples,training_task_universe
 from .scout_candidate_ids import numbered_example,permutation_mode
-from .scout_candidate_scoring import encode_candidate_prompt,candidate_membership,select_candidates,ranking_metrics
+from .scout_candidate_scoring import encode_score_input,candidate_membership,select_candidates,ranking_metrics
 
 
 def evaluate_scores(dataset,tokenizer_run,training_run,output,*,evaluation_dataset=None,
-                    candidate_permutation='original',checkpoint_step=None,threshold=0.5,max_items=8):
+                    candidate_permutation='original',checkpoint_step=None,threshold=0.5,max_items=8,
+                    score_representation=None):
     permutation_mode(candidate_permutation)
     select_candidates([],[],threshold=threshold,max_items=max_items)
     assets,receipt,training,checkpoint=evaluation_inputs(dataset,tokenizer_run,training_run,checkpoint_step)
+    representation=training.get('score_representation','legacy')
+    from .scout_candidate_scoring import validate_score_representation
+    validate_score_representation(representation,training.get('objective','generation'))
+    if score_representation is not None and score_representation!=representation:
+        raise ValueError('Evaluation score representation differs from training')
     if training.get('objective')!='candidate_scores' or 'candidate_head.pt' not in training['steps'][int(checkpoint.name.split('-')[1])-1]['checkpoint_files']:
         raise ValueError('Require completed hash-bound candidate-score checkpoint and head')
     if not training.get('candidate_head'):raise ValueError('Missing candidate-head architecture')
+    if training['candidate_head'].get('score_representation','legacy')!=representation:
+        raise ValueError('Candidate head score representation drift')
     original_examples(dataset)
     cohort=Path(evaluation_dataset) if evaluation_dataset is not None else Path(dataset)
     meta=json.loads((cohort/'export.json').read_text());validate_task_control(meta,False)
@@ -34,7 +42,7 @@ def evaluate_scores(dataset,tokenizer_run,training_run,output,*,evaluation_datas
     output=Path(output);output.mkdir(parents=True,exist_ok=False);started=time.monotonic()
     report={'status':'running','rows':[],'training_receipt_sha256':file_hash(Path(training_run)/'training/training.json'),
         'dataset_sha256':meta['dataset_sha256'],'checkpoint_step':int(checkpoint.name.split('-')[1]),
-        'candidate_permutation':candidate_permutation,'selection_policy':{'threshold':threshold,'max_items':max_items,'empty_selection':'failure, no forced fallback'},
+        'candidate_permutation':candidate_permutation,'score_representation':representation,'selection_policy':{'threshold':threshold,'max_items':max_items,'empty_selection':'failure, no forced fallback'},
         'generations':0,'weight_updates':0,'hosted_calls':0,'production_promoted':False,
         'scope':'Exposed teacher-set agreement with fixed score policy, not official repair or independent generalization'}
     atomic_json(output/'report.json',report)
@@ -57,7 +65,7 @@ def evaluate_scores(dataset,tokenizer_run,training_run,output,*,evaluation_datas
         for index in indices:
             print(f'[Candidate scores] sample {index+1}/{len(rows)}; {candidate_permutation}',flush=True)
             example=rows[index];actual,mapping,spec=numbered_example(example,permutation=candidate_permutation)
-            features=encode_candidate_prompt(tokenizer,actual['prompt'])
+            features=encode_score_input(tokenizer,actual['prompt'],representation)
             positions=[c['token_position'] for c in features['candidates']]
             ids=torch.tensor([features['input_ids']],device='cuda')
             with torch.inference_mode():
@@ -68,6 +76,7 @@ def evaluate_scores(dataset,tokenizer_run,training_run,output,*,evaluation_datas
             labels=candidate_membership(features,json.loads(actual['completion'][0]['content'])['candidate_ids'])
             metrics=score(example,mapped);metrics.update(ranking_metrics(probabilities,labels))
             report['rows'].append({'sample':index,'prompt_sha256':hashlib.sha256(json.dumps(actual['prompt'],sort_keys=True,ensure_ascii=False).encode()).hexdigest(),
+                'model_input_sha256':hashlib.sha256(json.dumps(features['input_ids']).encode()).hexdigest(),
                 'candidate_mapping_sha256':hashlib.sha256(json.dumps(mapping).encode()).hexdigest(),
                 'input_tokens':len(features['input_ids']),'mapped_output':mapped,'selected_ids':[c['candidate_id'] for c in selected],
                 'candidate_scores':[{**c,'probability':v,'teacher_member':label} for c,v,label in zip(features['candidates'],probabilities,labels)],'score':metrics})

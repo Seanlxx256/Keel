@@ -3,6 +3,48 @@ import json
 import math
 
 
+SCORE_REPRESENTATIONS={'numbered_end':('numbered','candidate_end'),
+    'numbered_after':('numbered','after_catalog'),
+    'id_free_end':('without_ids','candidate_end'),'id_free_after':('without_ids','after_catalog'),
+    'numbered_after_grouped':('numbered','after_catalog_grouped'),
+    'id_free_after_grouped':('without_ids','after_catalog_grouped')}
+
+
+def validate_score_representation(value,objective='candidate_scores'):
+    if value!='legacy' and value not in SCORE_REPRESENTATIONS:
+        raise ValueError('Unknown score representation')
+    if objective!='candidate_scores' and value!='legacy':
+        raise ValueError('Score representation requires candidate_scores objective')
+    return value
+
+
+def encode_score_input(tokenizer,messages,representation='legacy'):
+    validate_score_representation(representation)
+    if representation=='legacy':return encode_candidate_prompt(tokenizer,messages)
+    mode,readout=SCORE_REPRESENTATIONS[representation]
+    return encode_scoring_variant(tokenizer,messages,input_mode=mode,readout_mode=readout)
+
+
+def encode_scoring_variant(tokenizer,messages,*,input_mode='numbered',readout_mode='candidate_end'):
+    """Experimental 2x2 interface with a shared scoring instruction, no output schema.
+
+    Fresh aligned training is required for each variant. The legacy encoder call
+    remains byte compatible and is never silently routed through this interface.
+    """
+    import copy
+    prompt=copy.deepcopy(messages)
+    if not prompt or prompt[0]['role']!='system':raise ValueError('Require scoring system message')
+    prompt[0]['content']=_scoring_instruction(input_mode)
+    return encode_candidate_prompt(tokenizer,prompt,input_mode=input_mode,readout_mode=readout_mode)
+
+
+def _scoring_instruction(input_mode):
+    return ('Score each displayed source definition for relevance to the task. '
+            'Symbols contain definition line and name'+
+            (', followed by candidate ID.' if input_mode=='numbered' else '.')+
+            ' Scores are read by the program; do not generate a selection.')
+
+
 def json_value_spans(text):
     """Parse JSON structurally, retaining character offsets keyed by JSON path."""
     decoder=json.JSONDecoder();spans={}
@@ -37,11 +79,36 @@ def json_value_spans(text):
     return json.loads(text),spans
 
 
-def encode_candidate_prompt(tokenizer,messages):
+def encode_candidate_prompt(tokenizer,messages,*,input_mode='numbered',readout_mode='candidate_end'):
     """No assistant completion argument; scoring sees only the generation prefill."""
     if any(m['role']=='assistant' for m in messages):raise ValueError('Candidate scoring accepts prompt-only messages')
     if not messages or messages[-1]['role']!='user':raise ValueError('Require final user catalog')
+    if input_mode not in ('numbered','without_ids') or readout_mode not in ('candidate_end','after_catalog','after_catalog_grouped'):
+        raise ValueError('Unknown candidate representation policy')
     text=messages[-1]['content'];payload,spans=json_value_spans(text)
+    identities=[(ri,si,row['path'],symbol[:]) for ri,row in enumerate(payload['structure']) for si,symbol in enumerate(row['symbols'])]
+    if input_mode!='numbered' or readout_mode!='candidate_end':
+        # This is a new scoring-only prompt interface, not compatible with an old
+        # trained head by inference-only substitution. No completion is consumed.
+        import copy
+        payload=copy.deepcopy(payload)
+        if 'scoring_readouts' in payload:raise ValueError('Reserved scoring field collision')
+        if any(len(symbol)!=3 or type(symbol[2]) is not int for _,_,_,symbol in identities):
+            raise ValueError('Require numbered source catalog')
+        if input_mode=='without_ids':
+            for row in payload['structure']:
+                row['symbols']=[symbol[:2] for symbol in row['symbols']]
+        if readout_mode=='after_catalog':
+            payload['scoring_readouts']=[[path,*symbol] if input_mode=='numbered' else [path,*symbol[:2]]
+                                         for _,_,path,symbol in identities]
+        elif readout_mode=='after_catalog_grouped':
+            # Preserve every path/line/name (and optional ID), but serialize the
+            # shared file path once per file rather than once per definition.
+            payload['scoring_readouts']=[{'path':row['path'],'symbols':copy.deepcopy(row['symbols'])}
+                                         for row in payload['structure']]
+        messages=[{'role':'system','content':_scoring_instruction(input_mode)},
+                  *copy.deepcopy(messages[1:-1]),{'role':'user','content':json.dumps(payload,ensure_ascii=False)}]
+        text=messages[-1]['content'];payload,spans=json_value_spans(text)
     marker='__KEEL_CANDIDATE_PAYLOAD_OFFSET__'
     if any(marker in m['content'] for m in messages):raise ValueError('Payload marker collision')
     render=lambda ms:tokenizer.apply_chat_template(ms,tokenize=False,add_generation_prompt=True,enable_thinking=False)
@@ -56,25 +123,33 @@ def encode_candidate_prompt(tokenizer,messages):
         raise ValueError('Prompt token/offset identity changed')
     if ('goal',) not in spans:raise ValueError('Candidate scoring requires task goal')
     candidates=[];locations=set();candidate_ids=set()
-    for ri,row in enumerate(payload['structure']):
-        for si,symbol in enumerate(row['symbols']):
+    for index,(ri,si,path,symbol) in enumerate(identities):
             if len(symbol)!=3 or type(symbol[0]) is not int or type(symbol[2]) is not int:
                 raise ValueError('Require exact numbered candidate tuple')
-            location=f"{row['path']}:{symbol[0]}";cid=symbol[2]
+            location=f"{path}:{symbol[0]}";cid=symbol[2]
             if location in locations or cid in candidate_ids:raise ValueError('Duplicate candidate identity')
             locations.add(location);candidate_ids.add(cid)
-            start,end=spans[('structure',ri,'symbols',si)]
+            candidate_path=(('scoring_readouts',index) if readout_mode=='after_catalog' else
+                            ('scoring_readouts',ri,'symbols',si) if readout_mode=='after_catalog_grouped' else
+                            ('structure',ri,'symbols',si))
+            start,end=spans[candidate_path]
+            if readout_mode!='candidate_end' and start<spans[('structure',)][1]:
+                raise ValueError('Readout precedes complete catalog')
             if spans[('goal',)][1]>start:raise ValueError('Task goal is not visible before candidate')
             start+=len(before);end+=len(before)
             positions=[i for i,(a,b) in enumerate(offsets) if start<=a<b<=end]
             if not positions:raise ValueError('Candidate lacks a fully contained token')
             position=positions[-1]
             candidates.append({'candidate_id':cid,'location':location,'token_position':position,
-                               'character_span':[start,end],'json_path':['structure',ri,'symbols',si]})
+                               'character_span':[start,end],'json_path':list(candidate_path)})
     if not candidates or candidate_ids!=set(range(len(candidates))):raise ValueError('Incomplete numbered catalog')
     if len({c['token_position'] for c in candidates})!=len(candidates):raise ValueError('Shared candidate representation token')
     return {'input_ids':ids,'attention_mask':[1]*len(ids),'candidates':candidates,
-            'scope':'Prompt-only causal candidate-end states; earlier candidates cannot see later catalog entries'}
+            'scope':('Prompt-only causal candidate-end states; earlier candidates cannot see later catalog entries'
+                     if readout_mode=='candidate_end' else
+                     'Prompt-only readouts after complete catalog; readout order remains causal'),
+            **({'representation_policy':{'input_mode':input_mode,'readout_mode':readout_mode}}
+               if input_mode!='numbered' or readout_mode!='candidate_end' else {})}
 
 
 def candidate_membership(features,teacher_ids):
