@@ -52,7 +52,7 @@ def validate(config: dict):
 def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) -> dict:
     from .governance import validate_config as validate_governance, attach as attach_governance, govern_model
     validate_governance(config.get('governance'))
-    if config.get('governance') and Path(config['governance']['path']).resolve().is_relative_to(Path(repo).resolve()):
+    if (config.get('governance') or {}).get('path') and Path(config['governance']['path']).resolve().is_relative_to(Path(repo).resolve()):
         raise ValueError('Governance database must be outside the untrusted repository')
     from .operational_knowledge import validate_config as validate_knowledge, attach as attach_knowledge
     validate_knowledge(config.get('operational_knowledge'))
@@ -162,7 +162,7 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
         from .adapters.langgraph import require_dependencies
         require_dependencies()
     budget = Budget(Limits(**config.get("budget", {})))
-    if config.get('governance') and config['governance'].get('lease_seconds',3600) <= budget.limits.max_wallclock:
+    if (config.get('governance') or {}).get('path') and config['governance'].get('lease_seconds',3600) <= budget.limits.max_wallclock:
         raise ValueError('Governance lease must exceed the runtime wall-clock budget for blocking calls')
     if model is not None and callable(getattr(type(model), 'bind_budget', None)):
         model.bind_budget(budget)
@@ -746,17 +746,17 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
                                ("changes.patch", "trace.jsonl", "ledger.sqlite")}
         if engine == "langgraph" and (output / "checkpoints.sqlite").is_file():
             result["artifacts"]["checkpoints.sqlite"] = str(output / "checkpoints.sqlite")
-        trace.emit("runtime", "run_finished", status=result["status"])
-        result["telemetry"] = telemetry.report()
         if governance:
             try:
                 result['governance'] = governance.finish(result['status'])
             except (PolicyDenied, OSError) as error:
                 result['governance'] = {'status':'unavailable','run_id':governance.run_id,
-                    'path':str(governance.store.path),'scope':governance.config['scope'],
+                    'location':governance.location,'scope':governance.config['scope'],
                     'prior_runtime_failure':result['failure'],'error':str(error)}
                 result['status'] = 'failed'
                 result['failure'] = {'category':'governance_unavailable','stage':stage,'message':str(error)}
+        trace.emit("runtime", "run_finished", status=result["status"])
+        result["telemetry"] = telemetry.report()
         if telemetry.exported:
             result["artifacts"]["spans.otlp.json"] = str(telemetry.path)
         (output / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")

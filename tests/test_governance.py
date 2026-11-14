@@ -227,6 +227,9 @@ os._exit(19)
         self.assertEqual(result['status'],'failed')
         self.assertEqual(result['failure']['category'],'governance_unavailable')
         self.assertEqual(json.loads((self.repo/'.keel/lost-control/result.json').read_text())['status'],'failed')
+        trace=[json.loads(line) for line in (self.repo/'.keel/lost-control/trace.jsonl').read_text().splitlines()]
+        self.assertEqual(trace[-1]['event'],'run_finished')
+        self.assertEqual(trace[-1]['status'],'failed')
 
     def test_parallel_processes_cannot_overreserve(self):
         # Real concurrent OS processes; files avoid dependence on Windows named

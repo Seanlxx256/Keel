@@ -147,6 +147,10 @@ Optional [durable governance](docs/durable-governance.md) adds same-host shared
 model-budget reservations and required host audit records across Keel processes.
 It includes bounded inspection and expired-run reconciliation, not Ray/Kubernetes
 deployment or automatic replay of uncertain operations.
+An optional [separate control service](docs/remote-governance.md) binds worker
+identities and policies server-side and supports idempotent remote operations.
+Its tested scope is local HTTP and independent worker processes, not production
+network isolation or multi-node deployment.
 
 Each run produces:
 

@@ -10,6 +10,7 @@ import json
 import math
 import sqlite3
 import time
+import threading
 import uuid
 
 from .core import BudgetExceeded, ModelError, PolicyDenied
@@ -29,6 +30,10 @@ def reject_nonfinite(value):
 
 def validate_config(config):
     if config is None:
+        return
+    if isinstance(config, dict) and 'endpoint' in config:
+        from .remote_governance import validate_remote_config
+        validate_remote_config(config)
         return
     required = {'path', 'scope', 'max_tokens', 'max_model_calls'}
     if not isinstance(config, dict) or not required <= config.keys() or set(config) - required - {'lease_seconds', 'denied_tools'}:
@@ -51,6 +56,7 @@ class ControlStore:
     def __init__(self, path, *, clock=time.time, initialize=True):
         self.path = Path(path).resolve()
         self.clock = clock
+        self._transactions = threading.local()
         if not initialize:
             if not self.path.is_file():raise FileNotFoundError(self.path)
             return
@@ -80,6 +86,12 @@ class ControlStore:
 
     @contextmanager
     def transaction(self):
+        existing = getattr(self._transactions, 'connection', None)
+        if existing is not None:
+            # Used by the service to atomically commit an operation and its
+            # idempotent response. Nested callers must let failures propagate.
+            yield existing
+            return
         try:
             db = sqlite3.connect(self.path, timeout=2, isolation_level=None)
         except sqlite3.Error as error:
@@ -88,6 +100,7 @@ class ControlStore:
         try:
             db.execute('PRAGMA synchronous=FULL')
             db.execute('BEGIN IMMEDIATE')
+            self._transactions.connection = db
             yield db
             db.commit()
         except sqlite3.Error as error:
@@ -97,6 +110,7 @@ class ControlStore:
             db.rollback()
             raise
         finally:
+            self._transactions.connection = None
             db.close()
 
     def inspect(self, *, scope, run_id=None, after=0, limit=100):
@@ -165,6 +179,10 @@ class ControlStore:
 class Session:
     def __init__(self, store, config, run_id, owner):
         self.store, self.config, self.run_id, self.owner = store, dict(config), run_id, owner
+
+    @property
+    def location(self):
+        return str(self.store.path)
 
     def _active(self, db):
         row = db.execute('SELECT * FROM governance_runs WHERE id=?', (self.run_id,)).fetchone()
@@ -288,6 +306,11 @@ class GovernedModel:
 def attach(config, workspace, output, identity):
     if config is None:
         return None
+    if 'endpoint' in config:
+        from .remote_governance import RemoteSession
+        session = RemoteSession.begin(config, identity, workspace.budget.limits.max_wallclock,budget=workspace.budget)
+        workspace.governance = session
+        return session
     path=Path(config['path']).resolve()
     if path.is_relative_to(workspace.root):
         raise ValueError('Governance database must be outside the untrusted repository')
