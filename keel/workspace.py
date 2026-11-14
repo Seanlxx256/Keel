@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import os
+import uuid
 from pathlib import Path
 
 from .audit import audit_text, protected_path, read_junit
@@ -177,10 +178,22 @@ class Workspace:
             self.trace.emit("auditor", "edit_rejected", fact_id=fact_id)
             raise AuditFailed(findings)
         self.budget.charge_tool()
+        governance = getattr(self, 'governance', None)
+        action_id = uuid.uuid4().hex
+        if governance:
+            governance.tool_started('implementer', 'replace', action_id)
+            governance.event('write_intent', {'path':relative,'before_sha256':hashlib.sha256(text.encode('utf-8')).hexdigest(),
+                'after_sha256':hashlib.sha256(updated.encode('utf-8')).hexdigest()},action_id=action_id)
         path.write_bytes(updated.encode("utf-8"))
+        if governance:
+            governance.event('write_completed', {'path':relative},action_id=action_id)
         self.trace.emit("implementer", "tool_call", tool="replace", path=relative)
 
     def search(self, query: str, limit=30, role="scout", *, paths=None):
+        governance = getattr(self, 'governance', None)
+        if governance:
+            # Explicit/proposal paths can search without a ToolGateway session.
+            governance.tool_started(role, 'search_code', uuid.uuid4().hex)
         scoped = None
         if paths is not None:
             if (not isinstance(paths, list) or not 1 <= len(paths) <= 32 or
@@ -238,6 +251,10 @@ class Workspace:
                 target = "/keel-reports/report.xml" if self.runner.backend == "docker" else str(report_path.resolve())
                 command = [part.replace("{junit}", target) for part in command]
             self.trace.emit("verifier", "command_started", command=command, phase=phase)
+            governance = getattr(self, 'governance', None)
+            action_id = uuid.uuid4().hex
+            if governance:
+                governance.event('verification_intent', {'command':spec['command'],'phase':phase},action_id=action_id)
             result = self.runner.run(command, self.root, self.budget.remaining,
                                      reports=reports.resolve() if spec["junit"] else None)
             result.update(command=spec["command"], junit_required=spec["junit"])
@@ -248,6 +265,9 @@ class Workspace:
                 except ValueError as error:
                     result["metadata_error"] = str(error)
             fact = self.ledger.add("test", "verifier", f"{phase}: {command[0]}: {result['returncode']}", result)
+            if governance:
+                governance.event('verification_outcome', {'fact_id':fact,'returncode':result['returncode'],
+                    'timeout':result['timeout'],'phase':phase},action_id=action_id)
             self.trace.emit("verifier", "command_finished", fact_id=fact,
                             returncode=result["returncode"], timeout=result["timeout"], phase=phase)
             results.append(result)

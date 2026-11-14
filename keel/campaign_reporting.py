@@ -26,6 +26,11 @@ class FrozenModel:
     def bind_budget(self, budget):
         self.budget = budget
 
+    def bind_governance(self, session):
+        # Every actual provider attempt, including retries, reserves separately.
+        from .governance import govern_model
+        self.model = govern_model(self.model, session)
+
     def record(self, event, **payload):
         if self.transcript is not None:
             import json

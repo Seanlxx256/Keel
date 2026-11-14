@@ -110,6 +110,8 @@ class ToolGateway:
         started = time.monotonic()
         status = "failed"
         error_type = None
+        governance = getattr(self.ws, 'governance', None)
+        governed_intent = False
         self.ws.trace.emit(self.role, "gateway_call_started", call_id=call_id,
                            tool=tool if isinstance(tool, str) else "<invalid>", transport=(
                                'mcp_'+self.ws.mcp_tools.transport(tool).replace('-','_')
@@ -122,6 +124,9 @@ class ToolGateway:
             elif not isinstance(args, dict):
                 raise ValueError("MCP arguments must be an object")
             self.ws.budget.check()
+            if governance:
+                governance.tool_started(self.role, tool, call_id)
+                governed_intent = True
             result = self._dispatch(tool, args)
             self.ws.budget.check()
             status = "completed"
@@ -131,6 +136,9 @@ class ToolGateway:
             status = "denied" if isinstance(error, PolicyDenied) else "failed"
             raise
         finally:
+            if governance and governed_intent:
+                governance.event('tool_outcome', {'role':self.role,'tool':tool,
+                    'status':status,'error_type':error_type}, action_id=call_id)
             if isinstance(tool, str) and tool.startswith('mcp__'):
                 metrics = getattr(self.ws, 'external_tool_metrics', {})
                 counts = metrics.setdefault(tool, {'completed': 0, 'failed': 0, 'denied': 0})

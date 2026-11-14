@@ -1,0 +1,78 @@
+{
+  "mode": "localized-proposal",
+  "orchestrator": "native",
+  "goal": "修复 parser 的空输入异常，具体预期行为以 tests/test_parser.py 为准；保持正常输入行为，不修改测试或验收配置。",
+  "model": {
+    "provider": "ollama",
+    "name": "REPLACE_WITH_INSTALLED_MODEL",
+    "base_url": "http://localhost:11434"
+  },
+  "agent": {
+    "max_steps": 8,
+    "max_output": 2048,
+    "critic_max_output": 2048,
+    "require_change": true,
+    "require_python_ast_change": true
+  },
+  "budget": {
+    "max_wallclock": 600,
+    "max_tool_calls": 80,
+    "max_tokens": 100000,
+    "max_model_calls": 20
+  },
+  "execution": {
+    "backend": "docker",
+    "image": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "cpus": 1,
+    "memory_mb": 1024,
+    "pids_limit": 128
+  },
+  "acceptance": [
+    {
+      "command": [
+        "/usr/local/bin/python",
+        "-m",
+        "pytest",
+        "-p",
+        "no:cacheprovider",
+        "tests/test_parser.py",
+        "--junitxml={junit}"
+      ],
+      "junit": true
+    }
+  ],
+  "recovery": {
+    "strategy": "adaptive",
+    "max_actions": 6,
+    "repeat_limit": 2,
+    "write_roots": ["src"],
+    "monitor_progress": true,
+    "targeted_source_review": false,
+    "diagnosis_supervision": false,
+    "diagnostic_handoff": false,
+    "budget_driven": false
+  },
+  "verification_repair_attempts": 3,
+  "diagnostic_execution": {
+    "execution": {
+      "backend": "docker",
+      "image": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "cpus": 1,
+      "memory_mb": 1024,
+      "pids_limit": 128
+    },
+    "python": "/usr/local/bin/python",
+    "max_model_calls": 3
+  },
+  "preserve_repair_candidates": true,
+  "require_diagnostic_inspection": false,
+  "verification_infrastructure_retries": 0,
+  "mutation_samples": 0,
+  "memoization": true,
+  "retrieval": {"provider": "text"},
+  "localization_tool_steps": 0,
+  "localization_require_external": false,
+  "mcp_servers": {},
+  "operational_knowledge": null,
+  "approval_before_write": false
+}

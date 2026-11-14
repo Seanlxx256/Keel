@@ -143,6 +143,11 @@ Local command timeouts constrain the immediate process, not all descendants. Mod
 
 ## Run artifacts
 
+Optional [durable governance](docs/durable-governance.md) adds same-host shared
+model-budget reservations and required host audit records across Keel processes.
+It includes bounded inspection and expired-run reconciliation, not Ray/Kubernetes
+deployment or automatic replay of uncertain operations.
+
 Each run produces:
 
 - `result.json`: work-item outcomes, verification and audit evidence, budgets, failure attribution.

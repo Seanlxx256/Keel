@@ -50,6 +50,10 @@ def validate(config: dict):
 
 
 def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) -> dict:
+    from .governance import validate_config as validate_governance, attach as attach_governance, govern_model
+    validate_governance(config.get('governance'))
+    if config.get('governance') and Path(config['governance']['path']).resolve().is_relative_to(Path(repo).resolve()):
+        raise ValueError('Governance database must be outside the untrusted repository')
     from .operational_knowledge import validate_config as validate_knowledge, attach as attach_knowledge
     validate_knowledge(config.get('operational_knowledge'))
     from .mcp_client import validate_servers
@@ -158,6 +162,8 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
         from .adapters.langgraph import require_dependencies
         require_dependencies()
     budget = Budget(Limits(**config.get("budget", {})))
+    if config.get('governance') and config['governance'].get('lease_seconds',3600) <= budget.limits.max_wallclock:
+        raise ValueError('Governance lease must exceed the runtime wall-clock budget for blocking calls')
     if model is not None and callable(getattr(type(model), 'bind_budget', None)):
         model.bind_budget(budget)
     if recovery_config.get('budget_driven'):
@@ -173,6 +179,18 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
     lifecycle = RoleStateMachine(trace, allow_recovery=adaptive)
     workspace = Workspace(repo, budget, ledger, trace, runner=CommandRunner(config.get("execution")),
                           retrieval=config.get("retrieval"), retrieval_model=model, memoization=config.get("memoization", True))
+    try:
+        governance = attach_governance(config.get('governance'), workspace, output,
+                                     digest({'config':config,'repo':str(workspace.root),'output':str(output)}))
+        if governance and (model is not None or agent_mode or proposal_mode):
+            if model is None:
+                from .models import from_config
+                model = from_config(config.get('model', {}))
+            model = govern_model(model, governance)
+            workspace.retrieval_model = model
+    except BaseException:
+        ledger.close()
+        raise
     attach_knowledge(workspace,config.get('operational_knowledge'),output.name)
     from .mcp_client import McpTools
     workspace.mcp_tools = McpTools(config.get("mcp_servers", {}), workspace)
@@ -191,6 +209,8 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
     stage = "scout"
     def enter_role(role, *, previous_status="completed"):
         nonlocal stage
+        if governance:
+            governance.event('phase_started', {'role':role})
         lifecycle.enter("verifier" if role == "baseline_verifier" else role,
                         phase="baseline" if role == "baseline_verifier" else "main", previous_status=previous_status)
         stage = role
@@ -728,6 +748,15 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
             result["artifacts"]["checkpoints.sqlite"] = str(output / "checkpoints.sqlite")
         trace.emit("runtime", "run_finished", status=result["status"])
         result["telemetry"] = telemetry.report()
+        if governance:
+            try:
+                result['governance'] = governance.finish(result['status'])
+            except (PolicyDenied, OSError) as error:
+                result['governance'] = {'status':'unavailable','run_id':governance.run_id,
+                    'path':str(governance.store.path),'scope':governance.config['scope'],
+                    'prior_runtime_failure':result['failure'],'error':str(error)}
+                result['status'] = 'failed'
+                result['failure'] = {'category':'governance_unavailable','stage':stage,'message':str(error)}
         if telemetry.exported:
             result["artifacts"]["spans.otlp.json"] = str(telemetry.path)
         (output / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
