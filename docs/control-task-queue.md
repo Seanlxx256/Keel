@@ -4,6 +4,10 @@ The queue is an opt-in API for trusted worker hosts. Existing Runtime execution
 does not automatically become a queue worker. It uses the controller's existing
 single-host SQLite transaction boundary; this is not a Redis/Ray/Kubernetes queue.
 
+The queue now delegates through a [business storage contract](queue-store-contract.md):
+`TaskQueue` remains the public facade and `SqliteQueueStore` preserves the current
+schema and behavior. This does not change the worker protocol below.
+
 ## Why expiry cannot mean retry
 
 A worker can perform an edit or paid model call and crash before reporting it.

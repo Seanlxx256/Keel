@@ -16,6 +16,7 @@ compass-vectors = ["lancedb>=0.20,<1"]
 validation = ["mcp>=1.28,<2"]
 langgraph = ["langgraph>=1,<2", "langgraph-checkpoint-sqlite>=3,<4"]
 mcp = ["mcp>=1.28,<2", "jsonschema>=4.20,<5"]
+postgres = ["psycopg[binary]>=3.2,<4"]
 
 [project.scripts]
 keel = "keel.cli:main"

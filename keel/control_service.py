@@ -39,7 +39,7 @@ def identifier(value):
 class ControlService:
     def __init__(self,config,*,clock=time.time):
         if (not isinstance(config,dict) or not {'path','scopes','principals'}<=config.keys()
-                or set(config)-{'path','scopes','principals','model_proxy','read_broker','execution_broker','mcp_broker'}):raise ValueError('Invalid service config fields')
+                or set(config)-{'path','scopes','principals','tenants','model_proxy','read_broker','execution_broker','mcp_broker'}):raise ValueError('Invalid service config fields')
         if not isinstance(config['scopes'],dict) or not config['scopes']:raise ValueError('Expected scopes')
         self.policies={}
         for scope,policy in config['scopes'].items():
@@ -53,8 +53,11 @@ class ControlService:
         if not isinstance(config['principals'],list) or not config['principals']:raise ValueError('Expected principals')
         for principal in config['principals']:
             if (not isinstance(principal,dict) or not {'id','token_env','scope','task_id','tools'}<=principal.keys()
-                    or set(principal)-{'id','token_env','scope','task_id','tools','trusted_usage','models','require_model_proxy','require_read_broker','require_write_broker','require_execution_broker','require_mcp_broker'}):
+                    or set(principal)-{'id','tenant_id','token_env','scope','task_id','tools','trusted_usage','models','require_model_proxy','require_read_broker','require_write_broker','require_execution_broker','require_mcp_broker'}):
                 raise ValueError('Invalid principal grant')
+            if 'tenant_id' in principal:
+                from .tenancy import bounded_id
+                bounded_id(principal['tenant_id'])
             identity=identifier(principal['id']);identifier(principal['task_id'])
             if identity in self.principals or principal['scope'] not in self.policies:raise ValueError('Duplicate or unknown principal scope')
             if type(principal.get('trusted_usage',False)) is not bool:raise ValueError('trusted_usage must be boolean')
@@ -85,8 +88,14 @@ class ControlService:
                 row=db.execute('SELECT policy,max_tokens,max_calls FROM governance_scopes WHERE scope=?',(scope,)).fetchone()
                 if row and tuple(row)!=(encoded(sorted(policy.get('denied_tools',[]))),policy['max_tokens'],policy['max_model_calls']):
                     raise PolicyDenied('Existing scope policy changed; create a new explicit scope')
-            db.execute('CREATE TABLE IF NOT EXISTS remote_run_bindings (run_id TEXT PRIMARY KEY, principal TEXT NOT NULL, task_id TEXT NOT NULL, grant_hash TEXT NOT NULL)')
-            db.execute('CREATE TABLE IF NOT EXISTS remote_operations (principal TEXT NOT NULL, operation_id TEXT NOT NULL, request_hash TEXT NOT NULL, response TEXT NOT NULL, PRIMARY KEY(principal,operation_id))')
+        from .operation_store import SqliteOperationStore
+        self.operations=SqliteOperationStore(self.store)
+        from .tenancy import TenantRegistry
+        self.tenancy=TenantRegistry(self.store)
+        from .tenant_quotas import configure as configure_tenant_quotas
+        with self.store.transaction():
+            self.tenancy.bind(self.principals.values())
+            self.tenant_policies=configure_tenant_quotas(self.store,config.get('tenants'),self.principals.values())
         self.model_proxy=None
         if config.get('model_proxy') is not None:
             from .model_proxy import ModelProxy
@@ -149,6 +158,8 @@ class ControlService:
 
     def _grant_hash(self,principal):
         value={'grant':principal,'policy':self.policies[principal['scope']]}
+        if principal.get('tenant_id') in self.tenant_policies:
+            value['tenant_policy']=self.tenant_policies[principal['tenant_id']]
         if principal.get('models'):
             value['model_policies']={alias:self.model_proxy.policy_hashes[alias] for alias in principal['models']}
         if self.read_broker is not None and principal['task_id'] in self.read_broker.policy_hashes:
@@ -161,13 +172,16 @@ class ControlService:
 
     def _session(self,db,principal,run_id):
         identifier(run_id)
-        row=db.execute('SELECT r.*,b.principal,b.task_id,b.grant_hash FROM governance_runs r JOIN remote_run_bindings b ON r.id=b.run_id WHERE r.id=?',(run_id,)).fetchone()
-        if (not row or row['principal']!=principal['id'] or row['task_id']!=principal['task_id']
-                or row['grant_hash']!=self._grant_hash(principal)):
-            raise PolicyDenied('Run unavailable to this principal or grant changed')
-        return Session(self.store,self.policies[principal['scope']],run_id,row['owner'])
+        policy=self.policies[principal['scope']]
+        grant=self.store.runs.authorize_remote(run_id=run_id,principal=principal['id'],
+            task_id=principal['task_id'],scope=principal['scope'],grant_hash=self._grant_hash(principal),
+            lease_seconds=policy.get('lease_seconds',3600))
+        return Session(self.store,policy,grant.run_id,grant.owner)
 
     def operate(self,principal_id,request):
+        from .transaction_domain import require_shared_domain
+        self.store.require_persistence()
+        require_shared_domain(self.store,operations=self.operations,queue=self.queue)
         if isinstance(request,dict) and request.get('action')=='model_status':
             if self.model_proxy is None:raise PolicyDenied('Model proxy unavailable')
             required(request,{'operation_id','action','run_id','data'});required(request['data'],{'target_operation_id'})
@@ -198,35 +212,27 @@ class ControlService:
         if not isinstance(action,str) or not isinstance(data,dict):raise ValueError('Invalid action or data')
         if (action=='begin') == ('run_id' in request):raise ValueError('Only non-begin operations require run_id')
         fingerprint=hashlib.sha256(encoded(request).encode()).hexdigest()
-        with self.store.transaction() as db:
-            session=None
-            if action!='begin':session=self._session(db,principal,request.get('run_id'))
-            prior=db.execute('SELECT request_hash,response FROM remote_operations WHERE principal=? AND operation_id=?',
-                (principal_id,operation_id)).fetchone()
-            if prior:
-                if prior['request_hash']!=fingerprint:raise PolicyDenied('Operation ID reused with different parameters')
-                if action in {'reserve','tool_started','queue_claim','queue_start','queue_renew'}:
-                    session._active(db)
-                    if action in {'queue_claim','queue_start'}:
-                        # A cached claim is historical, never fresh dispatch permission.
-                        response=json.loads(prior['response'])
-                        if response.get('ok'):
-                            response['result']['dispatch_allowed']=False
-                            response['result']['historical_response']=True
-                        return response
-                return json.loads(prior['response'])
+        def prepare(db):
+            return self._session(db,principal,request.get('run_id')) if action!='begin' else None
+        def replay(db,session,response):
+            if action in {'reserve','tool_started','queue_claim','queue_start','queue_renew'}:
+                session._active(db)
+                if action in {'queue_claim','queue_start'} and response.get('ok'):
+                    # Historical receipt cannot authorize another dispatch.
+                    response['result']['dispatch_allowed']=False
+                    response['result']['historical_response']=True
+            return response
+        def apply(db,session):
             try:
                 result=self._execute(db,principal,session,action,data)
                 response={'ok':True,'result':result}
             except (PolicyDenied,BudgetExceeded,ValueError,KeyError) as error:
                 if isinstance(error,GovernanceUnavailable):raise
                 response={'ok':False,'error_type':type(error).__name__,'message':str(error)}
-            # Audit mutations and the idempotent response commit together. A
-            # lost HTTP response never causes an untracked second reservation.
-            if action not in {'report','inspect','queue_status'}:
-                db.execute('INSERT INTO remote_operations VALUES(?,?,?,?)',
-                    (principal_id,operation_id,fingerprint,encoded(response)))
             return response
+        return self.operations.execute(principal=principal_id,operation_id=operation_id,
+            request_hash=fingerprint,prepare=prepare,apply=apply,replay=replay,
+            record=action not in {'report','inspect','queue_status'})
 
     def _execute(self,db,principal,session,action,data):
         if action=='queue_status':
@@ -234,14 +240,14 @@ class ControlService:
             return self.queue.status(principal['id'],principal['task_id'],data['id'])
         if action in {'queue_claim','queue_start','queue_finish','queue_renew'}:
             session._active(db)
-            row=db.execute('SELECT deadline FROM governance_runs WHERE id=?',(session.run_id,)).fetchone()
+            deadline=self.store.runs.get_bound(session._run_grant()).deadline
             if action=='queue_claim':
                 required(data,set())
-                return self.queue.claim(principal['id'],principal['task_id'],session.run_id,row['deadline'])
+                return self.queue.claim(principal['id'],principal['task_id'],session.run_id,deadline)
             if action=='queue_renew':
                 required(data,{'id','fence'})
                 return self.queue.renew(principal['id'],principal['task_id'],session.run_id,
-                                        data['id'],data['fence'],row['deadline'])
+                                        data['id'],data['fence'],deadline)
             required(data,{'id','fence'} if action=='queue_start' else {'id','fence','report'})
             return self.queue.transition(principal['id'],principal['task_id'],session.run_id,
                 data['id'],data['fence'],'start' if action=='queue_start' else 'finish',data.get('report'))
@@ -255,9 +261,9 @@ class ControlService:
                 raise ValueError('Runtime wall-clock budget must be positive and below server lease')
             run_id=uuid.uuid4().hex
             session=self.store.begin(policy,run_id,identity)
-            db.execute('INSERT INTO remote_run_bindings VALUES(?,?,?,?)',
-                (run_id,principal['id'],principal['task_id'],self._grant_hash(principal)))
+            self.store.runs.bind_remote(session._run_grant(),principal['id'],principal['task_id'],self._grant_hash(principal))
             result={'run_id':run_id,'scope':principal['scope'],'lease_seconds':lease}
+            if 'tenant_id' in principal:result['tenant_id']=principal['tenant_id']
             if self.read_broker is not None:
                 capability=self.read_broker.capability(principal)
                 if capability is not None:result['read_broker']=capability

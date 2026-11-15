@@ -130,8 +130,7 @@ class ReadToolBroker:
 
     def _observe(self,session,role,tool,args):
         # Resolve by authenticated run binding, not by client-selected repository.
-        with self.service.store.transaction() as db:
-            task=db.execute('SELECT task_id FROM remote_run_bindings WHERE run_id=?',(session.run_id,)).fetchone()['task_id']
+        task=self.service.store.runs.remote_task(session._run_grant())
         spec=self.repositories[task]
         folder=self.evidence/session.run_id;folder.mkdir(parents=True,exist_ok=True)
         ledger=Ledger(folder/'reads.sqlite')

@@ -3,6 +3,11 @@
 This inventory separates source implementation from environment validation. Skipping
 Docker/WSL validation does not establish a sandbox security result.
 
+The [production reuse design](production-reuse-design.md) proposes plugin contracts,
+multi-tenant persistence, artifact publication and cross-Sandbox scheduling.
+It is a roadmap, not implemented distributed functionality; Docker validation
+remains deferred while the environment is unavailable.
+
 ## Implemented interfaces
 
 - Same-host transactional quota reservations, uncertain usage retention, expiring
@@ -41,6 +46,22 @@ Docker/WSL validation does not establish a sandbox security result.
   `keel/mcp_client.py`, `keel/agents.py`, [scope](mcp-transport-failures.md).
 - Opt-in zero-model local/controller host preflight, with durable controller
   outcomes and no implicit replay: [scope](mcp-preflight.md).
+- First atomic operation-receipt storage extraction, integrated with control RPCs
+  and preserving legacy SQLite receipts: [contract and limits](operation-store-contract.md).
+- Explicit tenant principal grants and durable scope/task ownership, preserving
+  legacy configurations: [identity and migration limits](controller-tenancy.md).
+- Optional tenant-wide cumulative token/call admission over scope counters:
+  [configuration, accounting and limits](tenant-quotas.md).
+- Business-level budget reserve/settle interface used by Session, with the
+  existing SQLite backend: [contract and transaction boundary](budget-store-contract.md).
+- Business-level queue storage interface behind the existing task queue facade:
+  [claim, lease and atomic receipt contract](queue-store-contract.md).
+- Run ownership, remote grant binding and lifecycle storage interface shared by
+  sessions and relevant brokers: [run/lease transaction contract](run-store-contract.md).
+- Trusted-host shared transaction-domain checks before repository delegation/RPCs:
+  [composition guard and limits](transaction-domain.md).
+- Optional native PostgreSQL transaction/operation-receipt foundation, not wired
+  into ControlService and awaiting real-server validation: [scope and manual CI](postgres-operations.md).
 
 ## Durable remote client recovery
 
@@ -136,3 +157,9 @@ Operator-shell follow-up: the user reported all 10 MCP client tests passing in
 also passed there. The remaining stdio error is context-dependent on the agent
 execution host; no Windows-wide repair was performed or shown necessary.
 This targeted user-run result does not replace the retained consolidated run.
+
+A subsequent ordinary-shell consolidated run (`unified-user-v2`) passed all
+255 tests across 29 modules without skips. Required report publication succeeded,
+declared input hashes remained unchanged and archive/plan receipts were verified.
+This closes the declared local-regression gate; earlier failed runs remain.
+Full repository CI and the deployment validations listed above remain separate.

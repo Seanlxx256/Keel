@@ -138,6 +138,7 @@ class RemoteSession:
         if action=='begin':
             self.run_id=result['run_id']
             self.config={'scope':result['scope'],'lease_seconds':result['lease_seconds']}
+            if 'tenant_id' in result:self.config['tenant_id']=result['tenant_id']
             if result.get('read_broker') is not None:self.config['read_broker']=result['read_broker']
             if result.get('write_broker') is not None:self.config['write_broker']=result['write_broker']
             if result.get('execution_broker') is not None:self.config['execution_broker']=result['execution_broker']

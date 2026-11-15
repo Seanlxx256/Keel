@@ -56,13 +56,26 @@ class ControlStore:
     def __init__(self, path, *, clock=time.time, initialize=True):
         self.path = Path(path).resolve()
         self.clock = clock
+        self.transaction_domain=object()
         self._transactions = threading.local()
+        from .budget_store import BudgetStore, SqliteBudgetStore
+        self.budgets: BudgetStore = SqliteBudgetStore(self)
+        from .run_store import RunStore, SqliteRunStore
+        self.runs: RunStore = SqliteRunStore(self)
         if not initialize:
             if not self.path.is_file():raise FileNotFoundError(self.path)
             return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.transaction() as db:
             schema='''
+                CREATE TABLE IF NOT EXISTS governance_tenant_limits (
+                    tenant_id TEXT PRIMARY KEY, max_tokens INTEGER NOT NULL, max_calls INTEGER NOT NULL);
+                CREATE TABLE IF NOT EXISTS control_namespace_bindings (
+                    resource_kind TEXT NOT NULL, resource_id TEXT NOT NULL,
+                    namespace_kind TEXT NOT NULL, namespace_id TEXT NOT NULL,
+                    PRIMARY KEY(resource_kind,resource_id));
+                CREATE INDEX IF NOT EXISTS control_namespace_owner
+                    ON control_namespace_bindings(namespace_kind,namespace_id,resource_kind,resource_id);
                 CREATE TABLE IF NOT EXISTS governance_scopes (
                     scope TEXT PRIMARY KEY, policy TEXT NOT NULL,
                     max_tokens INTEGER NOT NULL, max_calls INTEGER NOT NULL,
@@ -71,6 +84,8 @@ class ControlStore:
                 CREATE TABLE IF NOT EXISTS governance_runs (
                     id TEXT PRIMARY KEY, scope TEXT NOT NULL, owner TEXT NOT NULL,
                     status TEXT NOT NULL, deadline REAL NOT NULL, identity TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS remote_run_bindings (
+                    run_id TEXT PRIMARY KEY, principal TEXT NOT NULL, task_id TEXT NOT NULL, grant_hash TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS governance_requests (
                     id TEXT PRIMARY KEY, run_id TEXT NOT NULL, reserved INTEGER NOT NULL,
                     actual INTEGER, status TEXT NOT NULL);
@@ -86,6 +101,7 @@ class ControlStore:
 
     @contextmanager
     def transaction(self):
+        self.require_persistence()
         existing = getattr(self._transactions, 'connection', None)
         if existing is not None:
             # Used by the service to atomically commit an operation and its
@@ -112,6 +128,10 @@ class ControlStore:
         finally:
             self._transactions.connection = None
             db.close()
+
+    def require_persistence(self):
+        from .transaction_domain import require_shared_domain
+        require_shared_domain(self,budgets=self.budgets,runs=self.runs)
 
     def inspect(self, *, scope, run_id=None, after=0, limit=100):
         """Bounded host/operator view; not a remotely authenticated API."""
@@ -143,31 +163,14 @@ class ControlStore:
                    (run_id, action_id, kind, self.clock(), raw))
 
     def begin(self, config, run_id, identity):
-        validate_config(config)
-        policy = encoded(sorted(config.get('denied_tools', [])))
-        owner = uuid.uuid4().hex
-        with self.transaction() as db:
-            db.execute('INSERT OR IGNORE INTO governance_scopes(scope,policy,max_tokens,max_calls) VALUES(?,?,?,?)',
-                       (config['scope'], policy, config['max_tokens'], config['max_model_calls']))
-            row = db.execute('SELECT * FROM governance_scopes WHERE scope=?', (config['scope'],)).fetchone()
-            if (row['policy'], row['max_tokens'], row['max_calls']) != (policy, config['max_tokens'], config['max_model_calls']):
-                raise PolicyDenied('Governance scope configuration changed; use a new explicit scope')
-            db.execute('INSERT INTO governance_runs VALUES(?,?,?,?,?,?)',
-                       (run_id, config['scope'], owner, 'running', self.clock()+config.get('lease_seconds',3600), identity))
-            self._event(db, run_id, owner, 'run_started', {'scope': config['scope'], 'identity': identity})
-        return Session(self, config, run_id, owner)
+        self.require_persistence()
+        grant=self.runs.create(config,run_id,identity)
+        return Session(self,config,grant.run_id,grant.owner)
 
     def reconcile_expired(self, *, scope=None):
         """Detect expired runs, preserve reservations and never replay work."""
-        with self.transaction() as db:
-            rows = db.execute("SELECT id FROM governance_runs WHERE status='running' AND deadline<=?"+
-                (' AND scope=?' if scope is not None else ''),
-                (self.clock(),scope) if scope is not None else (self.clock(),)).fetchall()
-            for row in rows:
-                db.execute("UPDATE governance_runs SET status='unreachable' WHERE id=?", (row['id'],))
-                db.execute("UPDATE governance_requests SET status='unknown' WHERE run_id=? AND status='dispatched'", (row['id'],))
-                self._event(db,row['id'],uuid.uuid4().hex,'lease_expired',{'replay_authorized':False})
-        return [row['id'] for row in rows]
+        self.require_persistence()
+        return self.runs.reconcile_expired(scope=scope)
 
     def events(self, run_id, *, after=0, limit=100):
         if type(after) is not int or after < 0 or type(limit) is not int or not 1 <= limit <= 1000:
@@ -185,11 +188,12 @@ class Session:
         return str(self.store.path)
 
     def _active(self, db):
-        row = db.execute('SELECT * FROM governance_runs WHERE id=?', (self.run_id,)).fetchone()
-        if not row or row['owner'] != self.owner or row['status'] != 'running' or row['deadline'] <= self.store.clock():
-            raise PolicyDenied('Governance run inactive or lease expired; reconcile before further work')
-        db.execute('UPDATE governance_runs SET deadline=? WHERE id=?',
-                   (self.store.clock()+self.config.get('lease_seconds',3600), self.run_id))
+        # The backend joins the caller's existing ControlStore transaction.
+        return self.store.runs.require_active(self._run_grant())
+
+    def _run_grant(self):
+        from .run_store import RunGrant
+        return RunGrant(self.run_id,self.owner,self.config['scope'],self.config.get('lease_seconds',3600))
 
     def event(self, kind, payload, *, action_id=None):
         with self.store.transaction() as db:
@@ -203,61 +207,35 @@ class Session:
             raise PolicyDenied('Tool denied by durable governance policy: '+tool)
 
     def reserve(self, tokens, *, request_id=None):
-        if type(tokens) is not int or tokens <= 0:
-            raise ValueError('Reservation must be positive integer tokens')
-        request_id = request_id or uuid.uuid4().hex
-        with self.store.transaction() as db:
-            self._active(db)
-            if db.execute('SELECT 1 FROM governance_requests WHERE id=?', (request_id,)).fetchone():
-                raise PolicyDenied('Request ID already exists; never redispatch an uncertain call')
-            changed = db.execute('UPDATE governance_scopes SET held=held+?,calls=calls+1 WHERE scope=? AND spent+held+?<=max_tokens AND calls<max_calls',
-                                 (tokens,self.config['scope'],tokens)).rowcount
-            if not changed:
-                raise BudgetExceeded('Shared governance token or model-call budget exhausted')
-            db.execute('INSERT INTO governance_requests VALUES(?,?,?,NULL,?)', (request_id,self.run_id,tokens,'dispatched'))
-            self.store._event(db,self.run_id,request_id,'model_intent',{'reserved_tokens':tokens})
-        return request_id
+        self.store.require_persistence()
+        return self.store.budgets.reserve(self._budget_grant(),tokens,request_id=request_id)
+
+    def _budget_grant(self):
+        from .budget_store import BudgetGrant
+        return BudgetGrant(self.run_id,self.owner,self.config['scope'],self.config.get('lease_seconds',3600))
 
     def settle(self, request_id, actual, *, outcome='completed'):
         """Late usage may settle an unreachable run; it does not reactivate it."""
-        if actual is not None and (type(actual) is not int or actual < 0):
-            raise ValueError('Actual tokens must be a nonnegative integer or unknown')
-        with self.store.transaction() as db:
-            run = db.execute('SELECT owner FROM governance_runs WHERE id=?',(self.run_id,)).fetchone()
-            row = db.execute('SELECT * FROM governance_requests WHERE id=? AND run_id=?',(request_id,self.run_id)).fetchone()
-            if not run or run['owner'] != self.owner or not row:
-                raise PolicyDenied('Unknown or foreign request')
-            if row['status'] == 'settled':
-                if row['actual'] != actual:
-                    raise PolicyDenied('Conflicting usage settlement')
-                return
-            if actual is None:
-                db.execute("UPDATE governance_requests SET status='unknown' WHERE id=?",(request_id,))
-            else:
-                db.execute('UPDATE governance_scopes SET held=held-?,spent=spent+? WHERE scope=?',
-                           (row['reserved'],actual,self.config['scope']))
-                db.execute("UPDATE governance_requests SET actual=?,status='settled' WHERE id=?",(actual,request_id))
-            self.store._event(db,self.run_id,request_id,'model_outcome',{'actual_tokens':actual,'outcome':outcome,
-                'reservation_exceeded':actual is not None and actual>row['reserved']})
+        self.store.require_persistence()
+        return self.store.budgets.settle(self._budget_grant(),request_id,actual,outcome=outcome)
 
     def finish(self, status):
-        if status not in {'passed','failed'}:
-            raise ValueError('Expected final runtime status')
-        with self.store.transaction() as db:
-            self._active(db)
-            db.execute("UPDATE governance_requests SET status='unknown' WHERE run_id=? AND status='dispatched'", (self.run_id,))
-            db.execute('UPDATE governance_runs SET status=? WHERE id=?',(status,self.run_id))
-            self.store._event(db,self.run_id,self.owner,'run_finished',{'status':status})
+        self.store.require_persistence()
+        self.store.runs.finish(self._run_grant(),status)
         return self.report()
 
     def report(self):
         with self.store.transaction() as db:
             row = dict(db.execute('SELECT * FROM governance_scopes WHERE scope=?',(self.config['scope'],)).fetchone())
             run = db.execute('SELECT status FROM governance_runs WHERE id=?',(self.run_id,)).fetchone()
-        return {'path':str(self.store.path),'scope':self.config['scope'],'run_id':self.run_id,
+            from .tenant_quotas import report as tenant_report
+            tenant=tenant_report(db,self.config['scope'])
+        result={'path':str(self.store.path),'scope':self.config['scope'],'run_id':self.run_id,
                 'status':run['status'],'spent_tokens':row['spent'],'reserved_or_unknown_tokens':row['held'],
                 'model_calls':row['calls'],'max_tokens':row['max_tokens'],'max_model_calls':row['max_calls'],
                 'scope_note':'Same-host SQLite coordination; reservations are estimates, not provider billing guarantees.'}
+        if tenant is not None:result['tenant_budget']=tenant
+        return result
 
 
 class GovernedModel:

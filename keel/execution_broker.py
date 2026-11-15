@@ -122,8 +122,8 @@ class ExecutionBroker:
                 session.tool_started('verifier','verify',request['operation_id'])
                 db.execute('INSERT INTO broker_verifications VALUES(?,?,?,?,?,?,NULL)',
                            (job_id,principal['id'],request['operation_id'],session.run_id,fingerprint,'running'))
-                run=db.execute('SELECT deadline FROM governance_runs WHERE id=?',(session.run_id,)).fetchone()
-                timeout=min(timeout,spec['max_seconds'],max(.01,run['deadline']-self.service.store.clock()))
+                deadline=self.service.store.runs.get_bound(session._run_grant()).deadline
+                timeout=min(timeout,spec['max_seconds'],max(.01,deadline-self.service.store.clock()))
             thread=threading.Thread(target=self._run,args=(principal,session,job_id,data['source_sha256'],timeout),daemon=True)
             with self.lock:
                 if self.stopping.is_set():raise GovernanceUnavailable('Controller acceptance stopped before thread launch')

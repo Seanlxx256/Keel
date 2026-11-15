@@ -111,3 +111,18 @@ the preserved ordinary-shell pipe controls, this establishes availability in tha
 context, while the restricted agent context still has its recorded failure.
 The targeted run was not independently captured by the developer; no new merged
 suite, full CI, Docker or deployment pass is inferred.
+
+## Ordinary-shell consolidated follow-up: 255 passed
+
+The user executed `unified-user-v2/run.ps1` in ordinary PowerShell. Saved artifacts
+confirm all 255 tests across 29 declared modules passed, with no failures, errors
+or skips. Unittest elapsed 71.598s, the child report 72.906s and watchdog 80.047s.
+The new shared local-regression runner successfully published initial and final
+reports; its three contracts cover the earlier missing-parent defect.
+
+Declared input hashes remained unchanged, and archive plus plan receipt hashes
+were verified. `unified-user-v2/assessment.json` binds the original report,
+console, watchdog, plan and source archive by SHA-256. This is a distinct successful
+ordinary-shell run; earlier restricted-context failures are retained. It is a
+passing baseline for the declared local suite, not full repository CI or real
+Docker, billing, distributed-deployment or production validation.

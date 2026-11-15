@@ -84,8 +84,8 @@ class ModelProxy:
                     self.active[key]={'principal':principal_id,'operation_id':request['operation_id'],
                                       'run_id':session.run_id,'alias':alias,'phase':'preparing'}
                     registered=True
-                row=db.execute('SELECT deadline FROM governance_runs WHERE id=?',(session.run_id,)).fetchone()
-                timeout=min(timeout,self.timeout,row['deadline']-self.service.store.clock())
+                deadline=self.service.store.runs.get_bound(session._run_grant()).deadline
+                timeout=min(timeout,self.timeout,deadline-self.service.store.clock())
                 if timeout<=0:raise PolicyDenied('Run lease expired')
                 estimate=len(encoded({'messages':messages,'schema':schema}).encode())+limit
                 request_id='proxy-'+uuid.uuid4().hex
