@@ -12,6 +12,16 @@ import uuid
 from .core import PolicyDenied
 
 
+def canonical_mount(value):
+    """Normalize Docker Desktop host-bind aliases without changing POSIX case."""
+    value=str(value).replace('\\','/')
+    for prefix in ['/run/desktop/mnt/host/','/host_mnt/']:
+        if value.startswith(prefix):
+            tail=value[len(prefix):]
+            if len(tail)>1 and tail[1]=='/':value=tail[0]+':'+tail[1:]
+    return value.rstrip('/').casefold() if os.name=='nt' else value.rstrip('/')
+
+
 def normalize_acceptance(entries):
     if not isinstance(entries, list) or not entries:
         raise ValueError("acceptance must contain at least one command")
@@ -105,13 +115,16 @@ class CommandRunner:
                     "stderr": completed.stderr.decode("utf-8", errors="replace"), "backend": self.backend}
         except subprocess.TimeoutExpired as error:
             if self.backend == "docker":
-                try:
-                    cleanup = subprocess.run(["docker", "rm", "--force", name], shell=False,
-                                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
-                    if cleanup.returncode != 0 and b"No such container" not in cleanup.stderr:
-                        raise PolicyDenied(f"Timed out; failed to remove container {name}")
-                except (OSError, subprocess.TimeoutExpired):
-                    raise PolicyDenied(f"Timed out; could not confirm cleanup of container {name}") from None
+                self.cleanup_timed_out(name)
             return {"returncode": None, "timeout": True,
                     "stdout": (error.stdout or b"").decode("utf-8", errors="replace"),
                     "stderr": (error.stderr or b"").decode("utf-8", errors="replace"), "backend": self.backend}
+
+    def cleanup_timed_out(self,name):
+        try:
+            cleanup=subprocess.run(['docker','rm','--force',name],shell=False,
+                stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=5)
+            if cleanup.returncode!=0 and b'No such container' not in cleanup.stderr:
+                raise PolicyDenied(f'Timed out; failed to remove container {name}')
+        except (OSError,subprocess.TimeoutExpired):
+            raise PolicyDenied(f'Timed out; could not confirm cleanup of container {name}') from None

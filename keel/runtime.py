@@ -58,6 +58,8 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
     validate_knowledge(config.get('operational_knowledge'))
     from .mcp_client import validate_servers
     validate_servers(config.get("mcp_servers", {}))
+    from .mcp_preflight import validate_policy as validate_mcp_preflight
+    validate_mcp_preflight(config.get('mcp_preflight'))
     if type(config.get("context_handoff", False)) is not bool:
         raise ValueError("context_handoff must be boolean")
     if type(config.get("memoization", True)) is not bool:
@@ -193,7 +195,16 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
         raise
     attach_knowledge(workspace,config.get('operational_knowledge'),output.name)
     from .mcp_client import McpTools
-    workspace.mcp_tools = McpTools(config.get("mcp_servers", {}), workspace)
+    try:
+        workspace.mcp_tools = McpTools(config.get("mcp_servers", {}), workspace)
+        if governance and (governance.config.get('mcp_broker') or {}).get('tools'):
+            from .mcp_broker import RoutedMcpTools
+            workspace.mcp_tools=RoutedMcpTools(workspace.mcp_tools,workspace)
+    except BaseException:
+        try:
+            if governance and getattr(governance,'pending',None) is None:governance.finish('failed')
+        finally:ledger.close()
+        raise
     workspace.localization_tool_steps = scout_steps
     workspace.localization_require_external = require_external
     recovery = RecoveryController(recovery_config, workspace) if recovery_config.get('max_actions', 0) else None
@@ -683,6 +694,16 @@ def run(config: dict, repo: Path, output: Path, *, model=None, approval=None) ->
     result["orchestration"] = {"engine": engine, "resumable": False}
     try:
         trace.emit("runtime", "run_started", goal=config["goal"])
+        if config.get('mcp_preflight') is not None:
+            from .mcp_preflight import check_workspace
+            from compass.progress import atomic_json
+            stage='preflight'
+            report=check_workspace(workspace,config['mcp_preflight'])
+            result['mcp_preflight']=report
+            atomic_json(output/'mcp-preflight.json',report)
+            trace.emit('runtime','mcp_preflight',report=report)
+            if report['mode']=='strict' and report['status'] in {'unavailable','not_probed'}:
+                raise EnvironmentBlocked('MCP host preflight unavailable or not checked; see mcp-preflight.json')
         from .orchestration import execute
         result["orchestration"].update(execute(engine, stages, result, handle_error, output, budget,
             approval=decide_approval if approval_required else None,

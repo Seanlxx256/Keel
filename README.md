@@ -151,6 +151,9 @@ An optional [separate control service](docs/remote-governance.md) binds worker
 identities and policies server-side and supports idempotent remote operations.
 Its tested scope is local HTTP and independent worker processes, not production
 network isolation or multi-node deployment.
+The [real Docker isolation validation](docs/docker-isolation-validation.md)
+checks disposable container boundaries and normal acceptance without model calls.
+Docker unavailability is recorded explicitly, with no local execution fallback.
 
 Each run produces:
 

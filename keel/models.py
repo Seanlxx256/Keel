@@ -191,6 +191,10 @@ class CompatibleChatModel:
 
 def from_config(config: dict) -> Model:
     provider = config.get('provider', 'ollama')
+    if provider=='control-proxy':
+        if set(config)!={'provider','alias'}:raise ValueError('Control proxy accepts provider and alias only')
+        from .model_proxy import ProxyModel
+        return ProxyModel(config['alias'])
     if provider == 'openai-compatible':
         allowed = {'provider', 'name', 'base_url', 'api_key_env', 'response_mode', 'token_limit_field', 'temperature'}
         if set(config) - allowed:
@@ -198,6 +202,6 @@ def from_config(config: dict) -> Model:
         return CompatibleChatModel(config.get('name', ''), config.get('base_url', ''),
             **{key: config[key] for key in allowed - {'provider', 'name', 'base_url'} if key in config})
     if provider != 'ollama':
-        raise ValueError('Supported model providers: ollama, openai-compatible')
+        raise ValueError('Supported model providers: ollama, openai-compatible, control-proxy')
     return OllamaModel(config.get("name", ""), config.get("base_url", "http://localhost:11434"),
                        num_ctx=config.get("num_ctx"), num_gpu=config.get("num_gpu"))

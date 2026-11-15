@@ -151,3 +151,6 @@ Worker 不能通过通用事件接口伪造服务端 `model_intent` 等控制事
 
 2026-11-15 本机验证：18 项服务相关检查，以及合并的 126 项相关回归检查通过（1 项跳过）。
 真实三进程演示最新结果在 `.keel/remote-governance-live-v4/report.json`；未调用提供方。
+
+后续的[真实双 Docker 隔离验证](docker-isolation-validation.md) 已提供有界运行入口，
+当前执行环境因 Docker 管道权限未完成实际容器检查，不能与进程演示混为同一证据。

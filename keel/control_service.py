@@ -1,7 +1,8 @@
 """Authenticated governance transport for controlled deployments and tests.
 
 Only the service accesses SQLite. This is a bounded stdlib HTTP prototype, not
-a hardened internet-facing server, model proxy, or sandbox security boundary.
+a hardened internet-facing server or sandbox security boundary. Optional model
+execution remains subject to explicit server grants and bounded dispatch.
 """
 import argparse
 import hashlib
@@ -12,6 +13,7 @@ import math
 import os
 from pathlib import Path
 import ssl
+import signal
 import threading
 import time
 import uuid
@@ -36,7 +38,8 @@ def identifier(value):
 
 class ControlService:
     def __init__(self,config,*,clock=time.time):
-        required(config,{'path','scopes','principals'})
+        if (not isinstance(config,dict) or not {'path','scopes','principals'}<=config.keys()
+                or set(config)-{'path','scopes','principals','model_proxy','read_broker','execution_broker','mcp_broker'}):raise ValueError('Invalid service config fields')
         if not isinstance(config['scopes'],dict) or not config['scopes']:raise ValueError('Expected scopes')
         self.policies={}
         for scope,policy in config['scopes'].items():
@@ -50,11 +53,19 @@ class ControlService:
         if not isinstance(config['principals'],list) or not config['principals']:raise ValueError('Expected principals')
         for principal in config['principals']:
             if (not isinstance(principal,dict) or not {'id','token_env','scope','task_id','tools'}<=principal.keys()
-                    or set(principal)-{'id','token_env','scope','task_id','tools','trusted_usage'}):
+                    or set(principal)-{'id','token_env','scope','task_id','tools','trusted_usage','models','require_model_proxy','require_read_broker','require_write_broker','require_execution_broker','require_mcp_broker'}):
                 raise ValueError('Invalid principal grant')
             identity=identifier(principal['id']);identifier(principal['task_id'])
             if identity in self.principals or principal['scope'] not in self.policies:raise ValueError('Duplicate or unknown principal scope')
             if type(principal.get('trusted_usage',False)) is not bool:raise ValueError('trusted_usage must be boolean')
+            if type(principal.get('require_model_proxy',False)) is not bool:raise ValueError('require_model_proxy must be boolean')
+            if type(principal.get('require_read_broker',False)) is not bool:raise ValueError('require_read_broker must be boolean')
+            if type(principal.get('require_write_broker',False)) is not bool:raise ValueError('require_write_broker must be boolean')
+            if type(principal.get('require_execution_broker',False)) is not bool:raise ValueError('require_execution_broker must be boolean')
+            if type(principal.get('require_mcp_broker',False)) is not bool:raise ValueError('require_mcp_broker must be boolean')
+            aliases=principal.get('models',[])
+            if not isinstance(aliases,list) or any(not isinstance(alias,str) or not alias for alias in aliases):
+                raise ValueError('Expected model alias grants')
             tools=principal['tools']
             if not isinstance(tools,dict) or any(not isinstance(role,str) or not isinstance(names,list)
                     or any(not isinstance(name,str) or not name for name in names) for role,names in tools.items()):
@@ -67,6 +78,8 @@ class ControlService:
             self.principals[identity]=dict(principal)
         # Credentials are not written to SQLite or the ready file.
         self.store=ControlStore(config['path'],clock=clock)
+        from .task_queue import TaskQueue
+        self.queue=TaskQueue(self.store)
         with self.store.transaction() as db:
             for scope,policy in self.policies.items():
                 row=db.execute('SELECT policy,max_tokens,max_calls FROM governance_scopes WHERE scope=?',(scope,)).fetchone()
@@ -74,6 +87,39 @@ class ControlService:
                     raise PolicyDenied('Existing scope policy changed; create a new explicit scope')
             db.execute('CREATE TABLE IF NOT EXISTS remote_run_bindings (run_id TEXT PRIMARY KEY, principal TEXT NOT NULL, task_id TEXT NOT NULL, grant_hash TEXT NOT NULL)')
             db.execute('CREATE TABLE IF NOT EXISTS remote_operations (principal TEXT NOT NULL, operation_id TEXT NOT NULL, request_hash TEXT NOT NULL, response TEXT NOT NULL, PRIMARY KEY(principal,operation_id))')
+        self.model_proxy=None
+        if config.get('model_proxy') is not None:
+            from .model_proxy import ModelProxy
+            self.model_proxy=ModelProxy(self,config['model_proxy'])
+        self.read_broker=None
+        if config.get('read_broker') is not None:
+            from .tool_broker import ReadToolBroker
+            self.read_broker=ReadToolBroker(self,config['read_broker'])
+        self.write_broker=None
+        if self.read_broker is not None:
+            from .write_broker import WriteBroker
+            self.write_broker=WriteBroker(self)
+        self.execution_broker=None
+        if config.get('execution_broker') is not None:
+            from .execution_broker import ExecutionBroker
+            self.execution_broker=ExecutionBroker(self,config['execution_broker'])
+        self.mcp_broker=None
+        if config.get('mcp_broker') is not None:
+            from .mcp_broker import McpBroker
+            self.mcp_broker=McpBroker(self,config['mcp_broker'])
+        for principal in self.principals.values():
+            if any(alias not in (self.model_proxy.models if self.model_proxy else {}) for alias in principal.get('models',[])):
+                raise ValueError('Principal grants an unavailable model alias')
+            if principal.get('require_model_proxy') and not principal.get('models'):
+                raise ValueError('Proxy-only principal requires a configured model grant')
+            if principal.get('require_read_broker') and (self.read_broker is None or self.read_broker.capability(principal) is None):
+                raise ValueError('Required read broker is unavailable for this principal task')
+            if principal.get('require_write_broker') and (self.write_broker is None or self.write_broker.capability(principal) is None):
+                raise ValueError('Required write broker is unavailable for this principal task')
+            if principal.get('require_execution_broker') and (self.execution_broker is None or self.execution_broker.capability(principal) is None):
+                raise ValueError('Required execution broker unavailable for this principal task')
+            if principal.get('require_mcp_broker') and (self.mcp_broker is None or not (self.mcp_broker.capability(principal) or {}).get('tools')):
+                raise ValueError('Required MCP broker unavailable for this principal task')
 
     def authenticate(self,header):
         if not isinstance(header,str) or not header.startswith('Bearer '):raise PolicyDenied('Authentication required')
@@ -82,8 +128,36 @@ class ControlService:
             if hmac.compare_digest(fingerprint,expected):return identity
         raise PolicyDenied('Authentication required')
 
+    def close(self,*,timeout=10):
+        if type(timeout) not in (int,float) or not math.isfinite(timeout) or not 0<timeout<=30:
+            raise ValueError('Managed shutdown budget must be positive and at most 30 seconds')
+        deadline=time.monotonic()+timeout
+        brokers={name:broker for name,broker in [('acceptance',self.execution_broker),('mcp',self.mcp_broker),
+                 ('provider',getattr(self,'model_proxy',None))] if broker is not None}
+        if not brokers:return {'status':'not_configured','scope':'No acceptance, MCP or provider proxy to stop'}
+        results={};stop_errors={}
+        # Stop both admission paths before spending the common wait budget.
+        for name,broker in brokers.items():
+            try:broker.request_stop()
+            except Exception as error:stop_errors[name]=type(error).__name__
+        for name,broker in brokers.items():
+            try:results[name]=broker.shutdown(timeout=max(.01,deadline-time.monotonic()))
+            except Exception as error:results[name]={'status':'cleanup_unconfirmed','error_type':type(error).__name__}
+        return {'schema_version':2,'status':'stopped' if not stop_errors and all(v['status']=='stopped' for v in results.values()) else 'cleanup_unconfirmed',
+                'components':results,'admission_stop_errors':stop_errors,
+                'scope':'Managed acceptance/MCP/provider lifecycle only; external effects, descendants and billing not certified cancelled'}
+
     def _grant_hash(self,principal):
-        return hashlib.sha256(encoded({'grant':principal,'policy':self.policies[principal['scope']]}).encode()).hexdigest()
+        value={'grant':principal,'policy':self.policies[principal['scope']]}
+        if principal.get('models'):
+            value['model_policies']={alias:self.model_proxy.policy_hashes[alias] for alias in principal['models']}
+        if self.read_broker is not None and principal['task_id'] in self.read_broker.policy_hashes:
+            value['read_policy']=self.read_broker.policy_hashes[principal['task_id']]
+        if self.execution_broker is not None and principal['task_id'] in self.execution_broker.policy_hashes:
+            value['execution_policy']=self.execution_broker.policy_hashes[principal['task_id']]
+        if self.mcp_broker is not None and principal['task_id'] in self.mcp_broker.policy_hashes:
+            value['mcp_policy']=self.mcp_broker.policy_hashes[principal['task_id']]
+        return hashlib.sha256(encoded(value).encode()).hexdigest()
 
     def _session(self,db,principal,run_id):
         identifier(run_id)
@@ -94,6 +168,29 @@ class ControlService:
         return Session(self.store,self.policies[principal['scope']],run_id,row['owner'])
 
     def operate(self,principal_id,request):
+        if isinstance(request,dict) and request.get('action')=='model_status':
+            if self.model_proxy is None:raise PolicyDenied('Model proxy unavailable')
+            required(request,{'operation_id','action','run_id','data'});required(request['data'],{'target_operation_id'})
+            return {'ok':True,'result':self.model_proxy.inspect(principal_id,request['run_id'],request['data']['target_operation_id'])}
+        if isinstance(request,dict) and request.get('action') in {'mcp_call','mcp_page','mcp_cancel','mcp_preflight'}:
+            if self.mcp_broker is None:raise PolicyDenied('MCP broker unavailable')
+            return self.mcp_broker.operate(principal_id,request)
+        if isinstance(request,dict) and request.get('action') in {'verify_start','verify_status','verify_page'}:
+            if self.execution_broker is None:raise PolicyDenied('Execution broker unavailable')
+            return self.execution_broker.operate(principal_id,request)
+        if isinstance(request,dict) and request.get('action') in {'tool_replace','tool_write_status'}:
+            if self.write_broker is None:raise PolicyDenied('Write broker is not configured')
+            if request['action']=='tool_replace':return self.write_broker.execute(principal_id,request)
+            required(request,{'operation_id','action','run_id','data'});required(request['data'],{'write_operation_id'})
+            return {'ok':True,'result':self.write_broker.inspect(principal_id,request['run_id'],request['data']['write_operation_id'])}
+        if isinstance(request,dict) and request.get('action')=='tool_read':
+            if self.read_broker is None:raise PolicyDenied('Read broker is not configured')
+            return self.read_broker.execute(principal_id,request)
+        if isinstance(request,dict) and request.get('action')=='model_complete':
+            if self.model_proxy is None:raise PolicyDenied('Model proxy is not configured')
+            try:return self.model_proxy.execute(principal_id,request)
+            except BudgetExceeded as error:
+                return {'ok':False,'error_type':'BudgetExceeded','message':str(error)}
         principal=self.principals[principal_id]
         if not isinstance(request,dict) or set(request)-{'operation_id','action','data','run_id'} or not {'operation_id','action','data'}<=request.keys():
             raise ValueError('Invalid operation envelope')
@@ -108,7 +205,15 @@ class ControlService:
                 (principal_id,operation_id)).fetchone()
             if prior:
                 if prior['request_hash']!=fingerprint:raise PolicyDenied('Operation ID reused with different parameters')
-                if action in {'reserve','tool_started'}:session._active(db)
+                if action in {'reserve','tool_started','queue_claim','queue_start','queue_renew'}:
+                    session._active(db)
+                    if action in {'queue_claim','queue_start'}:
+                        # A cached claim is historical, never fresh dispatch permission.
+                        response=json.loads(prior['response'])
+                        if response.get('ok'):
+                            response['result']['dispatch_allowed']=False
+                            response['result']['historical_response']=True
+                        return response
                 return json.loads(prior['response'])
             try:
                 result=self._execute(db,principal,session,action,data)
@@ -118,12 +223,28 @@ class ControlService:
                 response={'ok':False,'error_type':type(error).__name__,'message':str(error)}
             # Audit mutations and the idempotent response commit together. A
             # lost HTTP response never causes an untracked second reservation.
-            if action not in {'report','inspect'}:
+            if action not in {'report','inspect','queue_status'}:
                 db.execute('INSERT INTO remote_operations VALUES(?,?,?,?)',
                     (principal_id,operation_id,fingerprint,encoded(response)))
             return response
 
     def _execute(self,db,principal,session,action,data):
+        if action=='queue_status':
+            required(data,{'id'})
+            return self.queue.status(principal['id'],principal['task_id'],data['id'])
+        if action in {'queue_claim','queue_start','queue_finish','queue_renew'}:
+            session._active(db)
+            row=db.execute('SELECT deadline FROM governance_runs WHERE id=?',(session.run_id,)).fetchone()
+            if action=='queue_claim':
+                required(data,set())
+                return self.queue.claim(principal['id'],principal['task_id'],session.run_id,row['deadline'])
+            if action=='queue_renew':
+                required(data,{'id','fence'})
+                return self.queue.renew(principal['id'],principal['task_id'],session.run_id,
+                                        data['id'],data['fence'],row['deadline'])
+            required(data,{'id','fence'} if action=='queue_start' else {'id','fence','report'})
+            return self.queue.transition(principal['id'],principal['task_id'],session.run_id,
+                data['id'],data['fence'],'start' if action=='queue_start' else 'finish',data.get('report'))
         if action=='begin':
             required(data,{'task_id','identity','wallclock_seconds'})
             if data['task_id']!=principal['task_id']:raise PolicyDenied('Task not granted to principal')
@@ -136,13 +257,34 @@ class ControlService:
             session=self.store.begin(policy,run_id,identity)
             db.execute('INSERT INTO remote_run_bindings VALUES(?,?,?,?)',
                 (run_id,principal['id'],principal['task_id'],self._grant_hash(principal)))
-            return {'run_id':run_id,'scope':principal['scope'],'lease_seconds':lease}
+            result={'run_id':run_id,'scope':principal['scope'],'lease_seconds':lease}
+            if self.read_broker is not None:
+                capability=self.read_broker.capability(principal)
+                if capability is not None:result['read_broker']=capability
+            if self.write_broker is not None:
+                capability=self.write_broker.capability(principal)
+                if capability is not None:result['write_broker']=capability
+            if self.execution_broker is not None:
+                capability=self.execution_broker.capability(principal)
+                if capability is not None:result['execution_broker']=capability
+            if self.mcp_broker is not None:
+                capability=self.mcp_broker.capability(principal)
+                if capability is not None:result['mcp_broker']=capability
+            return result
         if action=='reserve':
+            if principal.get('require_model_proxy'):raise PolicyDenied('This principal must execute models through the controller proxy')
             required(data,{'tokens','request_id'})
             return {'request_id':session.reserve(data['tokens'],request_id=identifier(data['request_id']))}
         if action=='tool_started':
             required(data,{'role','tool','action_id'})
             for name in data.values():identifier(name)
+            if principal.get('require_mcp_broker') and data['tool'].startswith('mcp__'):
+                raise PolicyDenied('MCP calls must execute through the controller broker')
+            if principal.get('require_write_broker') and data['tool']=='replace':
+                raise PolicyDenied('Replacements must execute through the controller broker')
+            if principal.get('require_read_broker'):
+                from .tool_broker import READ_TOOLS
+                if data['tool'] in READ_TOOLS:raise PolicyDenied('Read tools must execute through the controller broker')
             if data['tool'] not in principal['tools'].get(data['role'],[]):
                 session.event('authorization_denied',{'principal':principal['id'],'role':data['role'],'tool':data['tool']},action_id=data['action_id'])
                 raise PolicyDenied('Tool not granted to this principal and role')
@@ -151,11 +293,14 @@ class ControlService:
         if action=='event':
             required(data,{'kind','payload','action_id'})
             if data['kind'] not in OBSERVATIONS:raise PolicyDenied('Worker cannot publish authoritative control events')
+            if principal.get('require_execution_broker') and data['kind'] in {'verification_intent','verification_outcome'}:
+                raise PolicyDenied('This principal must request controller-executed acceptance')
             identifier(data['action_id'])
             session.event('worker_observation',{'principal':principal['id'],'kind':data['kind'],'reported_payload':data['payload'],
                 'authority':'worker report, not independent execution proof'},action_id=data['action_id'])
             return {'recorded':True}
         if action=='settle':
+            if principal.get('require_model_proxy'):raise PolicyDenied('Proxy-only usage is settled by the controller provider adapter')
             required(data,{'request_id','actual','outcome'})
             identifier(data['request_id']);identifier(data['outcome'])
             actual=data['actual']
@@ -279,10 +424,12 @@ def main():
     parser.add_argument('--host',default='127.0.0.1')
     parser.add_argument('--port',type=int,default=0)
     parser.add_argument('--max-seconds',type=float,default=300)
+    parser.add_argument('--shutdown-seconds',type=float,default=10)
     parser.add_argument('--ready-file',type=Path,required=True)
     parser.add_argument('--cert',type=Path);parser.add_argument('--key',type=Path)
     args=parser.parse_args()
     if not math.isfinite(args.max_seconds) or args.max_seconds<=0:parser.error('max-seconds must be finite and positive')
+    if not math.isfinite(args.shutdown_seconds) or not 0<args.shutdown_seconds<=30:parser.error('shutdown-seconds must be positive and at most 30')
     if bool(args.cert)!=bool(args.key):parser.error('cert and key must be provided together')
     if args.ready_file.exists():raise ValueError('Ready receipt exists; preserve previous service evidence')
     context=None
@@ -297,12 +444,25 @@ def main():
         atomic_json(args.ready_file,{'endpoint':endpoint,'pid':os.getpid(),'scope':'Bounded control-service prototype'})
         print('[Control service] listening; maximum '+str(args.max_seconds)+' seconds',flush=True)
         server.timeout=.2;deadline=time.monotonic()+args.max_seconds;next_progress=time.monotonic()+10
-        while time.monotonic()<deadline:
-            server.handle_request()
-            if time.monotonic()>=next_progress:
-                service.store.reconcile_expired()
-                print('[Control service] alive; remaining='+str(round(deadline-time.monotonic(),1))+'s',flush=True)
-                next_progress=time.monotonic()+10
+        stopped=threading.Event();handlers={}
+        try:
+            for number in (signal.SIGINT,signal.SIGTERM):
+                handlers[number]=signal.signal(number,lambda *_:stopped.set())
+            while time.monotonic()<deadline and not stopped.is_set():
+                server.handle_request()
+                if time.monotonic()>=next_progress:
+                    service.store.reconcile_expired()
+                    print('[Control service] alive; remaining='+str(round(deadline-time.monotonic(),1))+'s',flush=True)
+                    next_progress=time.monotonic()+10
+        finally:
+            try:
+                print('[Control service] managed shutdown; <='+str(args.shutdown_seconds)+'s plus storage operations',flush=True)
+                try:receipt=service.close(timeout=args.shutdown_seconds)
+                except Exception as error:receipt={'status':'cleanup_unconfirmed','error_type':type(error).__name__}
+                atomic_json(args.ready_file.with_name(args.ready_file.name+'.execution-shutdown.json'),receipt)
+                if receipt.get('status')=='cleanup_unconfirmed':raise SystemExit(1)
+            finally:
+                for number,previous in handlers.items():signal.signal(number,previous)
 
 
 if __name__=='__main__':main()

@@ -308,6 +308,8 @@ def attach(config, workspace, output, identity):
         return None
     if 'endpoint' in config:
         from .remote_governance import RemoteSession
+        if config.get('state_path') and Path(config['state_path']).resolve().is_relative_to(workspace.root):
+            raise ValueError('Remote client checkpoint must be outside the untrusted repository')
         session = RemoteSession.begin(config, identity, workspace.budget.limits.max_wallclock,budget=workspace.budget)
         workspace.governance = session
         return session

@@ -162,11 +162,14 @@ class Workspace:
                         cache_hit=result["cache_hit"], repeat_count=result["repeat_count"])
         return result
 
-    def replace(self, relative: str, old: str, new: str):
+    def replace(self, relative: str, old: str, new: str, *, expected_sha256=None):
         path = self.path(relative, write=True)
         if not old or old == new:
             raise ValueError("Replacement must have a nonempty old value and change content")
         text = self.read(relative)["value"]
+        before_hash=hashlib.sha256(text.encode('utf-8')).hexdigest()
+        if expected_sha256 is not None and before_hash!=expected_sha256:
+            raise PolicyDenied('Source changed before replacement')
         if text.count(old) != 1:
             raise ValueError(f"Expected exactly one occurrence in {relative}, found {text.count(old)}")
         updated = text.replace(old, new, 1)
@@ -180,14 +183,30 @@ class Workspace:
         self.budget.charge_tool()
         governance = getattr(self, 'governance', None)
         action_id = uuid.uuid4().hex
+        if governance and (getattr(governance,'config',{}).get('write_broker') or {}).get('replace'):
+            receipt=governance.replace_tool(relative,old,new,before_hash)
+            target_hash=hashlib.sha256(updated.encode('utf-8')).hexdigest()
+            if (receipt.get('authority')!='controller executed replacement'
+                    or receipt.get('before_sha256')!=before_hash or receipt.get('after_sha256')!=target_hash
+                    or hashlib.sha256(path.read_bytes()).hexdigest()!=target_hash):
+                raise PolicyDenied('Controller write is not reflected in worker workspace; inspect shared-source state')
+            fact_id=self.ledger.add('decision','implementer','Controller replacement receipt',receipt)
+            self.trace.emit('implementer','broker_write_imported',fact_id=fact_id,operation_id=receipt['operation_id'],path=relative)
+            return
         if governance:
             governance.tool_started('implementer', 'replace', action_id)
             governance.event('write_intent', {'path':relative,'before_sha256':hashlib.sha256(text.encode('utf-8')).hexdigest(),
                 'after_sha256':hashlib.sha256(updated.encode('utf-8')).hexdigest()},action_id=action_id)
-        path.write_bytes(updated.encode("utf-8"))
+        if hashlib.sha256(path.read_bytes()).hexdigest()!=before_hash:
+            raise PolicyDenied('Source changed during replacement preparation')
+        self._write_replacement(path,updated.encode('utf-8'))
         if governance:
             governance.event('write_completed', {'path':relative},action_id=action_id)
         self.trace.emit("implementer", "tool_call", tool="replace", path=relative)
+
+    def _write_replacement(self,path,raw):
+        """Commit hook shared with the controller's uncertain-effect tracking."""
+        path.write_bytes(raw)
 
     def search(self, query: str, limit=30, role="scout", *, paths=None):
         governance = getattr(self, 'governance', None)
@@ -238,6 +257,23 @@ class Workspace:
         return result
 
     def verify(self, commands, phase="final"):
+        governance=getattr(self,'governance',None)
+        capability=(getattr(governance,'config',{}).get('execution_broker') or {}) if governance else {}
+        if capability:
+            normalized=normalize_acceptance(commands)
+            contract=digest(normalized)
+            if contract!=capability['acceptance_sha256']:raise PolicyDenied('Acceptance differs from controller contract')
+            for _ in normalized:self.budget.charge_tool()
+            source=digest(self.snapshot())
+            payload=governance.verify_commands(source,contract,self.budget.remaining)
+            if digest(self.snapshot())!=source:raise PolicyDenied('Worker source changed during controller acceptance')
+            rows=payload['verification']
+            if not isinstance(rows,list) or len(rows)!=len(normalized):raise PolicyDenied('Incomplete controller verification')
+            for row in rows:
+                fact=self.ledger.add('test','verifier',phase+': controller acceptance',
+                    {**row,'controller_job_id':payload['job_id'],'source_sha256':source,'authority':payload['authority']})
+                self.trace.emit('verifier','broker_verification_imported',fact_id=fact,job_id=payload['job_id'],phase=phase)
+            return rows
         results = []
         for index, spec in enumerate(normalize_acceptance(commands)):
             self.budget.charge_tool()

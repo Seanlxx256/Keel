@@ -207,9 +207,27 @@ class AgentSession:
                 raise
             except (ValueError, TypeError, KeyError, OSError, SyntaxError) as error:
                 observation = {"ok": False, "error": str(error)[:1000]}
+                from .mcp_client import McpToolError, McpTransportUnavailable
+                if isinstance(error,McpToolError) and isinstance(getattr(error,'failure',None),dict):
+                    observation['failure']=error.failure
+                    if error.failure.get('category')=='tool_outcome_unknown':
+                        observation['requires_reconciliation']=True
+                if isinstance(error,McpTransportUnavailable):
+                    alias=action.get('tool','') if isinstance(action,dict) else ''
+                    if alias.startswith('mcp__'):
+                        prefix='__'.join(alias.split('__')[:2])+'__'
+                        blocked=[name for name in tools if name.startswith(prefix)]
+                        self.paused_tools.update(blocked)
+                        observation['strategy']={'paused_tools':blocked,
+                            'reason':'Transport startup unavailable for this configured server; repeated aliases will not repair it.',
+                            'next':'Use another authorized tool if allowed; retain failed external-tool status. Do not edit business code or bypass permissions to repair host transport.'}
+                        self.ws.trace.emit(self.role,'tool_strategy_changed',tool=alias,reason='transport_unavailable',paused_tools=blocked,available=False)
                 failed = self.ws.ledger.add("failed_attempt", self.role, observation["error"], observation)
                 self.ws.trace.emit(self.role, "tool_or_protocol_error", fact_id=failed,
                     error_type=type(error).__name__)
+                if observation.get('requires_reconciliation'):
+                    from .governance import GovernanceUnavailable
+                    raise GovernanceUnavailable('MCP tool outcome unknown; inspect the recorded invocation before further actions') from None
             if history is not None:
                 receipt = archive({'action': reply.content, 'observation': observation})
                 note = {'ok': observation['ok']}

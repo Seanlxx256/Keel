@@ -6,6 +6,8 @@ import json
 import math
 import re
 import os
+import contextvars
+import uuid
 from contextlib import asynccontextmanager
 from urllib.parse import urlsplit
 
@@ -15,6 +17,27 @@ from .async_process_lifecycle import run_request
 
 class McpToolError(ValueError):
     pass
+
+
+class McpTransportUnavailable(McpToolError):
+    """Host transport setup failed before a tool RPC was dispatched."""
+
+
+_request_state=contextvars.ContextVar('keel_mcp_request_state',default=None)
+
+
+def request_phase(stage,**fields):
+    state=_request_state.get()
+    if state is not None:state.update(stage=stage,**fields)
+
+
+def nested_os_error(error):
+    if isinstance(error,OSError):return error
+    if isinstance(error,BaseExceptionGroup):
+        for child in error.exceptions:
+            found=nested_os_error(child)
+            if found is not None:return found
+    return None
 
 
 def nested_tool_error(error):
@@ -80,9 +103,11 @@ def validate_servers(servers, *, discovery=False):
 
 
 class McpTools:
-    def __init__(self, servers, workspace, *, discovery=False):
+    def __init__(self, servers, workspace, *, discovery=False, before_tool_call=None, after_tool_result=None, request_control=None):
         validate_servers(servers, discovery=discovery)
         self.servers, self.ws = servers, workspace
+        self.before_tool_call,self.after_tool_result=before_tool_call,after_tool_result
+        self.request_control=request_control
 
     def catalog(self, role):
         return {f'mcp__{server}__{tool}': policy['description']
@@ -150,28 +175,59 @@ class McpTools:
         self.ws.budget.charge_tool()
         timeout = min(spec.get('timeout', 30), self.ws.budget.remaining)
         log = self.ws.trace.path.parent / f'mcp-{server}.stderr.log'
+        state={'stage':'request','tool_dispatch_started':False,'reply_received':False,
+               'transport':spec.get('transport','stdio')}
+        token=_request_state.set(state)
         try:
             with log.open('a', encoding='utf-8') as stderr:
-                return run_request(lambda: asyncio.wait_for(self._invoke(spec, tool, arguments, stderr), timeout))
-        except (PolicyDenied, McpToolError):
+                factory=lambda:asyncio.wait_for(self._invoke(spec,tool,arguments,stderr),timeout)
+                return (run_request(factory,control=self.request_control) if self.request_control is not None else run_request(factory))
+        except asyncio.CancelledError:
+            raise self._record_failure(server,McpToolError('MCP request cancelled; inspect lifecycle evidence'),state) from None
+        except PolicyDenied:
             raise
         except Exception as error:
-            host_error=nested_tool_error(error)
-            if host_error is not None:
-                raise host_error from None
-            # Server error strings may contain environment values or credentials.
-            raise McpToolError(f'MCP request failed ({type(error).__name__}); inspect server stderr log') from None
+            raise self._record_failure(server,error,state) from None
+        finally:_request_state.reset(token)
+
+    def _record_failure(self,server,error,state):
+        host_error=nested_tool_error(error);os_error=nested_os_error(error)
+        startup=(not state['tool_dispatch_started'] and state['stage']=='transport_start'
+                 and os_error is not None and host_error is None)
+        category=('transport_unavailable' if startup else 'tool_outcome_unknown'
+                  if state['tool_dispatch_started'] and not state['reply_received'] else 'tool_or_protocol_error')
+        failure={**state,'category':category,'error_type':type(error).__name__,'automatic_retry':False,
+                 'scope':'Host-observed stage; no claim that external processes or side effects never occurred'}
+        if os_error is not None:
+            failure['os_error']={'type':type(os_error).__name__,
+                **{name:getattr(os_error,name) for name in ('errno','winerror') if type(getattr(os_error,name,None)) is int}}
+        if startup:
+            result=McpTransportUnavailable('MCP transport startup unavailable ('+type(os_error).__name__+'); no tool RPC dispatched')
+        else:
+            result=host_error or McpToolError('MCP request failed ('+type(error).__name__+'); inspect host failure receipt')
+        artifact=self.ws.trace.path.parent/('mcp-'+server+'.failure-'+uuid.uuid4().hex+'.json')
+        from compass.progress import atomic_json
+        try:atomic_json(artifact,failure)
+        except Exception:
+            from .governance import GovernanceUnavailable
+            raise GovernanceUnavailable('Required MCP failure receipt could not be saved') from None
+        result.failure={**failure,'artifact':str(artifact)}
+        return result
 
     async def _invoke(self, spec, tool, arguments, stderr):
+        request_phase('dependencies')
         try:
             from mcp import ClientSession, StdioServerParameters
             from mcp.client.stdio import stdio_client
             from jsonschema import Draft202012Validator
         except ImportError:
             raise McpToolError('MCP client requires pip install -e ".[mcp]"') from None
+        request_phase('transport_start')
         async with self._connection(spec,stderr) as (reader, writer):
+            request_phase('initialize')
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
+                request_phase('discovery')
                 tools, cursor, seen = [], None, set()
                 for _ in range(100):
                     page = await session.list_tools(**({'cursor': cursor} if cursor else {}))
@@ -197,13 +253,18 @@ class McpTools:
                 found = [entry for entry in tools if entry.name == tool]
                 if len(found) != 1:
                     raise McpToolError('Allowlisted MCP tool is missing or duplicated on server')
+                request_phase('validation')
                 validator = Draft202012Validator(found[0].inputSchema)
                 if not validator.is_valid(arguments):
                     raise McpToolError('MCP arguments do not match the server input schema')
                 policy=spec['tools'][tool]
                 if 'input_schema' in policy and not Draft202012Validator(policy['input_schema']).is_valid(arguments):
                     raise McpToolError('MCP arguments do not match the operator input schema')
+                if self.before_tool_call is not None:self.before_tool_call()
+                request_phase('tool_dispatch',tool_dispatch_started=True)
                 result = await session.call_tool(tool, arguments=arguments)
+                request_phase('tool_result',reply_received=True)
+                if self.after_tool_result is not None:self.after_tool_result()
                 if result.isError:
                     # Preserve untrusted error evidence without echoing potential secrets.
                     artifact=self.ws.trace.path.parent/'mcp-tool-error.json'

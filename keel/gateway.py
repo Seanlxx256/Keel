@@ -124,10 +124,13 @@ class ToolGateway:
             elif not isinstance(args, dict):
                 raise ValueError("MCP arguments must be an object")
             self.ws.budget.check()
-            if governance:
+            brokered=bool(governance and tool in (getattr(governance,'config',{}).get('read_broker') or {}).get('tools',[]))
+            broker_write=bool(governance and tool=='replace' and (getattr(governance,'config',{}).get('write_broker') or {}).get('replace'))
+            broker_mcp=bool(governance and tool in (getattr(governance,'config',{}).get('mcp_broker') or {}).get('tools',{}))
+            if governance and not (brokered or broker_write or broker_mcp):
                 governance.tool_started(self.role, tool, call_id)
                 governed_intent = True
-            result = self._dispatch(tool, args)
+            result = self._dispatch_broker(tool,args,governance) if brokered else self._dispatch(tool, args)
             self.ws.budget.check()
             status = "completed"
             return result
@@ -147,6 +150,32 @@ class ToolGateway:
             self.ws.trace.emit(self.role, "gateway_call_finished", call_id=call_id,
                                status=status, error_type=error_type,
                                seconds=max(0, time.monotonic() - started))
+
+    def _dispatch_broker(self,tool,args,governance):
+        self.ws.budget.charge_tool()
+        observation=governance.read_tool(self.role,tool,args)
+        hashes=observation.get('source_hashes')
+        if (observation.get('authority')!='controller executed read observation'
+                or not isinstance(hashes,dict) or not hashes):
+            raise PolicyDenied('Broker observation has no usable source provenance')
+        for name,expected in hashes.items():
+            self.ws.budget.check()
+            if hashlib.sha256(self.ws.path(name).read_bytes()).hexdigest()!=expected:
+                raise PolicyDenied('Controller source differs from worker workspace; do not use stale read evidence')
+        payload=observation['payload']
+        fact_id=self.ws.ledger.add('symbol' if tool=='search_code' else 'file',self.role,
+                                  tool+' broker evidence',observation)
+        self.visible_facts.add(fact_id);self.observed_facts.add(fact_id)
+        if tool=='read_file':
+            canonical=self.ws.path(args['path']).relative_to(self.ws.root).as_posix()
+            self.read_evidence[fact_id]={'path':canonical,'sha256':hashes[args['path']]}
+        self.ws.trace.emit(self.role,'broker_evidence_imported',fact_id=fact_id,
+                           controller_fact_id=observation['controller_fact_id'],operation_id=observation['operation_id'])
+        if tool in {'read_page','read_lines'}:return {'fact_id':fact_id,**payload}
+        text=json.dumps(payload,ensure_ascii=False)
+        return {'fact_id':fact_id,'preview':text[:4000],
+                'truncated':len(text)>4000 or bool(payload.get('truncated',False)),
+                'next_line':payload.get('next_line'),'authority':observation['authority']}
 
     @staticmethod
     def _validate(tool, args):
