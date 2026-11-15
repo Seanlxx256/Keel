@@ -11,6 +11,7 @@ import threading
 from .core import PolicyDenied
 from .governance import GovernanceUnavailable, encoded, reject_nonfinite
 from .operation_store import validate_operation_request
+from .postgres_migrations import SchemaMigration, apply_migrations
 
 
 class PostgresUnitOfWork:
@@ -74,14 +75,15 @@ class PostgresOperationStore:
     def transaction_domain(self):return self.store.transaction_domain
 
     def initialize_schema(self):
-        """Explicit trusted migration; constructor never creates tables."""
-        with self.store.transaction() as db:
-            db.execute('''CREATE TABLE IF NOT EXISTS public.keel_operation_receipts_v1 (
+        """Explicit trusted, checksummed migration; constructor creates nothing."""
+        migration=SchemaMigration(1,'operation-receipts-v1',(
+            '''CREATE TABLE IF NOT EXISTS public.keel_operation_receipts_v1 (
                 principal TEXT NOT NULL, operation_id TEXT NOT NULL,
                 request_hash TEXT NOT NULL, status TEXT NOT NULL,
                 response TEXT, PRIMARY KEY(principal,operation_id),
                 CHECK (status IN ('pending','complete')),
-                CHECK ((status='pending' AND response IS NULL) OR (status='complete' AND response IS NOT NULL)))''')
+                CHECK ((status='pending' AND response IS NULL) OR (status='complete' AND response IS NOT NULL)))''',))
+        apply_migrations(self.store,(migration,))
 
     def execute(self,*,principal,operation_id,request_hash,prepare,apply,replay,record=True):
         validate_operation_request(principal,operation_id,request_hash,record)

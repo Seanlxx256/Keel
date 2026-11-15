@@ -68,3 +68,18 @@ class PostgresIntegrationTests(unittest.TestCase):
         self.operations.execute(**self.request())
         with self.assertRaises(PolicyDenied):self.operations.execute(**self.request(request_hash='b'*64))
         self.assertEqual(self.count_effects(),1)
+
+    def test_versioned_migration_is_idempotent_and_keeps_existing_receipts(self):
+        expected=self.operations.execute(**self.request())
+        reopened_store=PostgresUnitOfWork(dsn_env='KEEL_TEST_POSTGRES_DSN')
+        reopened=PostgresOperationStore(reopened_store)
+        reopened.initialize_schema()
+        apply=Mock()
+        self.assertEqual(reopened.execute(**self.request(apply=apply)),expected)
+        apply.assert_not_called()
+        with reopened_store.transaction() as db:
+            rows=db.execute('''SELECT version,name,checksum FROM public.keel_schema_migrations_v1
+                WHERE version=1''').fetchall()
+        self.assertEqual(len(rows),1)
+        self.assertEqual(rows[0]['name'],'operation-receipts-v1')
+        self.assertEqual(len(rows[0]['checksum']),64)

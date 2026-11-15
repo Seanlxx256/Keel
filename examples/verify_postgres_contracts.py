@@ -16,7 +16,8 @@ NATIVE_CONTRACTS={
         'test_reopen_uses_receipt_without_business_callback',
         'test_callback_failure_rolls_back_effect_and_intent',
         'test_principal_namespaces_are_separate',
-        'test_changed_input_cannot_reapply')}
+        'test_changed_input_cannot_reapply',
+        'test_versioned_migration_is_idempotent_and_keeps_existing_receipts')}
 
 
 def verify(folder):

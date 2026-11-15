@@ -8,7 +8,7 @@
 任务队列也已通过[业务存储契约](queue-store-contract.md)分离接口与 SQLite 实现；这不代表已接入跨节点队列或公平资源调度。
 运行归属、远程授权和租约生命周期已接入[RunStore 接口](run-store-contract.md)，仍与其他仓库共用当前 SQLite 事务。
 现已加入[共享事务域检查](transaction-domain.md)，拒绝把不同事务管理器误拼为一个控制流程；它不等于分布式事务或 PostgreSQL 支持。
-已开始[原生 PostgreSQL 事务与操作收据后端](postgres-operations.md)，但未接管控制服务，真实数据库测试和手动 CI 仍待运行。
+已开始[原生 PostgreSQL 事务与操作收据后端](postgres-operations.md)。手动 GitHub Actions artifact `postgres-operation-contracts-43699827320-1` 已在本地核验：提交哈希匹配，PostgreSQL 17.12 上 18/18 项通过，其中 5 项为真实数据库集成测试，artifact 文件哈希全部匹配。当前新增了 checksummed migration ledger 和重复迁移验证；需随新提交再次运行真实服务测试。PostgreSQL 仍未接管控制服务，预算、队列、租户和 run 生命周期尚未迁移。
 当前已验证的是 29 个模块、255 项本地回归；真实 Docker 验证因环境不可用而延期。
 “CloudCode”具体平台待确认，本文暂指外部 Coding Agent，不假设任何未核实的平台 API。
 

@@ -3,7 +3,9 @@
 Implementation status: optional native PostgreSQL unit of work and operation
 receipt repository are present. Current ControlService still uses SQLite.
 PostgreSQL run/budget/queue/tenant/broker repositories and controller migration
-are not implemented. Real PostgreSQL integration is not yet validated here.
+are not implemented. The manual real-PostgreSQL GitHub Actions artifact
+`postgres-operation-contracts-43699827320-1` has been inspected in the workspace;
+its commit identity, test inventory, reports and declared artifact hashes match.
 
 ## What is implemented
 
@@ -22,6 +24,13 @@ Both the business SQL and completed response commit together. A duplicate reads
 the response; changed input is denied. Pending/corrupt receipts do not authorize
 blind replay. Prepare/replay can run again and must not cause external effects.
 Only trusted transactional SQL callbacks are supported, not model/tool dispatch.
+
+Schema setup uses an explicit contiguous migration ledger with checksums,
+version/name drift rejection, and a transaction-scoped PostgreSQL advisory lock.
+Repository construction still does not migrate. The initial
+`operation-receipts-v1` migration is idempotent; later changes must append a new
+version rather than rewrite an applied migration. This is a small migration
+mechanism, not a general online migration or rollback framework.
 
 PostgreSQL and SQLite share request-envelope validation. Their SQL is separate;
 no SQL-string substitution adapter is used. The PostgreSQL repository owns a
@@ -53,7 +62,7 @@ automatic destructive cleanup, quota migration or controller backend switch.
 
 ## Real integration contracts
 
-`tests/test_postgres_integration.py` contains five actual-server contracts:
+`tests/test_postgres_integration.py` contains actual-server contracts:
 concurrent duplicates produce one SQL effect, reopen uses a completed receipt,
 callback failure rolls back intent and business data, principal namespaces remain
 separate, and changed input cannot reapply. To enable them explicitly:
@@ -77,16 +86,17 @@ the shared watchdog (120s test budget). It rejects skipped database tests and
 uploads scoped reports/logs even after failure. Fixture credentials are only for
 the disposable CI service and are not deployment credentials.
 
-After committing/pushing the workflow where GitHub can expose manual workflows,
-select **Actions → PostgreSQL operation contracts → Run workflow**. This developer
-turn prepared the file only: it did not commit, push, trigger Actions or start a
-local/cloud PostgreSQL instance. The job remains unexecuted until triggered.
-GitHub's service container is not a validation of Keel Sandbox isolation.
+The first manual run is retained as
+`postgres-operation-contracts-43699827320-1/`: it ran 18/18 tests against
+PostgreSQL 17.12, including all five initial integration cases. The service
+container is not a validation of Keel Sandbox isolation. The current working
+revision extends this contract with migration idempotency; that new case still
+needs a fresh Actions run after commit.
 
 The final gate is `examples/verify_postgres_contracts.py`. It binds the read-only
 preflight, successful watchdog, frozen implementation/test inputs and the actual
-test inventory published by the shared runner. All five named native contract
-cases must be present; unit-only runs, skipped/expected-failure cases, missing
+test inventory published by the shared runner. All named native contract cases
+must be present; unit-only runs, skipped/expected-failure cases, missing
 test-source hashes and changed code are rejected. It publishes `acceptance.json`
 with evidence hashes and preserves prior verdicts. This is trusted CI evidence
 checking, not cryptographic attestation against a compromised runner or proof
@@ -102,12 +112,25 @@ that arbitrary test bodies are correct.
 - `.keel/production-reuse/postgres-preflight-v1/report.json` records no driver and
   no DSN in the current execution environment, zero model calls/migrations.
 - `.keel/production-reuse/postgres-operations-v1/` retains source/test archive,
-  plan, original console and result. Manual workflow YAML and inline Python were
-  statically checked; there is no GitHub execution result yet.
+  plan, original console and result from the earlier local run. Manual workflow
+  YAML and inline Python were statically checked at that time.
 - Follow-up CI-readiness checks passed 45 local tests, including synthetic gate
   rejection cases and reporting/driver/SQLite regressions. Frozen evidence is in
-  `.keel/production-reuse/postgres-ci-readiness-v2/`. This still contains no real
-  PostgreSQL test execution; the manual CI remains pending.
+  `.keel/production-reuse/postgres-ci-readiness-v2/`. These local checks are not
+  real PostgreSQL execution.
+- `postgres-operation-contracts-43699827320-1/acceptance.json` reports `passed`,
+  commit `734ff2aeb92067875b1bd8df48e10c21a9f74d1a`, PostgreSQL `17.12`, psycopg
+  `3.3.9`, and 18/18 total tests with no failures, errors, skips or expected
+  failures. The 5 required native integration cases all appear in the inventory;
+  the other 13 are driver-contract tests. Preflight and watchdog both passed, the
+  source inputs were unchanged, and recomputation matched all six artifact
+  SHA-256 entries. This verifies the operation-receipt backend contract only;
+  it is not a full controller migration or deployment qualification.
+- Current uncommitted migration work adds a checksummed schema ledger and a sixth
+  real-server contract for idempotent migration/reopen with existing receipts.
+  Local unit/contract-gate checks passed 28/28; the new PostgreSQL-specific
+  contract has not yet been run against a real server. The prior 18-test artifact
+  remains valid for the earlier commit and is not overwritten.
 
 ## Primary technical references
 
